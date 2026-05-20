@@ -182,18 +182,6 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         return 2
     state.setdefault("version", "1")
 
-    # Clear stale current_run (>24h old) before starting a new run.
-    if "current_run" in state:
-        started = state["current_run"].get("started_at")
-        if started:
-            try:
-                started_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
-                if (datetime.now(timezone.utc) - started_dt) > timedelta(hours=24):
-                    state.pop("current_run")
-                    add_partial(state, "stale_current_run_cleared")
-            except ValueError:
-                pass
-
     head_sha = (
         subprocess.run(
             ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
@@ -205,16 +193,29 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
 
     repo = detect_repo(repo_root)
 
+    # CCE-5: Always begin a new run with a fresh current_run. partial_reasons
+    # from a prior run must not carry forward — persistent root causes will
+    # re-accumulate naturally on this run's own dispatches; transient reasons
+    # belong to the run that produced them.
+    prior_run = state.pop("current_run", None)
     now = datetime.now(timezone.utc).isoformat()
-    # Preserve partial flags accumulated before this point (e.g., stale_current_run_cleared)
-    carried_partial = state.get("current_run", {}).get("partial", False)
-    carried_reasons = state.get("current_run", {}).get("partial_reasons", [])
     state["current_run"] = {
         "started_at": now,
         "head_sha": head_sha,
-        "partial": carried_partial,
-        "partial_reasons": list(carried_reasons),
+        "partial": False,
+        "partial_reasons": [],
     }
+
+    if prior_run is not None:
+        prior_started = prior_run.get("started_at")
+        if prior_started:
+            try:
+                prior_dt = datetime.fromisoformat(prior_started.replace("Z", "+00:00"))
+                if (datetime.now(timezone.utc) - prior_dt) > timedelta(hours=24):
+                    # add_partial writes into the already-initialised fresh current_run
+                    add_partial(state, "stale_current_run_cleared")
+            except ValueError:
+                pass
 
     jira_payload = config.get("sources", {}).get("jira")
     sc_inputs = {

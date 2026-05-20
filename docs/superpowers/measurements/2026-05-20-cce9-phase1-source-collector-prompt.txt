@@ -1,0 +1,7 @@
+You are running in production as part of the engineering-docs-agent orchestrator pipeline.
+
+Your inputs (JSON) are below. Execute the Job defined in your system prompt using these inputs. Return ONLY a JSON object matching your output contract — no prose, no markdown fences, no commentary, no clarifying questions.
+
+<inputs>
+{"last_sha": "", "head_sha": "c36f53b598780dd219bc83a6601488d8381e2e75", "repo": {"owner": "designitright", "name": "advanced-data-importer"}, "pr_branch_filter": ["docs-agent/*"], "jira": {"enabled": true, "base_url": "https://designitright.atlassian.net", "project_keys": ["ADIS"]}}
+</inputs>

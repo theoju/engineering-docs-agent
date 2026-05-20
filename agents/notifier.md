@@ -20,7 +20,27 @@ configured channels (Slack webhook + SMTP email).
 - `email_config`: `{ enabled, smtp_server, smtp_user, smtp_password, from_address, recipients }`
 - `mode`: "run" | "verify" — "run" for "PR opened" digest, "verify" for "PR landed" follow-up
 
+## Output schema (canonical)
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "notifier output",
+  "type": "object",
+  "required": ["slack_ok", "email_ok"],
+  "properties": {
+    "slack_ok": { "type": "boolean" },
+    "email_ok": { "type": "boolean" },
+    "errors": { "type": "array", "items": { "type": "string" } }
+  }
+}
+```
+
+Return ONLY a JSON object that validates against this schema. No prose, no markdown fences around the response, no commentary.
+
 ## Output contract
+
+The canonical schema is in §Output schema above. The shape described here is the same; the schema is authoritative if they disagree.
 
 ```json
 {

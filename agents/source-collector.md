@@ -26,7 +26,46 @@ The orchestrator will pass you a JSON block named `inputs` containing:
 - `jira`: optional `{ enabled, project_keys, base_url }` — present only if Jira opt-in is on
 - `pr_branch_filter`: list of glob patterns to EXCLUDE (e.g. `["docs-agent/*"]`)
 
+## Output schema (canonical)
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "source-collector output",
+  "type": "object",
+  "required": ["prs", "jira_issues"],
+  "properties": {
+    "prs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["number", "url"],
+        "properties": {
+          "number": { "type": "integer" },
+          "url": { "type": "string" },
+          "title": { "type": "string" },
+          "body": { "type": ["string", "null"] },
+          "merge_sha": { "type": "string" },
+          "merged_at": { "type": "string" },
+          "author": { "type": "string" },
+          "files": { "type": "array" },
+          "labels": { "type": "array" },
+          "jira_keys": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "jira_issues": { "type": "array" },
+    "error": { "type": ["string", "null"] },
+    "partial": { "type": "boolean" }
+  }
+}
+```
+
+Return ONLY a JSON object that validates against this schema. No prose, no markdown fences around the response, no commentary.
+
 ## Output contract
+
+The canonical schema is in §Output schema above. The shape described here is the same; the schema is authoritative if they disagree.
 
 Return ONLY a JSON object matching:
 

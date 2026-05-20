@@ -28,3 +28,15 @@ def load_config_validated(path: Path) -> dict[str, Any]:
     except jsonschema.ValidationError as e:
         raise ConfigError(f"config invalid at {e.json_path}: {e.message}") from e
     return raw
+
+
+def load_state_validated(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"version": "1"}
+    raw = json.loads(path.read_text())
+    schema = json.loads((TEMPLATES_DIR / "state.schema.json").read_text())
+    try:
+        jsonschema.validate(raw, schema)
+    except jsonschema.ValidationError as e:
+        raise StateError(f"state invalid at {e.json_path}: {e.message}") from e
+    return raw

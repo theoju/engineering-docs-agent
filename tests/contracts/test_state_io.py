@@ -57,3 +57,30 @@ def test_load_config_validated_missing_file(tmp_path):
 
     with pytest.raises(ConfigError):
         load_config_validated(tmp_path / "nope.yml")
+
+
+def test_load_state_validated_missing_file_returns_default(tmp_path):
+    from state_io import load_state_validated
+
+    state = load_state_validated(tmp_path / "state.json")
+    assert state == {"version": "1"}
+
+
+def test_load_state_validated_rejects_bad_type(tmp_path):
+    from state_io import load_state_validated, StateError
+    import json as _json
+
+    p = tmp_path / "state.json"
+    p.write_text(_json.dumps({"version": 1}))  # int instead of string
+    with pytest.raises(StateError):
+        load_state_validated(p)
+
+
+def test_load_state_validated_accepts_valid(tmp_path):
+    from state_io import load_state_validated
+    import json as _json
+
+    p = tmp_path / "state.json"
+    p.write_text(_json.dumps({"version": "1", "cursors": {}}))
+    state = load_state_validated(p)
+    assert state["version"] == "1"

@@ -68,7 +68,7 @@ def test_gap_detector_validates_and_parses():
     result, errors = validate_and_parse("gap-detector", raw)
     assert errors == []
     assert isinstance(result, GapVerdict)
-    assert result.pr_id == "x/y#1"
+    assert result.pr_id == "unknown/unknown#1"
 
 
 def test_publish_verifier_validates_and_parses():

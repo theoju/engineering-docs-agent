@@ -44,6 +44,44 @@ class GhClient:
             extract=lambda d: d[0]["number"] if d else None,
         )
 
+    def pr_create(self, branch: str, title: str, body: str) -> GhResult:
+        try:
+            r = subprocess.run(
+                [
+                    "gh",
+                    "pr",
+                    "create",
+                    "--head",
+                    branch,
+                    "--title",
+                    title,
+                    "--body",
+                    body,
+                ],
+                cwd=self._cwd,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            return GhResult(ok=False, error="gh_not_installed")
+        if r.returncode != 0:
+            return GhResult(
+                ok=False, error=f"gh_pr_create_failed: {(r.stderr or '')[:200]}"
+            )
+        return self._parse_pr_create_output(r.stdout, branch)
+
+    def _parse_pr_create_output(self, stdout: str, branch: str) -> GhResult:
+        last = stdout.strip().split("/")[-1] if stdout.strip() else ""
+        if last.isdigit():
+            return GhResult(ok=True, value=int(last))
+        m = re.search(r"/pull/(\d+)", stdout)
+        if m:
+            return GhResult(ok=True, value=int(m.group(1)))
+        fallback = self.pr_list_for_branch(branch)
+        if fallback.ok and fallback.value is not None:
+            return fallback
+        return GhResult(ok=False, error=f"gh_pr_create_unparseable: {stdout[:200]}")
+
     def _run_json(self, cmd: list[str], *, extract: Callable[[Any], Any]) -> GhResult:
         try:
             r = subprocess.run(

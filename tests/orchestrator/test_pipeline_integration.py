@@ -392,6 +392,30 @@ def test_dispatch_subagent_handles_claude_not_installed(monkeypatch, tmp_path):
     assert result is None
 
 
+def test_orchestrator_uses_gh_client_for_pr_create(tmp_path, monkeypatch):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+    import gh_client
+
+    importlib.reload(runner)
+
+    fake = gh_client.FakeGhClient(
+        pr_list_for_branch=gh_client.GhResult(ok=True, value=None),
+        pr_create=gh_client.GhResult(ok=True, value=321),
+    )
+    monkeypatch.setattr(runner, "GhClient", lambda *a, **kw: fake)
+
+    _init_host(tmp_path)
+    # Have to make git work for commit/push: stub push to succeed
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+    )
+    rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=False)
+    assert any(c[0] == "pr_create" for c in fake.calls)
+
+
 def test_source_collector_error_propagates_partial(tmp_path):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner

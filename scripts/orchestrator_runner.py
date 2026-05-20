@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 import yaml
 
+from gh_client import GhClient
 from state_io import add_partial, load_voice_samples, resolve_lens
 
 
@@ -353,8 +354,10 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     if no_pr:
         return 0
     branch = branch_name(now)
+    gh = GhClient(repo_root)
     pr_number = open_or_append_pr(
         repo_root,
+        gh,
         branch=branch,
         now_iso=now,
         partial=state["current_run"]["partial"],
@@ -399,33 +402,9 @@ def branch_name(now_iso: str) -> str:
     return f"docs-agent/{now_iso[:10]}"
 
 
-def existing_pr_for_branch(repo_root: Path, branch: str) -> int | None:
-    r = subprocess.run(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--head",
-            branch,
-            "--state",
-            "open",
-            "--json",
-            "number",
-            "-L",
-            "1",
-        ],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if r.returncode != 0:
-        return None
-    items = json.loads(r.stdout or "[]")
-    return items[0]["number"] if items else None
-
-
 def open_or_append_pr(
     repo_root: Path,
+    gh: GhClient,
     *,
     branch: str,
     now_iso: str,
@@ -440,26 +419,27 @@ def open_or_append_pr(
     subprocess.run(
         ["git", "-C", str(repo_root), "commit", "-m", commit_msg], check=False
     )
-    subprocess.run(
-        ["git", "-C", str(repo_root), "push", "-u", "origin", branch], check=True
+    push = subprocess.run(
+        ["git", "-C", str(repo_root), "push", "-u", "origin", branch],
+        capture_output=True,
+        text=True,
     )
-    existing = existing_pr_for_branch(repo_root, branch)
-    if existing:
-        return existing
+    if push.returncode != 0:
+        return None
+    existing = gh.pr_list_for_branch(branch)
+    if not existing.ok:
+        return None
+    if existing.value is not None:
+        return existing.value
     body = (
         "WARNING — Partial run — " + "; ".join(partial_reasons)
         if partial
         else "docs-agent run"
     )
-    r = subprocess.run(
-        ["gh", "pr", "create", "--head", branch, "--title", commit_msg, "--body", body],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if r.returncode != 0:
+    created = gh.pr_create(branch, commit_msg, body)
+    if not created.ok:
         return None
-    return int(r.stdout.strip().split("/")[-1])
+    return created.value
 
 
 def main() -> int:

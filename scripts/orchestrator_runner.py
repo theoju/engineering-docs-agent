@@ -225,11 +225,14 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     }
     if jira_payload:
         sc_inputs["jira"] = jira_payload
-    sources = dispatch_subagent(
+    sources, reasons = dispatch_validated(
         "source-collector", sc_inputs, dry_run_dir=dry_run_dir, cwd=repo_root
     )
+    for r in reasons:
+        add_partial(state, r)
     if sources is None:
-        add_partial(state, "source_collector_invalid: returned None")
+        if not reasons:
+            add_partial(state, "source_collector_invalid: returned None")
         sources = {"prs": [], "jira_issues": []}
     else:
         if sources.get("error"):
@@ -246,7 +249,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         jira_context = [
             jira_lookup[k] for k in pr.get("jira_keys", []) if k in jira_lookup
         ]
-        summary = dispatch_subagent(
+        summary, reasons = dispatch_validated(
             "pr-summarizer",
             {
                 "pr": pr,
@@ -256,8 +259,11 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             dry_run_dir=dry_run_dir,
             cwd=repo_root,
         )
+        for r in reasons:
+            add_partial(state, r)
         if summary is None:
-            add_partial(state, f"pr_summarizer_invalid: pr={pr['number']}")
+            if not reasons:
+                add_partial(state, f"pr_summarizer_invalid: pr={pr['number']}")
             continue
         if summary.get("error"):
             add_partial(
@@ -298,7 +304,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             continue
         target_path.parent.mkdir(parents=True, exist_ok=True)
         action = "edit" if target_path.exists() else "create"
-        out = dispatch_subagent(
+        out, reasons = dispatch_validated(
             "page-author",
             {
                 "target_path": str(target_path),
@@ -320,8 +326,11 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             dry_run_dir=dry_run_dir,
             cwd=repo_root,
         )
+        for r in reasons:
+            add_partial(state, r)
         if out is None:
-            add_partial(state, f"page_author_invalid: {rel}")
+            if not reasons:
+                add_partial(state, f"page_author_invalid: {rel}")
             continue
         if out.get("ok"):
             authored.append(str(target_path))
@@ -333,7 +342,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
 
     # Content validation
     if authored:
-        validation = dispatch_subagent(
+        validation, reasons = dispatch_validated(
             "content-validator",
             {
                 "paths": authored,
@@ -343,8 +352,11 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             dry_run_dir=dry_run_dir,
             cwd=repo_root,
         )
+        for r in reasons:
+            add_partial(state, r)
         if validation is None:
-            add_partial(state, "content_validator_invalid: returned None")
+            if not reasons:
+                add_partial(state, "content_validator_invalid: returned None")
             validation = {"failed": []}
         for fail in validation.get("failed", []):
             if fail.get("severity") == "block":
@@ -425,7 +437,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         pr_id = f"{repo['owner']}/{repo['name']}#{pr['number']}"
         if pr_id in dismissed:
             continue
-        verdict = dispatch_subagent(
+        verdict, reasons = dispatch_validated(
             "gap-detector",
             {
                 "pr_id": pr_id,
@@ -443,8 +455,11 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             dry_run_dir=dry_run_dir,
             cwd=repo_root,
         )
+        for r in reasons:
+            add_partial(state, r)
         if verdict is None:
-            add_partial(state, f"gap_detector_invalid: pr_id={pr_id}")
+            if not reasons:
+                add_partial(state, f"gap_detector_invalid: pr_id={pr_id}")
             continue
         gap_verdicts.append(verdict)
 
@@ -501,7 +516,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         "lint_failures": state["current_run"]["partial_reasons"],
         "partial_reasons": state["current_run"]["partial_reasons"],
     }
-    notifier_result = dispatch_subagent(
+    notifier_result, reasons = dispatch_validated(
         "notifier",
         {
             "digest": digest,
@@ -512,8 +527,11 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         dry_run_dir=dry_run_dir,
         cwd=repo_root,
     )
+    for r in reasons:
+        add_partial(state, r)
     if notifier_result is None:
-        add_partial(state, "notifier_invalid: returned None")
+        if not reasons:
+            add_partial(state, "notifier_invalid: returned None")
         state_path.write_text(json.dumps(state, indent=2))
     return 0
 

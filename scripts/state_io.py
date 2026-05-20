@@ -63,3 +63,32 @@ def cleanup_empty_parents(path: Path, *, until: Path) -> None:
         except OSError:
             return
         current = current.parent
+
+
+def load_voice_samples(repo_root: Path, config: dict) -> list[dict]:
+    """Read voice samples + host CLAUDE.md, capped at ~20KB total."""
+    samples: list[dict] = []
+    total = 0
+    cap = 20_000
+    sources: list[Path] = []
+    voice_cfg = config.get("voice") or {}
+    for rel in voice_cfg.get("sample_paths") or []:
+        sources.append(repo_root / rel)
+    claude_md = repo_root / "CLAUDE.md"
+    if claude_md.exists():
+        sources.append(claude_md)
+    for src in sources:
+        if not src.exists() or not src.is_file():
+            continue
+        try:
+            text = src.read_text()
+        except (OSError, UnicodeDecodeError):
+            continue
+        snippet = text[: max(0, cap - total)]
+        if not snippet:
+            break
+        samples.append({"path": str(src.relative_to(repo_root)), "content": snippet})
+        total += len(snippet)
+        if total >= cap:
+            break
+    return samples

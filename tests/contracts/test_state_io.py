@@ -152,3 +152,47 @@ def test_cleanup_empty_parents_never_removes_until(tmp_path):
     f.unlink()
     cleanup_empty_parents(f, until=tmp_path)
     assert tmp_path.exists()
+
+
+def test_load_voice_samples_reads_configured_paths(tmp_path):
+    from state_io import load_voice_samples
+
+    sample = tmp_path / "voice" / "tone.md"
+    sample.parent.mkdir()
+    sample.write_text("Use second person.")
+    cfg = {"voice": {"sample_paths": ["voice/tone.md"]}}
+
+    samples = load_voice_samples(tmp_path, cfg)
+
+    assert samples == [{"path": "voice/tone.md", "content": "Use second person."}]
+
+
+def test_load_voice_samples_includes_claude_md(tmp_path):
+    from state_io import load_voice_samples
+
+    (tmp_path / "CLAUDE.md").write_text("Host CLAUDE")
+    samples = load_voice_samples(tmp_path, {})
+
+    assert len(samples) == 1
+    assert samples[0]["path"] == "CLAUDE.md"
+
+
+def test_load_voice_samples_caps_at_20kb(tmp_path):
+    from state_io import load_voice_samples
+
+    big = tmp_path / "big.md"
+    big.write_text("x" * 30_000)
+    cfg = {"voice": {"sample_paths": ["big.md"]}}
+
+    samples = load_voice_samples(tmp_path, cfg)
+
+    assert len(samples) == 1
+    assert len(samples[0]["content"]) == 20_000
+
+
+def test_load_voice_samples_skips_missing(tmp_path):
+    from state_io import load_voice_samples
+
+    cfg = {"voice": {"sample_paths": ["does-not-exist.md"]}}
+    samples = load_voice_samples(tmp_path, cfg)
+    assert samples == []

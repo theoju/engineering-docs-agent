@@ -179,7 +179,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                 f"pr_summarizer_error: pr={pr['number']}: {summary['error']}",
             )
             continue
-        summaries.append(summary)
+        # Use the PR's actual number, not summary's echo (which is fixture-static in tests).
+        summary_with_pr = {**summary, "pr_number": pr["number"]}
+        summaries.append(summary_with_pr)
 
     # Page authoring: aggregate doc_targets per lens.
     import fnmatch

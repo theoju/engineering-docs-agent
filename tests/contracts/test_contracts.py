@@ -69,3 +69,17 @@ def test_gap_detector_validates_and_parses():
     assert errors == []
     assert isinstance(result, GapVerdict)
     assert result.pr_id == "x/y#1"
+
+
+def test_publish_verifier_validates_and_parses():
+    from contracts import validate_and_parse, VerifyVerdict
+
+    raw = {
+        "verified": ["https://example.com/foo"],
+        "failed": [],
+        "build_status": "success",
+    }
+    result, errors = validate_and_parse("publish-verifier", raw)
+    assert errors == []
+    assert isinstance(result, VerifyVerdict)
+    assert result.failed == []

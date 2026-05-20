@@ -57,12 +57,20 @@ class GapVerdict:
     tier: str = "llm"
 
 
+@dataclass(frozen=True)
+class VerifyVerdict:
+    verified: list[str]
+    failed: list[str]
+    build_status: str
+
+
 _DATACLASS_BY_NAME: dict[str, type] = {
     "source-collector": SourceCollectorResult,
     "pr-summarizer": PrSummary,
     "page-author": PageAuthorResult,
     "content-validator": ValidationResult,
     "gap-detector": GapVerdict,
+    "publish-verifier": VerifyVerdict,
 }
 
 

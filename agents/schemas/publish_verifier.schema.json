@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "publish-verifier output",
+  "type": "object",
+  "required": ["verified", "failed", "build_status"],
+  "properties": {
+    "verified": { "type": "array", "items": { "type": "string" } },
+    "failed": { "type": "array", "items": { "type": "string" } },
+    "build_status": { "type": "string" }
+  }
+}

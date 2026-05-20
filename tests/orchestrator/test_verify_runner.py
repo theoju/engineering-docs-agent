@@ -1,9 +1,12 @@
 from __future__ import annotations
+import importlib
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 # Make scripts/ importable.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
@@ -113,3 +116,32 @@ def test_verify_runner_uses_gh_client_for_pr_view(tmp_path, monkeypatch):
     rc = verify_runner.run(tmp_path, 42, dry_run_dir=FAKES_VERIFY_OK)
     assert any(c[0] == "pr_view_files" for c in fake.calls)
     assert rc == 0
+
+
+def test_verify_runner_writes_state_even_on_dispatch_failure(tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import verify_runner
+
+    importlib.reload(verify_runner)
+
+    state_path = _init_host(tmp_path)
+    # Delete state.json after init so we can detect whether run() re-creates it
+    # via try/finally. Without try/finally, the file stays missing because the
+    # raise happens before the existing end-of-run write.
+    state_path.unlink()
+
+    def raise_on_publish_verifier(name, inputs, *, dry_run_dir):
+        if name == "publish-verifier":
+            raise RuntimeError("simulated crash")
+        return {"slack_ok": True, "email_ok": True, "errors": []}
+
+    monkeypatch.setattr(verify_runner, "dispatch_subagent", raise_on_publish_verifier)
+
+    with pytest.raises(RuntimeError):
+        verify_runner.run(tmp_path, 42, dry_run_dir=FAKES_VERIFY_OK)
+
+    # try/finally must have written state.json, even though dispatch raised
+    assert state_path.exists(), "state.json must be written via try/finally"
+    state = json.loads(state_path.read_text())
+    # state was written; current_run not promoted (no last_successful_run)
+    assert "last_successful_run" not in state

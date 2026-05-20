@@ -41,49 +41,50 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
     else:
         changed_paths = view.value or []
 
-    verdict = dispatch_subagent(
-        "publish-verifier",
-        {
-            "merged_pr_number": pr_number,
-            "changed_paths": changed_paths,
-            "publishing_config": cfg.get("publishing", {}),
-            "repo": repo,
-        },
-        dry_run_dir=dry_run_dir,
-    )
-    if verdict is None:
-        verdict = {"verified": [], "failed": [], "build_status": "verifier_invalid"}
-    dispatch_subagent(
-        "notifier",
-        {
-            "digest": {
-                "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
-                "verified": verdict.get("verified", []),
-                "failed_urls": verdict.get("failed", []),
-                "build_status": verdict.get("build_status"),
+    state_path = repo_root / ".engineering-docs-agent" / "state.json"
+    try:
+        verdict = dispatch_subagent(
+            "publish-verifier",
+            {
+                "merged_pr_number": pr_number,
+                "changed_paths": changed_paths,
+                "publishing_config": cfg.get("publishing", {}),
+                "repo": repo,
             },
-            "slack_config": cfg.get("notifications", {}).get("slack", {}),
-            "email_config": cfg.get("notifications", {}).get("email", {}),
-            "mode": "verify",
-        },
-        dry_run_dir=dry_run_dir,
-    )
+            dry_run_dir=dry_run_dir,
+        )
+        if verdict is None:
+            verdict = {"verified": [], "failed": [], "build_status": "verifier_invalid"}
+        dispatch_subagent(
+            "notifier",
+            {
+                "digest": {
+                    "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
+                    "verified": verdict.get("verified", []),
+                    "failed_urls": verdict.get("failed", []),
+                    "build_status": verdict.get("build_status"),
+                },
+                "slack_config": cfg.get("notifications", {}).get("slack", {}),
+                "email_config": cfg.get("notifications", {}).get("email", {}),
+                "mode": "verify",
+            },
+            dry_run_dir=dry_run_dir,
+        )
 
-    failed_urls = verdict.get("failed", [])
-    build_status = verdict.get("build_status")
-    verify_succeeded = not failed_urls and build_status == "success"
+        failed_urls = verdict.get("failed", [])
+        build_status = verdict.get("build_status")
+        verify_succeeded = not failed_urls and build_status == "success"
 
-    if verify_succeeded and "current_run" in state:
-        state["last_successful_run"] = {
-            "completed_at": state["current_run"]["started_at"],
-            "head_sha": state["current_run"]["head_sha"],
-            "pr_number": pr_number,
-        }
-        state.pop("current_run", None)
-    (repo_root / ".engineering-docs-agent" / "state.json").write_text(
-        json.dumps(state, indent=2)
-    )
-    return 0 if verify_succeeded else 1
+        if verify_succeeded and "current_run" in state:
+            state["last_successful_run"] = {
+                "completed_at": state["current_run"]["started_at"],
+                "head_sha": state["current_run"]["head_sha"],
+                "pr_number": pr_number,
+            }
+            state.pop("current_run", None)
+        return 0 if verify_succeeded else 1
+    finally:
+        state_path.write_text(json.dumps(state, indent=2))
 
 
 def main() -> int:

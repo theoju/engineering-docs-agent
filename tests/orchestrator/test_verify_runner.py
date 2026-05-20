@@ -161,7 +161,7 @@ def test_verify_runner_writes_state_even_on_dispatch_failure(tmp_path, monkeypat
     # raise happens before the existing end-of-run write.
     state_path.unlink()
 
-    def raise_on_publish_verifier(name, inputs, *, dry_run_dir):
+    def raise_on_publish_verifier(name, inputs, *, dry_run_dir, cwd=None):
         if name == "publish-verifier":
             raise RuntimeError("simulated crash")
         return {"slack_ok": True, "email_ok": True, "errors": []}

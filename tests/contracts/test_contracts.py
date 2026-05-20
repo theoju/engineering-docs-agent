@@ -59,3 +59,13 @@ def test_content_validator_validates_and_parses():
     assert errors == []
     assert isinstance(result, ValidationResult)
     assert result.failed == []
+
+
+def test_gap_detector_validates_and_parses():
+    from contracts import validate_and_parse, GapVerdict
+
+    raw = json.loads((FAKES / "fake_gap_detector.json").read_text())
+    result, errors = validate_and_parse("gap-detector", raw)
+    assert errors == []
+    assert isinstance(result, GapVerdict)
+    assert result.pr_id == "x/y#1"

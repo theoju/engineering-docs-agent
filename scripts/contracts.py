@@ -48,11 +48,21 @@ class ValidationResult:
     failed: list[dict]
 
 
+@dataclass(frozen=True)
+class GapVerdict:
+    pr_id: str
+    needs_spec: bool
+    reasoning: str = ""
+    confidence: str = "medium"
+    tier: str = "llm"
+
+
 _DATACLASS_BY_NAME: dict[str, type] = {
     "source-collector": SourceCollectorResult,
     "pr-summarizer": PrSummary,
     "page-author": PageAuthorResult,
     "content-validator": ValidationResult,
+    "gap-detector": GapVerdict,
 }
 
 

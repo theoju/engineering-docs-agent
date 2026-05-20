@@ -13,6 +13,29 @@ from typing import Any
 import yaml
 
 
+def detect_repo(repo_root: Path) -> dict[str, str]:
+    """Detect GitHub owner/name from git remote or GITHUB_REPOSITORY env."""
+    import os
+
+    if env := os.environ.get("GITHUB_REPOSITORY"):
+        if "/" in env:
+            owner, name = env.split("/", 1)
+            return {"owner": owner, "name": name}
+    r = subprocess.run(
+        ["git", "-C", str(repo_root), "remote", "get-url", "origin"],
+        capture_output=True,
+        text=True,
+    )
+    url = r.stdout.strip()
+    # Parse github.com/<owner>/<name> from ssh or https URLs.
+    import re
+
+    m = re.search(r"github\.com[:/]([^/]+)/([^/.]+?)(?:\.git)?$", url)
+    if m:
+        return {"owner": m.group(1), "name": m.group(2)}
+    return {"owner": "unknown", "name": "unknown"}
+
+
 def load_yaml(p: Path) -> dict[str, Any]:
     return yaml.safe_load(p.read_text()) or {}
 
@@ -64,6 +87,8 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         or "unknown"
     )
 
+    repo = detect_repo(repo_root)
+
     now = datetime.now(timezone.utc).isoformat()
     state["current_run"] = {
         "started_at": now,
@@ -77,7 +102,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         {
             "last_sha": state.get("last_successful_run", {}).get("head_sha", ""),
             "head_sha": head_sha,
-            "repo": {"owner": "x", "name": "y"},
+            "repo": repo,
             "pr_branch_filter": ["docs-agent/*"],
         },
         dry_run_dir=dry_run_dir,
@@ -121,7 +146,11 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                     "voice_samples": [],
                     "frontmatter_template": {
                         "status": "draft",
-                        "sources": [],
+                        "sources": [
+                            pr.get("url")
+                            for pr in prs
+                            if pr.get("number") == item["summary"].get("pr_number")
+                        ],
                         "synthesized_into": [],
                     },
                 },
@@ -148,7 +177,47 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         )
         for fail in validation.get("failed", []):
             if fail.get("severity") == "block":
-                Path(fail["path"]).unlink(missing_ok=True)
+                fail_path = Path(fail["path"])
+                # Verify path is inside repo_root before any destructive op.
+                try:
+                    fail_path.resolve().relative_to(repo_root.resolve())
+                except ValueError:
+                    state["current_run"]["partial"] = True
+                    state["current_run"]["partial_reasons"].append(
+                        f"lint_block_unsafe_path: {fail['path']} (outside repo)"
+                    )
+                    continue
+                # If the file exists in HEAD, restore it (edit case).
+                # If not (create case), remove it.
+                in_head = (
+                    subprocess.run(
+                        [
+                            "git",
+                            "-C",
+                            str(repo_root),
+                            "cat-file",
+                            "-e",
+                            f"HEAD:{fail_path.relative_to(repo_root)}",
+                        ],
+                        capture_output=True,
+                    ).returncode
+                    == 0
+                )
+                if in_head:
+                    subprocess.run(
+                        [
+                            "git",
+                            "-C",
+                            str(repo_root),
+                            "checkout",
+                            "HEAD",
+                            "--",
+                            str(fail_path.relative_to(repo_root)),
+                        ],
+                        check=False,
+                    )
+                else:
+                    fail_path.unlink(missing_ok=True)
                 state["current_run"]["partial"] = True
                 state["current_run"]["partial_reasons"].append(
                     f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}"
@@ -158,7 +227,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     dismissed = set(state.get("dismissed_gap_flags", {}).keys())
     gap_verdicts = []
     for pr in prs:
-        pr_id = f"x/y#{pr['number']}"
+        pr_id = f"{repo['owner']}/{repo['name']}#{pr['number']}"
         if pr_id in dismissed:
             continue
         verdict = dispatch_subagent(
@@ -210,6 +279,31 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         return 1
     state["current_run"]["pr_number"] = pr_number
     state_path.write_text(json.dumps(state, indent=2))
+
+    # Compose digest and dispatch notifier.
+    digest = {
+        "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
+        "run_summary_bullets": [
+            f"PR #{s.get('pr_number')}: {s.get('what_changed', '')}" for s in summaries
+        ],
+        "gap_flags": [
+            {"pr_id": v["pr_id"], "reasoning": v["reasoning"]}
+            for v in gap_verdicts
+            if v.get("needs_spec")
+        ],
+        "lint_failures": state["current_run"]["partial_reasons"],
+        "partial_reasons": state["current_run"]["partial_reasons"],
+    }
+    dispatch_subagent(
+        "notifier",
+        {
+            "digest": digest,
+            "slack_config": config.get("notifications", {}).get("slack", {}),
+            "email_config": config.get("notifications", {}).get("email", {}),
+            "mode": "run",
+        },
+        dry_run_dir=dry_run_dir,
+    )
     return 0
 
 

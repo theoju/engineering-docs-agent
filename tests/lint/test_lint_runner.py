@@ -78,3 +78,29 @@ def test_no_tier1_means_no_rules(tmp_path):
     assert r.returncode == 0
     out = json.loads(r.stdout)
     assert out["results"] == []
+
+
+def test_tier2_spec_keys_activate_rules(tmp_path):
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("""
+lint:
+  tier1: default
+  tier2:
+    banned_phrases: ["simply"]
+    ai_tells: true
+    terminology_glossary: glossary.yml
+    second_person_consistency: true
+    paragraph_max_words: 150
+  tier3: {}
+""")
+    from scripts.lint.lint_runner import enabled_rules
+    import yaml
+
+    rules = enabled_rules(yaml.safe_load(cfg.read_text()))
+    # Tier 1 default rules + Tier 2 keyed-in rules
+    assert "banned_phrases" in rules
+    assert "ai_tells" in rules
+    assert "terminology" in rules
+    assert "second_person" in rules
+    assert "paragraph_length" in rules
+    assert "voice_consistency" not in rules  # excluded: LLM-handled

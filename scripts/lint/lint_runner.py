@@ -21,16 +21,29 @@ TIER1_DEFAULT = [
     "stub_redirect",
 ]
 
-TIER2_RULES = [
-    "banned_phrases",
-    "ai_tells",
-    "voice_consistency",
-    "terminology",
-    "second_person",
-    "paragraph_length",
-]
+# Mapping config keys (in tier2/tier3 dicts) → rule script name.
+# voice_consistency is intentionally absent: it's LLM-handled by content-validator.
+TIER2_CONFIG_KEYS = {
+    "banned_phrases": "banned_phrases",
+    "ai_tells": "ai_tells",
+    "terminology_glossary": "terminology",
+    "second_person_consistency": "second_person",
+    "paragraph_max_words": "paragraph_length",
+}
 
-TIER3_RULES = ["reading_grade", "sentence_variance", "duplicate_content"]
+TIER3_CONFIG_KEYS = {
+    "reading_grade_range": "reading_grade",
+    "sentence_variance": "sentence_variance",
+    "duplicate_detection": "duplicate_content",
+}
+
+
+def _truthy_key(d: dict, key: str) -> bool:
+    """Return True if config key is present and not None/False/empty."""
+    if key not in d:
+        return False
+    v = d[key]
+    return v not in (None, False, "")
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -43,13 +56,13 @@ def enabled_rules(config: dict[str, Any]) -> list[str]:
     if lint.get("tier1") == "default":
         rules.extend(TIER1_DEFAULT)
     tier2 = lint.get("tier2", {}) or {}
-    for r in TIER2_RULES:
-        if r in tier2 and tier2[r]:
-            rules.append(r)
+    for cfg_key, script_name in TIER2_CONFIG_KEYS.items():
+        if _truthy_key(tier2, cfg_key):
+            rules.append(script_name)
     tier3 = lint.get("tier3", {}) or {}
-    for r in TIER3_RULES:
-        if r in tier3 and tier3[r]:
-            rules.append(r)
+    for cfg_key, script_name in TIER3_CONFIG_KEYS.items():
+        if _truthy_key(tier3, cfg_key):
+            rules.append(script_name)
     return rules
 
 

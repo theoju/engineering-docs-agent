@@ -60,6 +60,8 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
         },
         dry_run_dir=dry_run_dir,
     )
+    if verdict is None:
+        verdict = {"verified": [], "failed": [], "build_status": "verifier_invalid"}
     dispatch_subagent(
         "notifier",
         {

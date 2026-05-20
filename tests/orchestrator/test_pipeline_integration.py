@@ -336,3 +336,56 @@ def test_archive_index_empty_subdir_emits_placeholder(tmp_path):
     index = tmp_path / "empty" / "index.md"
     assert index.exists()
     assert "_No entries yet._" in index.read_text()
+
+
+def test_dispatch_subagent_handles_bad_json_in_production_branch(monkeypatch, tmp_path):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    class FakeCP:
+        def __init__(self, stdout, stderr="", returncode=0):
+            self.stdout = stdout
+            self.stderr = stderr
+            self.returncode = returncode
+
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda *a, **kw: FakeCP(stdout="not json at all\n"),
+    )
+
+    # Call dispatch_subagent directly with dry_run_dir=None (production path)
+    result = runner.dispatch_subagent("source-collector", {}, dry_run_dir=None)
+    assert result is None
+
+
+def test_dispatch_subagent_handles_empty_stdout(monkeypatch, tmp_path):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    class FakeCP:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr(runner.subprocess, "run", lambda *a, **kw: FakeCP())
+    result = runner.dispatch_subagent("source-collector", {}, dry_run_dir=None)
+    assert result is None
+
+
+def test_dispatch_subagent_handles_claude_not_installed(monkeypatch, tmp_path):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    def raise_fnf(*a, **kw):
+        raise FileNotFoundError()
+
+    monkeypatch.setattr(runner.subprocess, "run", raise_fnf)
+    result = runner.dispatch_subagent("source-collector", {}, dry_run_dir=None)
+    assert result is None

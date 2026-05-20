@@ -46,27 +46,44 @@ def load_json(p: Path) -> dict[str, Any]:
     return json.loads(p.read_text()) if p.exists() else {}
 
 
-def dispatch_subagent(name: str, inputs: dict, *, dry_run_dir: Path | None) -> dict:
-    """Dispatch a subagent. Returns parsed JSON output.
+def dispatch_subagent(
+    name: str, inputs: dict, *, dry_run_dir: Path | None
+) -> dict | None:
+    """Dispatch a subagent. Returns parsed JSON output, or None on failure.
 
     In dry-run mode, reads from `<dry_run_dir>/fake_<name_with_underscores>.json`
-    instead of invoking Claude.
+    instead of invoking Claude. Returns None if the fixture is missing.
+
+    In production, returns None if:
+    - the `claude` binary is not installed (FileNotFoundError)
+    - the subagent process exits with a non-zero return code
+    - the subagent emits empty stdout
+    - the subagent emits unparseable JSON
     """
     if dry_run_dir is not None:
         fixture = dry_run_dir / f"fake_{name.replace('-', '_')}.json"
         if not fixture.exists():
-            return {}
+            return None
         return load_json(fixture)
     payload = json.dumps(inputs)
-    r = subprocess.run(
-        ["claude", "agent", name, "--input", payload],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        r = subprocess.run(
+            ["claude", "agent", name, "--input", payload],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
     if r.returncode != 0:
-        raise RuntimeError(f"subagent {name} failed: {r.stderr[:500]}")
-    return json.loads(r.stdout)
+        return None
+    stdout = (r.stdout or "").strip()
+    if not stdout:
+        return None
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
 
 
 def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
@@ -110,6 +127,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     if jira_payload:
         sc_inputs["jira"] = jira_payload
     sources = dispatch_subagent("source-collector", sc_inputs, dry_run_dir=dry_run_dir)
+    if sources is None:
+        add_partial(state, "source_collector_invalid: returned None")
+        sources = {"prs": [], "jira_issues": []}
 
     prs = sources.get("prs", [])
     jira_issues = sources.get("jira_issues", []) or []
@@ -129,6 +149,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             },
             dry_run_dir=dry_run_dir,
         )
+        if summary is None:
+            add_partial(state, f"pr_summarizer_invalid: pr={pr['number']}")
+            continue
         summaries.append(summary)
 
     # Page authoring: aggregate doc_targets per lens.
@@ -182,6 +205,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                 },
                 dry_run_dir=dry_run_dir,
             )
+            if out is None:
+                add_partial(state, f"page_author_invalid: {target_path}")
+                continue
             if out.get("ok"):
                 authored.append(str(target_path))
                 if dry_run_dir and not target_path.exists():
@@ -201,6 +227,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             },
             dry_run_dir=dry_run_dir,
         )
+        if validation is None:
+            add_partial(state, "content_validator_invalid: returned None")
+            validation = {"failed": []}
         for fail in validation.get("failed", []):
             if fail.get("severity") == "block":
                 fail_path = Path(fail["path"])
@@ -288,6 +317,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             },
             dry_run_dir=dry_run_dir,
         )
+        if verdict is None:
+            add_partial(state, f"gap_detector_invalid: pr_id={pr_id}")
+            continue
         gap_verdicts.append(verdict)
 
     # Prepend What's New entry
@@ -336,7 +368,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         "lint_failures": state["current_run"]["partial_reasons"],
         "partial_reasons": state["current_run"]["partial_reasons"],
     }
-    dispatch_subagent(
+    notifier_result = dispatch_subagent(
         "notifier",
         {
             "digest": digest,
@@ -346,6 +378,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         },
         dry_run_dir=dry_run_dir,
     )
+    if notifier_result is None:
+        add_partial(state, "notifier_invalid: returned None")
+        state_path.write_text(json.dumps(state, indent=2))
     return 0
 
 

@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
@@ -101,12 +102,7 @@ def test_prior_run_partial_reasons_do_not_carry_forward(tmp_path):
 
     state = json.loads(state_path.read_text())
     reasons = state["current_run"].get("partial_reasons", [])
-    leaked = [
-        reason
-        for reason in reasons
-        if "schema_invalid" in reason or "source_collector_invalid" in reason
-    ]
-    assert leaked == [], (
+    assert reasons == [], (
         f"prior-run transient reasons must not carry forward; got {reasons}"
     )
 
@@ -143,8 +139,6 @@ def test_stale_clear_signal_still_emitted_against_fresh_reasons(tmp_path):
     contract: a stale prior current_run must still emit
     'stale_current_run_cleared' — and that must be the ONLY reason
     present (no leakage of the stale run's prior reasons)."""
-    from datetime import datetime, timedelta, timezone
-
     stale_iso = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
     seeded = {
         "version": "1",

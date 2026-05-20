@@ -7,12 +7,28 @@ from pathlib import Path
 # Allow importing from sibling script.
 sys.path.insert(0, str(Path(__file__).parent))
 from gh_client import GhClient  # noqa: E402
-from orchestrator_runner import detect_repo, dispatch_subagent, load_yaml, load_json  # noqa: E402
+from orchestrator_runner import detect_repo, dispatch_subagent  # noqa: E402
+from state_io import (  # noqa: E402
+    ConfigError,
+    StateError,
+    load_config_validated,
+    load_state_validated,
+)
 
 
 def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> int:
-    cfg = load_yaml(repo_root / ".engineering-docs-agent" / "config.yml")
-    state = load_json(repo_root / ".engineering-docs-agent" / "state.json")
+    cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
+    state_path_arg = repo_root / ".engineering-docs-agent" / "state.json"
+    try:
+        cfg = load_config_validated(cfg_path)
+    except ConfigError as e:
+        print(f"config invalid: {e}", file=sys.stderr)
+        return 2
+    try:
+        state = load_state_validated(state_path_arg)
+    except StateError as e:
+        print(f"state invalid: {e}", file=sys.stderr)
+        return 2
 
     repo = detect_repo(repo_root)
 

@@ -14,8 +14,12 @@ import yaml
 
 from gh_client import GhClient
 from state_io import (
+    ConfigError,
+    StateError,
     add_partial,
     cleanup_empty_parents,
+    load_config_validated,
+    load_state_validated,
     load_voice_samples,
     resolve_lens,
 )
@@ -104,9 +108,17 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         print("no config", file=sys.stderr)
         return 2
 
-    config = load_yaml(cfg_path)
+    try:
+        config = load_config_validated(cfg_path)
+    except ConfigError as e:
+        print(f"config invalid: {e}", file=sys.stderr)
+        return 2
     voice_samples = load_voice_samples(repo_root, config)
-    state = load_json(state_path) or {}
+    try:
+        state = load_state_validated(state_path)
+    except StateError as e:
+        print(f"state invalid: {e}", file=sys.stderr)
+        return 2
     state.setdefault("version", "1")
 
     # Clear stale current_run (>24h old) before starting a new run.

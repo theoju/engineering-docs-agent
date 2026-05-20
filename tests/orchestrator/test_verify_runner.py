@@ -16,6 +16,16 @@ FAKES_VERIFY_FAIL = Path(__file__).parent / "fakes_verify_fail"
 FAKES_VERIFY_OK = Path(__file__).parent / "fakes_verify_ok"
 
 CONFIG_YAML = """
+docs:
+  framework: mkdocs
+  source_dir: docs/site-src
+  whats_new_file: docs/site-src/whats-new.md
+  agent_editable_paths: ["docs/site-src/**"]
+  lens_paths:
+    core: docs/site-src/core
+sources:
+  git: { host: github }
+lint: { tier1: default }
 publishing:
   base_url: https://example.com
   build_workflow: deploy.yml

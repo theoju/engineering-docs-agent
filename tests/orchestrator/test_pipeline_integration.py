@@ -136,6 +136,21 @@ def test_lint_block_unlinks_newly_created_file(tmp_path):
     assert any("lint_block" in reason for reason in reasons), reasons
 
 
+def test_orchestrator_hard_fails_on_bad_config(tmp_path):
+    """An invalid config (missing required keys + bad enum) → exit 2 (hard fail)."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    _init_host(tmp_path)
+    cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
+    cfg.write_text("docs:\n  framework: vuepress\n")  # missing required + bad enum
+
+    rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+    assert rc == 2, "exit 2 on invalid config (hard fail)"
+
+
 def test_same_page_targets_batched_into_single_dispatch(tmp_path, monkeypatch):
     """3 PRs that all target the same (lens, page_hint) → ONE page-author dispatch
     with all 3 summaries."""

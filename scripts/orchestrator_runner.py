@@ -97,16 +97,16 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         "partial_reasons": [],
     }
 
-    sources = dispatch_subagent(
-        "source-collector",
-        {
-            "last_sha": state.get("last_successful_run", {}).get("head_sha", ""),
-            "head_sha": head_sha,
-            "repo": repo,
-            "pr_branch_filter": ["docs-agent/*"],
-        },
-        dry_run_dir=dry_run_dir,
-    )
+    jira_payload = config.get("sources", {}).get("jira")
+    sc_inputs = {
+        "last_sha": state.get("last_successful_run", {}).get("head_sha", ""),
+        "head_sha": head_sha,
+        "repo": repo,
+        "pr_branch_filter": ["docs-agent/*"],
+    }
+    if jira_payload:
+        sc_inputs["jira"] = jira_payload
+    sources = dispatch_subagent("source-collector", sc_inputs, dry_run_dir=dry_run_dir)
 
     prs = sources.get("prs", [])
     summaries = []

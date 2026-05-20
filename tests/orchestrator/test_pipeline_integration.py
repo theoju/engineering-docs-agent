@@ -1,10 +1,24 @@
 from __future__ import annotations
+import importlib
 import json, subprocess, sys
+import sys as _sys
 from pathlib import Path
 
 RUNNER = Path(__file__).parent.parent.parent / "scripts" / "orchestrator_runner.py"
 FAKES = Path(__file__).parent / "fakes"
 FAKES_BLOCK = Path(__file__).parent / "fakes_block"
+
+
+def _run_inproc(tmp_path: Path, fakes_dir: Path):
+    """In-process run for monkeypatch-driven tests.
+
+    Does NOT reload the module so monkeypatches applied by the caller survive.
+    """
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    return runner.run(tmp_path, dry_run_dir=fakes_dir, no_pr=True)
+
 
 CONFIG_YAML = """
 docs:
@@ -138,3 +152,39 @@ def test_lint_block_restores_edited_file_from_head(tmp_path):
     assert any(
         "lint_block" in reason for reason in updated["current_run"]["partial_reasons"]
     )
+
+
+def test_jira_input_forwarded_to_source_collector(tmp_path, monkeypatch):
+    """When config has sources.jira, orchestrator passes it under the `jira` key."""
+    import sys as _sys
+
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner
+
+    captured_inputs: dict[str, dict] = {}
+    real_dispatch = orchestrator_runner.dispatch_subagent
+
+    def spying_dispatch(name, inputs, *, dry_run_dir):
+        captured_inputs[name] = inputs
+        return real_dispatch(name, inputs, dry_run_dir=dry_run_dir)
+
+    monkeypatch.setattr(orchestrator_runner, "dispatch_subagent", spying_dispatch)
+
+    state = _init_host(tmp_path)
+    cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
+    cfg.write_text(
+        cfg.read_text().replace(
+            "sources:\n  git: { host: github }",
+            "sources:\n  git: { host: github }\n  jira:\n    enabled: true\n    project_keys: [ADIS]\n    base_url: https://acme.atlassian.net",
+        )
+    )
+
+    rc = _run_inproc(tmp_path, FAKES)
+    assert rc == 0
+
+    sc_inputs = captured_inputs.get("source-collector", {})
+    assert sc_inputs.get("jira") == {
+        "enabled": True,
+        "project_keys": ["ADIS"],
+        "base_url": "https://acme.atlassian.net",
+    }

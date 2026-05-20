@@ -26,16 +26,25 @@ def build_index(subdir: Path) -> str:
         title = md.stem
         status = fm.get("status", "—")
         entries.append(f"- [{title}]({md.name}) — status: `{status}`")
+    if not entries:
+        return f"# {subdir.name}\n\n_No entries yet._\n"
     return f"# {subdir.name}\n\n" + "\n".join(entries) + "\n"
+
+
+def regenerate(archive_root: Path) -> None:
+    """Regenerate per-subdirectory index.md files under archive_root."""
+    if not archive_root.exists():
+        return
+    for sub in archive_root.iterdir():
+        if sub.is_dir():
+            (sub / "index.md").write_text(build_index(sub))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive-root", type=Path, required=True)
     args = parser.parse_args()
-    for sub in args.archive_root.iterdir():
-        if sub.is_dir():
-            (sub / "index.md").write_text(build_index(sub))
+    regenerate(args.archive_root)
     return 0
 
 

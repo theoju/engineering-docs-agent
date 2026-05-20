@@ -297,3 +297,42 @@ def test_gap_detector_receives_constructed_pr_id(tmp_path, monkeypatch):
 
     assert captured
     assert captured[0].get("pr_id") == "myorg/myrepo#1"
+
+
+def test_archive_index_regenerated_after_authoring(tmp_path):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    _init_host(
+        tmp_path,
+        seed_files={
+            "docs/site-src/archive/2025/old.md": "---\nstatus: archived\n---\n# Old",
+        },
+    )
+    cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
+    cfg.write_text(
+        cfg.read_text().replace(
+            "    core: docs/site-src/core",
+            "    core: docs/site-src/core\n    archive:\n      path: docs/site-src/archive\n      archive_index: true",
+        )
+    )
+
+    runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+
+    index = tmp_path / "docs" / "site-src" / "archive" / "2025" / "index.md"
+    assert index.exists(), "archive_indexes should regenerate per-year index.md"
+    assert "old" in index.read_text()
+
+
+def test_archive_index_empty_subdir_emits_placeholder(tmp_path):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import archive_indexes
+
+    (tmp_path / "empty").mkdir()
+    archive_indexes.regenerate(tmp_path)
+
+    index = tmp_path / "empty" / "index.md"
+    assert index.exists()
+    assert "_No entries yet._" in index.read_text()

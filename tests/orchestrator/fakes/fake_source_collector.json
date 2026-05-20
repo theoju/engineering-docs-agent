@@ -3,7 +3,7 @@
     {
       "number": 1,
       "title": "Add foo connector",
-      "body": "Adds a new connector.",
+      "body": "Adds a new connector. Refs ADIS-235.",
       "merge_sha": "deadbeef",
       "merged_at": "2026-05-19T07:00:00Z",
       "author": "alice",
@@ -15,9 +15,18 @@
         }
       ],
       "labels": [],
-      "jira_keys": [],
+      "jira_keys": ["ADIS-235"],
       "url": "https://github.com/owner/repo/pull/1"
     }
   ],
-  "jira_issues": []
+  "jira_issues": [
+    {
+      "key": "ADIS-235",
+      "summary": "Build foo connector",
+      "description": "Customer need.",
+      "status": "Done",
+      "labels": ["architecture"],
+      "url": "https://acme.atlassian.net/browse/ADIS-235"
+    }
+  ]
 }

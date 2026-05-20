@@ -109,13 +109,19 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     sources = dispatch_subagent("source-collector", sc_inputs, dry_run_dir=dry_run_dir)
 
     prs = sources.get("prs", [])
+    jira_issues = sources.get("jira_issues", []) or []
+    jira_lookup = {issue["key"]: issue for issue in jira_issues}
+
     summaries = []
     for pr in prs:
+        jira_context = [
+            jira_lookup[k] for k in pr.get("jira_keys", []) if k in jira_lookup
+        ]
         summary = dispatch_subagent(
             "pr-summarizer",
             {
                 "pr": pr,
-                "jira_context": [],
+                "jira_context": jira_context,
                 "lens_names": list(config.get("docs", {}).get("lens_paths", {}).keys()),
             },
             dry_run_dir=dry_run_dir,

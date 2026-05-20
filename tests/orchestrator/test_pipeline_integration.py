@@ -188,3 +188,28 @@ def test_jira_input_forwarded_to_source_collector(tmp_path, monkeypatch):
         "project_keys": ["ADIS"],
         "base_url": "https://acme.atlassian.net",
     }
+
+
+def test_jira_context_threaded_to_pr_summarizer(tmp_path, monkeypatch):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    captured: dict[str, list] = {"summarizer_inputs": []}
+    real_dispatch = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir):
+        if name == "pr-summarizer":
+            captured["summarizer_inputs"].append(inputs)
+        return real_dispatch(name, inputs, dry_run_dir=dry_run_dir)
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+
+    _init_host(tmp_path)
+    runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+
+    assert len(captured["summarizer_inputs"]) == 1
+    jc = captured["summarizer_inputs"][0]["jira_context"]
+    assert len(jc) == 1
+    assert jc[0]["key"] == "ADIS-235"

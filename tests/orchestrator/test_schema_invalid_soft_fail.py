@@ -87,13 +87,19 @@ def test_schema_invalid_source_collector_yields_specific_reason(tmp_path):
     reasons = state["current_run"]["partial_reasons"]
 
     schema_reasons = [
-        r for r in reasons if r.startswith("schema_invalid: source-collector: ")
+        reason
+        for reason in reasons
+        if reason.startswith("schema_invalid: source-collector: ")
     ]
     assert len(schema_reasons) == 1, (
         f"expected exactly one schema_invalid: source-collector: reason; got reasons={reasons}"
     )
 
-    generic = [r for r in reasons if r == "source_collector_invalid: returned None"]
+    generic = [
+        reason
+        for reason in reasons
+        if reason == "source_collector_invalid: returned None"
+    ]
     assert generic == [], (
         f"specific schema reason should suppress the generic returned-None reason; got {reasons}"
     )

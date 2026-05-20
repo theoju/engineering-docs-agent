@@ -48,23 +48,47 @@ def detect_ci(cwd: Path) -> str | None:
     return None
 
 
-def detect_jira_hint(cwd: Path) -> bool:
+def detect_jira_hint(cwd: Path) -> dict | None:
+    """Detect Jira hints from CI workflow files or .env.example.
+
+    Returns a dict with `base_url` if found, else None.
+    """
+    import re
+
     wf_dir = cwd / ".github" / "workflows"
+    base_url: str | None = None
+    has_jira_marker = False
     if wf_dir.is_dir():
         for p in wf_dir.glob("*"):
             try:
-                if "JIRA_" in p.read_text(errors="ignore"):
-                    return True
+                text = p.read_text(errors="ignore")
             except (OSError, UnicodeDecodeError):
                 continue
+            if "JIRA_" in text:
+                has_jira_marker = True
+                m = re.search(r"JIRA_BASE_URL:\s*(\S+)", text)
+                if m:
+                    base_url = m.group(1).strip().strip('"').strip("'")
+                    break
+        if base_url:
+            return {"base_url": base_url}
     env_example = cwd / ".env.example"
     if env_example.exists():
         try:
-            if "JIRA_" in env_example.read_text(errors="ignore"):
-                return True
+            text = env_example.read_text(errors="ignore")
         except (OSError, UnicodeDecodeError):
-            pass
-    return False
+            text = ""
+        if "JIRA_" in text:
+            has_jira_marker = True
+            m = re.search(r"JIRA_BASE_URL\s*=\s*(\S+)", text)
+            if m:
+                base_url = m.group(1).strip().strip('"').strip("'")
+                return {"base_url": base_url}
+    if base_url:
+        return {"base_url": base_url}
+    if has_jira_marker:
+        return {"base_url": None}
+    return None
 
 
 def main() -> int:

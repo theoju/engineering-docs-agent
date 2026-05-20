@@ -28,3 +28,22 @@ def test_bare_repo_minimal():
     )
     out = json.loads(r.stdout)
     assert out["framework"] is None
+
+
+def test_detect_jira_hint_from_workflow_yaml(tmp_path):
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import setup_discover
+
+    wf = tmp_path / ".github" / "workflows" / "ci.yml"
+    wf.parent.mkdir(parents=True)
+    wf.write_text("""
+env:
+  JIRA_BASE_URL: https://acme.atlassian.net
+  JIRA_PROJECT: ADIS
+""")
+
+    hint = setup_discover.detect_jira_hint(tmp_path)
+    assert hint
+    assert hint.get("base_url") == "https://acme.atlassian.net"

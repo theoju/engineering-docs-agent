@@ -83,7 +83,7 @@ def dispatch_subagent(
     payload = json.dumps(inputs)
     try:
         r = subprocess.run(
-            ["claude", "agent", name, "--input", payload],
+            ["claude", "-p", payload, "--agent", name],
             capture_output=True,
             text=True,
             check=False,

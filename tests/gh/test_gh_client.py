@@ -142,3 +142,23 @@ def test_pr_create_gh_failure(monkeypatch, tmp_path):
     r = gh.pr_create("docs-agent/x", "title", "body")
     assert not r.ok
     assert "gh_pr_create_failed" in r.error
+
+
+def test_fake_gh_client_records_calls():
+    from gh_client import FakeGhClient, GhResult
+
+    fake = FakeGhClient(
+        pr_view_files=GhResult(ok=True, value=["a.md", "b.md"]),
+    )
+    r = fake.pr_view_files(42)
+    assert r.value == ["a.md", "b.md"]
+    assert fake.calls == [("pr_view_files", (42,))]
+
+
+def test_fake_gh_client_default_responses():
+    from gh_client import FakeGhClient
+
+    fake = FakeGhClient()
+    assert fake.pr_view_files(1).value == []
+    assert fake.pr_list_for_branch("x").value is None
+    assert fake.pr_create("x", "t", "b").value == 1

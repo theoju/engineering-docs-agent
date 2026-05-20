@@ -96,3 +96,33 @@ class GhClient:
         except json.JSONDecodeError as e:
             return GhResult(ok=False, error=f"gh_bad_json: {e}")
         return GhResult(ok=True, value=extract(data))
+
+
+class FakeGhClient:
+    """Test injection point. Constructor takes canned GhResult per method."""
+
+    def __init__(
+        self,
+        *,
+        pr_view_files: GhResult | None = None,
+        pr_list_for_branch: GhResult | None = None,
+        pr_create: GhResult | None = None,
+    ) -> None:
+        self._canned = {
+            "pr_view_files": pr_view_files,
+            "pr_list_for_branch": pr_list_for_branch,
+            "pr_create": pr_create,
+        }
+        self.calls: list[tuple[str, tuple]] = []
+
+    def pr_view_files(self, pr_number: int) -> GhResult:
+        self.calls.append(("pr_view_files", (pr_number,)))
+        return self._canned["pr_view_files"] or GhResult(ok=True, value=[])
+
+    def pr_list_for_branch(self, branch: str) -> GhResult:
+        self.calls.append(("pr_list_for_branch", (branch,)))
+        return self._canned["pr_list_for_branch"] or GhResult(ok=True, value=None)
+
+    def pr_create(self, branch: str, title: str, body: str) -> GhResult:
+        self.calls.append(("pr_create", (branch, title, body)))
+        return self._canned["pr_create"] or GhResult(ok=True, value=1)

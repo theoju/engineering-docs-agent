@@ -13,7 +13,12 @@ from typing import Any
 import yaml
 
 from gh_client import GhClient
-from state_io import add_partial, load_voice_samples, resolve_lens
+from state_io import (
+    add_partial,
+    cleanup_empty_parents,
+    load_voice_samples,
+    resolve_lens,
+)
 
 
 def detect_repo(repo_root: Path) -> dict[str, str]:
@@ -311,6 +316,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                     )
                 else:
                     fail_path.unlink(missing_ok=True)
+                    cleanup_empty_parents(fail_path, until=repo_root)
                 state["current_run"]["partial"] = True
                 state["current_run"]["partial_reasons"].append(
                     f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}"

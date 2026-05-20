@@ -135,6 +135,23 @@ def test_lint_block_unlinks_newly_created_file(tmp_path):
     assert any("lint_block" in reason for reason in reasons), reasons
 
 
+def test_blocked_create_cleans_up_empty_parent_dirs(tmp_path):
+    """Blocked create unlinks the file; empty parent dir(s) should also be removed."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    _init_host(tmp_path)
+    rc = runner.run(tmp_path, dry_run_dir=FAKES_BLOCK, no_pr=True)
+    assert rc == 0
+
+    # The page-author created docs/site-src/core/connectors/foo.md;
+    # validator blocked → file unlinked → connectors/ directory empty → should be removed.
+    connectors = tmp_path / "docs" / "site-src" / "core" / "connectors"
+    assert not connectors.exists(), "empty parent dir should be removed after cleanup"
+
+
 def test_lint_block_restores_edited_file_from_head(tmp_path):
     """Edit case: file in HEAD with original content, working tree modified,
     validator blocks → git checkout HEAD -- restores original content."""

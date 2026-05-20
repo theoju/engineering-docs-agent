@@ -194,11 +194,90 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     existing = whats_new.read_text() if whats_new.exists() else ""
     whats_new.write_text(entry + existing)
 
+    state["current_run"]["pr_number"] = None
     state_path.write_text(json.dumps(state, indent=2))
-
     if no_pr:
         return 0
+    branch = branch_name(now)
+    pr_number = open_or_append_pr(
+        repo_root,
+        branch=branch,
+        now_iso=now,
+        partial=state["current_run"]["partial"],
+        partial_reasons=state["current_run"]["partial_reasons"],
+    )
+    if pr_number is None:
+        return 1
+    state["current_run"]["pr_number"] = pr_number
+    state_path.write_text(json.dumps(state, indent=2))
     return 0
+
+
+def branch_name(now_iso: str) -> str:
+    return f"docs-agent/{now_iso[:10]}"
+
+
+def existing_pr_for_branch(repo_root: Path, branch: str) -> int | None:
+    r = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--json",
+            "number",
+            "-L",
+            "1",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        return None
+    items = json.loads(r.stdout or "[]")
+    return items[0]["number"] if items else None
+
+
+def open_or_append_pr(
+    repo_root: Path,
+    *,
+    branch: str,
+    now_iso: str,
+    partial: bool,
+    partial_reasons: list[str],
+) -> int | None:
+    subprocess.run(["git", "-C", str(repo_root), "checkout", "-B", branch], check=True)
+    subprocess.run(["git", "-C", str(repo_root), "add", "."], check=True)
+    commit_msg = f"docs(agent): run {now_iso}"
+    if partial:
+        commit_msg += " (partial)"
+    subprocess.run(
+        ["git", "-C", str(repo_root), "commit", "-m", commit_msg], check=False
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_root), "push", "-u", "origin", branch], check=True
+    )
+    existing = existing_pr_for_branch(repo_root, branch)
+    if existing:
+        return existing
+    body = (
+        "WARNING — Partial run — " + "; ".join(partial_reasons)
+        if partial
+        else "docs-agent run"
+    )
+    r = subprocess.run(
+        ["gh", "pr", "create", "--head", branch, "--title", commit_msg, "--body", body],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        return None
+    return int(r.stdout.strip().split("/")[-1])
 
 
 def main() -> int:

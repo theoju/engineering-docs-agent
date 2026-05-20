@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 import yaml
 
+from state_io import load_voice_samples
+
 
 def detect_repo(repo_root: Path) -> dict[str, str]:
     """Detect GitHub owner/name from git remote or GITHUB_REPOSITORY env."""
@@ -75,6 +77,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         return 2
 
     config = load_yaml(cfg_path)
+    voice_samples = load_voice_samples(repo_root, config)
     state = load_json(state_path)
     state.setdefault("version", "1")
 
@@ -149,7 +152,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                     "action": t["action"],
                     "lens": lens,
                     "summaries": [item["summary"]],
-                    "voice_samples": [],
+                    "voice_samples": voice_samples,
                     "frontmatter_template": {
                         "status": "draft",
                         "sources": [
@@ -177,7 +180,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             {
                 "paths": authored,
                 "config_path": str(cfg_path),
-                "voice_samples": [],
+                "voice_samples": voice_samples,
             },
             dry_run_dir=dry_run_dir,
         )

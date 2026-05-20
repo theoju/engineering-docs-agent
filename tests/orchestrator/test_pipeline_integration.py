@@ -213,3 +213,41 @@ def test_jira_context_threaded_to_pr_summarizer(tmp_path, monkeypatch):
     jc = captured["summarizer_inputs"][0]["jira_context"]
     assert len(jc) == 1
     assert jc[0]["key"] == "ADIS-235"
+
+
+def test_voice_samples_loaded_and_passed_to_authoring(tmp_path, monkeypatch):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    captured: list[dict] = []
+    real_dispatch = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir):
+        if name in ("page-author", "content-validator"):
+            captured.append(
+                {"name": name, "voice_samples": inputs.get("voice_samples")}
+            )
+        return real_dispatch(name, inputs, dry_run_dir=dry_run_dir)
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+
+    _init_host(
+        tmp_path,
+        seed_files={
+            "voice/tone.md": "Use second person.",
+            "CLAUDE.md": "Project voice notes.",
+        },
+    )
+    cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
+    cfg.write_text(cfg.read_text() + "\nvoice:\n  sample_paths: [voice/tone.md]\n")
+
+    runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+
+    assert captured, "expected page-author/content-validator dispatches"
+    for entry in captured:
+        assert entry["voice_samples"], f"voice_samples missing for {entry['name']}"
+        paths = [s["path"] for s in entry["voice_samples"]]
+        assert "voice/tone.md" in paths
+        assert "CLAUDE.md" in paths

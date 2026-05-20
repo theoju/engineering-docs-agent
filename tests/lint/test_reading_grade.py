@@ -40,7 +40,7 @@ def test_simple_warns(tmp_path):
     cfg = tmp_path / "c.yml"
     cfg.write_text("lint:\n  tier3:\n    reading_grade_range:\n      - 8\n      - 12\n")
     rc, out = _run([FIX / "simple.md"], cfg)
-    assert rc == 2
+    assert rc == 1
     assert out["rule"] == "reading_grade"
     assert out["severity"] == "warn"
     assert out["results"][0]["ok"] is False

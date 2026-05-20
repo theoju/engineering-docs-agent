@@ -41,7 +41,7 @@ def main() -> int:
         json.dump(
             {"rule": RULE_NAME, "severity": SEVERITY, "results": results}, sys.stdout
         )
-    return 2 if any_failed else 0
+    return 1 if any_failed else 0
 
 
 if __name__ == "__main__":

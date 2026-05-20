@@ -1,4 +1,11 @@
-"""Lint runner: dispatch per-rule scripts based on config and aggregate results."""
+"""Lint runner: dispatch per-rule scripts based on config and aggregate results.
+
+Rule script CLI contract:
+  exit 0 — all paths passed the rule
+  exit 1 — at least one path failed (severity from JSON output determines
+           whether lint_runner exits 1 itself)
+  exit 2 — invocation error (bad args, missing config, unhandled exception)
+"""
 
 from __future__ import annotations
 

@@ -273,3 +273,27 @@ def test_unsafe_page_path_filtered_logs_partial(tmp_path):
     state = json.loads(state_path.read_text())
     reasons = state["current_run"]["partial_reasons"]
     assert any("unsafe_page_path" in r for r in reasons)
+
+
+def test_gap_detector_receives_constructed_pr_id(tmp_path, monkeypatch):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    captured: list[dict] = []
+    real = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir):
+        if name == "gap-detector":
+            captured.append(inputs)
+        return real(name, inputs, dry_run_dir=dry_run_dir)
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "myorg/myrepo")
+
+    _init_host(tmp_path)
+    runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+
+    assert captured
+    assert captured[0].get("pr_id") == "myorg/myrepo#1"

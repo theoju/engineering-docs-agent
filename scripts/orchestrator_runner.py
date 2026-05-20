@@ -263,6 +263,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         verdict = dispatch_subagent(
             "gap-detector",
             {
+                "pr_id": pr_id,
                 "pr": pr,
                 "config": {
                     "allowlist_paths": config.get("gap_detection", {}).get(

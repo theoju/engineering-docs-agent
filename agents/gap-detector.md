@@ -17,6 +17,7 @@ judgment.
 
 ## Inputs
 
+- `pr_id`: string in format `{owner}/{name}#{number}` — use exactly this value in your output.
 - `pr`: PR object
 - `config`: `{ allowlist_paths: [glob], size_filter: {min_loc, min_files} }`
 - `dismissed_flags`: set of PR IDs (e.g. `"owner/repo#138"`) where humans previously dismissed a gap
@@ -32,6 +33,8 @@ judgment.
   "tier": "allowlist"
 }
 ```
+
+`pr_id`: Echo back the `pr_id` you received in the input — do not construct your own.
 
 `confidence`: "high" | "medium" | "low".
 `tier`: "allowlist" | "size_filter" | "llm" | "dismissed".

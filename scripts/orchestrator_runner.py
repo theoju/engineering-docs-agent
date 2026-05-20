@@ -43,8 +43,13 @@ def load_yaml(p: Path) -> dict[str, Any]:
     return yaml.safe_load(p.read_text()) or {}
 
 
-def load_json(p: Path) -> dict[str, Any]:
-    return json.loads(p.read_text()) if p.exists() else {}
+def load_json(p: Path) -> dict[str, Any] | None:
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except json.JSONDecodeError:
+        return None
 
 
 def dispatch_subagent(
@@ -96,7 +101,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
 
     config = load_yaml(cfg_path)
     voice_samples = load_voice_samples(repo_root, config)
-    state = load_json(state_path)
+    state = load_json(state_path) or {}
     state.setdefault("version", "1")
 
     # Clear stale current_run (>24h old) before starting a new run.

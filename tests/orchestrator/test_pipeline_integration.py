@@ -11,6 +11,7 @@ FAKES_UNSAFE = Path(__file__).parent / "fakes_unsafe"
 FAKES_SC_ERROR = Path(__file__).parent / "fakes_sc_error"
 FAKES_EMPTY = Path(__file__).parent / "fakes_empty"
 FAKES_MULTI = Path(__file__).parent / "fakes_multi"
+FAKES_BAD_JSON = Path(__file__).parent / "fakes_bad_json"
 
 
 def _run_inproc(tmp_path: Path, fakes_dir: Path):
@@ -489,6 +490,21 @@ def test_git_push_failure_adds_partial(tmp_path, monkeypatch):
     state = json.loads(state_path.read_text())
     reasons = state["current_run"]["partial_reasons"]
     assert any("push_failed" in r for r in reasons)
+
+
+def test_invalid_subagent_json_logs_partial_continues(tmp_path):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    state_path = _init_host(tmp_path)
+    rc = runner.run(tmp_path, dry_run_dir=FAKES_BAD_JSON, no_pr=True)
+    assert rc == 0
+
+    state = json.loads(state_path.read_text())
+    reasons = state["current_run"]["partial_reasons"]
+    assert any("pr_summarizer_invalid" in r for r in reasons)
 
 
 def test_multi_pr_runs_lists_all_in_whats_new(tmp_path):

@@ -178,6 +178,10 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         for fail in validation.get("failed", []):
             if fail.get("severity") == "block":
                 fail_path = Path(fail["path"])
+                # Interpret relative paths as repo-relative (some subagent
+                # implementations may strip the repo prefix from echoed paths).
+                if not fail_path.is_absolute():
+                    fail_path = repo_root / fail_path
                 # Verify path is inside repo_root before any destructive op.
                 try:
                     fail_path.resolve().relative_to(repo_root.resolve())

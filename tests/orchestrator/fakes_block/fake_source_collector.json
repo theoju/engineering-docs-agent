@@ -1,0 +1,23 @@
+{
+  "prs": [
+    {
+      "number": 1,
+      "title": "Add foo connector",
+      "body": "Adds a new connector.",
+      "merge_sha": "deadbeef",
+      "merged_at": "2026-05-19T07:00:00Z",
+      "author": "alice",
+      "files": [
+        {
+          "path": "backend/connectors/foo.py",
+          "additions": 120,
+          "deletions": 0
+        }
+      ],
+      "labels": [],
+      "jira_keys": [],
+      "url": "https://github.com/owner/repo/pull/1"
+    }
+  ],
+  "jira_issues": []
+}

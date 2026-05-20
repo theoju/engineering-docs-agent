@@ -14,7 +14,11 @@
         "lens_paths"
       ],
       "properties": {
-        "framework": { "type": "string", "enum": ["mkdocs", "docusaurus"] },
+        "framework": {
+          "type": "string",
+          "enum": ["mkdocs", "docusaurus"],
+          "description": "Docusaurus support is partial in v0.1; build validation skipped."
+        },
         "source_dir": { "type": "string" },
         "whats_new_file": { "type": "string" },
         "agent_editable_paths": {
@@ -23,7 +27,19 @@
         },
         "lens_paths": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "archive_index": { "type": "boolean" }
+                }
+              }
+            ]
+          }
         }
       }
     },
@@ -48,8 +64,21 @@
     },
     "trigger": { "type": "object" },
     "gap_detection": { "type": "object" },
-    "voice": { "type": "object" },
-    "lint": { "type": "object" },
+    "voice": {
+      "type": "object",
+      "properties": {
+        "sample_paths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "lint": {
+      "type": "object",
+      "properties": {
+        "tier1": {},
+        "tier2": { "type": "object" },
+        "tier3": { "type": "object" },
+        "stub_paths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "publishing": {
       "type": "object",
       "required": ["base_url", "build_workflow", "url_map_rule"],

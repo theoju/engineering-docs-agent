@@ -12,6 +12,7 @@ FAKES_SC_ERROR = Path(__file__).parent / "fakes_sc_error"
 FAKES_EMPTY = Path(__file__).parent / "fakes_empty"
 FAKES_MULTI = Path(__file__).parent / "fakes_multi"
 FAKES_BAD_JSON = Path(__file__).parent / "fakes_bad_json"
+FAKES_COLLISION = Path(__file__).parent / "fakes_collision"
 
 
 def _run_inproc(tmp_path: Path, fakes_dir: Path):
@@ -133,6 +134,33 @@ def test_lint_block_unlinks_newly_created_file(tmp_path):
     reasons = updated["current_run"]["partial_reasons"]
     assert updated["current_run"]["partial"] is True
     assert any("lint_block" in reason for reason in reasons), reasons
+
+
+def test_same_page_targets_batched_into_single_dispatch(tmp_path, monkeypatch):
+    """3 PRs that all target the same (lens, page_hint) → ONE page-author dispatch
+    with all 3 summaries."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    captured: list[dict] = []
+    real = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir):
+        if name == "page-author":
+            captured.append(inputs)
+        return real(name, inputs, dry_run_dir=dry_run_dir)
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+
+    _init_host(tmp_path)
+    rc = runner.run(tmp_path, dry_run_dir=FAKES_COLLISION, no_pr=True)
+    assert rc == 0
+
+    # 3 PRs, same target → ONE dispatch with all 3 summaries
+    assert len(captured) == 1, f"expected 1 page-author dispatch, got {len(captured)}"
+    assert len(captured[0]["summaries"]) == 3
 
 
 def test_blocked_create_cleans_up_empty_parent_dirs(tmp_path):

@@ -104,3 +104,47 @@ lint:
     assert "second_person" in rules
     assert "paragraph_length" in rules
     assert "voice_consistency" not in rules  # excluded: LLM-handled
+
+
+def test_lint_runner_missing_script_reports_block(tmp_path, monkeypatch):
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "lint"))
+    import lint_runner
+
+    # Force script_for to return a path that doesn't exist
+    monkeypatch.setattr(
+        lint_runner,
+        "script_for",
+        lambda rule: tmp_path / f"{rule}-does-not-exist.py",
+    )
+
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("lint: { tier1: default }\n")
+    foo = tmp_path / "foo.md"
+    foo.write_text("# foo")
+
+    out = lint_runner.run_rule("frontmatter_schema", cfg, [foo])
+    assert out["severity"] == "block"
+    assert any("rule script missing" in r["message"] for r in out["results"])
+
+
+def test_lint_runner_empty_output_reports_block(tmp_path, monkeypatch):
+    import sys, subprocess as sp
+
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "lint"))
+    import lint_runner
+
+    # Stub subprocess.run to return empty stdout
+    class FakeCP:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr(lint_runner.subprocess, "run", lambda *a, **kw: FakeCP())
+
+    out = lint_runner.run_rule(
+        "frontmatter_schema", tmp_path / "config.yml", [tmp_path / "foo.md"]
+    )
+    assert out["severity"] == "block"
+    assert any("empty output" in r["message"] for r in out["results"])

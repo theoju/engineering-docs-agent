@@ -414,7 +414,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
 
 
 def branch_name(now_iso: str) -> str:
-    return f"docs-agent/{now_iso[:10]}"
+    return f"docs-agent/{now_iso[:13]}"
 
 
 def open_or_append_pr(

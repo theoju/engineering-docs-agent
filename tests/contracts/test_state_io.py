@@ -84,3 +84,29 @@ def test_load_state_validated_accepts_valid(tmp_path):
     p.write_text(_json.dumps({"version": "1", "cursors": {}}))
     state = load_state_validated(p)
     assert state["version"] == "1"
+
+
+def test_add_partial_creates_current_run_if_missing():
+    from state_io import add_partial
+
+    state = {"version": "1"}
+    add_partial(state, "test_reason")
+    assert state["current_run"]["partial"] is True
+    assert state["current_run"]["partial_reasons"] == ["test_reason"]
+
+
+def test_add_partial_appends_when_current_run_exists():
+    from state_io import add_partial
+
+    state = {"current_run": {"partial": False, "partial_reasons": ["one"]}}
+    add_partial(state, "two")
+    assert state["current_run"]["partial"] is True
+    assert state["current_run"]["partial_reasons"] == ["one", "two"]
+
+
+def test_add_partial_idempotent_on_same_reason():
+    from state_io import add_partial
+
+    state = {"current_run": {"partial": True, "partial_reasons": ["dup"]}}
+    add_partial(state, "dup")
+    assert state["current_run"]["partial_reasons"] == ["dup"]

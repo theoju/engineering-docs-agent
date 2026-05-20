@@ -40,3 +40,14 @@ def load_state_validated(path: Path) -> dict[str, Any]:
     except jsonschema.ValidationError as e:
         raise StateError(f"state invalid at {e.json_path}: {e.message}") from e
     return raw
+
+
+def add_partial(state: dict, reason: str) -> None:
+    """Mark current_run as partial and append the reason. Idempotent."""
+    if "current_run" not in state:
+        state["current_run"] = {"partial": True, "partial_reasons": []}
+    cr = state["current_run"]
+    cr["partial"] = True
+    cr.setdefault("partial_reasons", [])
+    if reason not in cr["partial_reasons"]:
+        cr["partial_reasons"].append(reason)

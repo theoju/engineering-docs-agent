@@ -23,6 +23,8 @@ def load_config(path: Path) -> dict[str, Any]:
 
 
 def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
+    if not path.exists():
+        return False, "file not found"
     text = path.read_text()
     starts = [m.start() for m in MERMAID_FENCE.finditer(text)]
     if not starts:

@@ -41,3 +41,15 @@ def test_bad_fails(tmp_path):
     failed = [r for r in out["results"] if not r["ok"]]
     assert failed
     assert "unterminated" in failed[0]["message"].lower()
+
+
+def test_diagrams_returns_structured_error_for_missing_file(tmp_path):
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "lint"))
+    import diagrams
+
+    missing = tmp_path / "nope.md"
+    ok, msg = diagrams.check_path(missing, {})
+    assert ok is False
+    assert "file not found" in msg.lower()

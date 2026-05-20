@@ -20,17 +20,18 @@ def load_config(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text()) or {}
 
 
-def run_mkdocs(cwd: Path) -> tuple[bool, str]:
+def run_mkdocs(cwd: Path) -> tuple[bool, bool, str]:
+    """Returns (ok, skipped, reason_or_message)."""
     if not (cwd / "mkdocs.yml").exists():
-        return True, "no mkdocs.yml found; build skipped"
+        return True, True, "no mkdocs.yml in repo root"
     if shutil.which("mkdocs") is None:
-        return True, "mkdocs not installed; build skipped"
+        return True, True, "mkdocs binary not installed"
     r = subprocess.run(
         ["mkdocs", "build", "--strict"], cwd=cwd, capture_output=True, text=True
     )
     if r.returncode != 0:
-        return False, f"mkdocs build failed: {r.stderr.strip()[:500]}"
-    return True, "mkdocs build ok"
+        return False, False, f"mkdocs build failed: {r.stderr.strip()[:500]}"
+    return True, False, "mkdocs build ok"
 
 
 def main() -> int:
@@ -42,10 +43,20 @@ def main() -> int:
     config = load_config(args.config)
     framework = config.get("docs", {}).get("framework", "mkdocs")
     if framework == "mkdocs":
-        ok, msg = run_mkdocs(Path.cwd())
+        ok, skipped, reason = run_mkdocs(Path.cwd())
     else:
-        ok, msg = True, f"framework={framework} not yet supported; skipped"
-    result = {"path": str(args.paths[0]), "ok": ok, "message": msg}
+        ok, skipped, reason = (
+            True,
+            True,
+            f"framework={framework}; build validation not supported in v0.1",
+        )
+    result = {
+        "path": str(args.paths[0]),
+        "ok": ok,
+        "skipped": skipped,
+        "reason": reason,
+        "message": reason,  # legacy field
+    }
     if args.json:
         json.dump(
             {"rule": RULE_NAME, "severity": SEVERITY, "results": [result]}, sys.stdout

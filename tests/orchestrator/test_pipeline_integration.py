@@ -416,6 +416,35 @@ def test_orchestrator_uses_gh_client_for_pr_create(tmp_path, monkeypatch):
     assert any(c[0] == "pr_create" for c in fake.calls)
 
 
+def test_stale_current_run_cleared_on_next_run(tmp_path):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    state_path = _init_host(tmp_path)
+    # Inject a 48h-old current_run
+    state = json.loads(state_path.read_text())
+    from datetime import datetime, timedelta, timezone
+
+    stale_iso = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    state["current_run"] = {
+        "started_at": stale_iso,
+        "head_sha": "olddeadbeef",
+        "partial": False,
+        "partial_reasons": [],
+    }
+    state_path.write_text(json.dumps(state))
+
+    rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+    assert rc == 0
+
+    state = json.loads(state_path.read_text())
+    assert "stale_current_run_cleared" in state["current_run"]["partial_reasons"]
+    # New current_run replaces the old; the old head_sha is gone
+    assert state["current_run"]["head_sha"] != "olddeadbeef"
+
+
 def test_source_collector_error_propagates_partial(tmp_path):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner

@@ -7,7 +7,7 @@ instead of invoking Claude.
 
 from __future__ import annotations
 import argparse, json, subprocess, sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 import yaml
@@ -99,6 +99,18 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     state = load_json(state_path)
     state.setdefault("version", "1")
 
+    # Clear stale current_run (>24h old) before starting a new run.
+    if "current_run" in state:
+        started = state["current_run"].get("started_at")
+        if started:
+            try:
+                started_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                if (datetime.now(timezone.utc) - started_dt) > timedelta(hours=24):
+                    state.pop("current_run")
+                    add_partial(state, "stale_current_run_cleared")
+            except ValueError:
+                pass
+
     head_sha = (
         subprocess.run(
             ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
@@ -111,11 +123,14 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     repo = detect_repo(repo_root)
 
     now = datetime.now(timezone.utc).isoformat()
+    # Preserve partial flags accumulated before this point (e.g., stale_current_run_cleared)
+    carried_partial = state.get("current_run", {}).get("partial", False)
+    carried_reasons = state.get("current_run", {}).get("partial_reasons", [])
     state["current_run"] = {
         "started_at": now,
         "head_sha": head_sha,
-        "partial": False,
-        "partial_reasons": [],
+        "partial": carried_partial,
+        "partial_reasons": list(carried_reasons),
     }
 
     jira_payload = config.get("sources", {}).get("jira")

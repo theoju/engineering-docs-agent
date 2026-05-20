@@ -25,11 +25,22 @@ def is_stub_path(path: Path, patterns: list[str]) -> bool:
     return any(fnmatch(str(path), pat) for pat in patterns)
 
 
+def configured_stub_paths(config: dict) -> list[str]:
+    """Read stub paths from lint.stub_paths (preferred) or lint.tier1.stub_paths (legacy)."""
+    lint = config.get("lint") or {}
+    direct = lint.get("stub_paths")
+    if direct is not None:
+        return list(direct)
+    tier1 = lint.get("tier1")
+    if isinstance(tier1, dict):
+        return list(tier1.get("stub_paths", []))
+    return []
+
+
 def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
     if not path.exists():
         return False, "file not found"
-    tier1 = config.get("lint", {}).get("tier1", {})
-    patterns = tier1.get("stub_paths", []) if isinstance(tier1, dict) else []
+    patterns = configured_stub_paths(config)
     if not is_stub_path(path, patterns):
         return True, "not a stub path; skipped"
     lines = [l for l in path.read_text().splitlines() if l.strip()]

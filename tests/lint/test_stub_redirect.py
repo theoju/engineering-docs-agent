@@ -44,3 +44,25 @@ def test_not_a_stub_path_skipped(tmp_path):
     cfg.write_text("lint:\n  tier1:\n    stub_paths: ['/somewhere/else/*.md']\n")
     rc, _ = _run([p], cfg)
     assert rc == 0
+
+
+def test_stub_redirect_reads_paths_from_lint_stub_paths_when_tier1_is_default(tmp_path):
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "lint"))
+    import stub_redirect
+
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("""
+lint:
+  tier1: default
+  stub_paths: [legacy/old-page.md]
+""")
+    stub = tmp_path / "legacy" / "old-page.md"
+    stub.parent.mkdir()
+    # Stub WITHOUT a redirect_to frontmatter -> should fail
+    stub.write_text("# old page\n")
+
+    cfg_loaded = stub_redirect.load_config(cfg)
+    paths = stub_redirect.configured_stub_paths(cfg_loaded)
+    assert paths == ["legacy/old-page.md"]

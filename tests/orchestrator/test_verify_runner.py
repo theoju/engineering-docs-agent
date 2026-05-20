@@ -118,6 +118,27 @@ def test_verify_runner_uses_gh_client_for_pr_view(tmp_path, monkeypatch):
     assert rc == 0
 
 
+def test_verify_runner_uses_cli_pr_number_authoritative(tmp_path):
+    """CLI --pr-number is authoritative; state.current_run.pr_number is ignored on promotion."""
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import verify_runner
+
+    importlib.reload(verify_runner)
+
+    state_path = _init_host(tmp_path)
+    state = json.loads(state_path.read_text())
+    state["current_run"]["pr_number"] = 99
+    state_path.write_text(json.dumps(state))
+
+    rc = verify_runner.run(tmp_path, 42, dry_run_dir=FAKES_VERIFY_OK)
+    assert rc == 0
+
+    state = json.loads(state_path.read_text())
+    assert state["last_successful_run"]["pr_number"] == 42, (
+        "CLI --pr-number is authoritative"
+    )
+
+
 def test_verify_runner_writes_state_even_on_dispatch_failure(tmp_path, monkeypatch):
     sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import verify_runner

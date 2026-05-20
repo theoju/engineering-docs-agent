@@ -83,3 +83,13 @@ def test_publish_verifier_validates_and_parses():
     assert errors == []
     assert isinstance(result, VerifyVerdict)
     assert result.failed == []
+
+
+def test_notifier_validates_and_parses():
+    from contracts import validate_and_parse, NotifierResult
+
+    raw = json.loads((FAKES / "fake_notifier.json").read_text())
+    result, errors = validate_and_parse("notifier", raw)
+    assert errors == []
+    assert isinstance(result, NotifierResult)
+    assert result.slack_ok is True

@@ -64,6 +64,17 @@ class VerifyVerdict:
     build_status: str
 
 
+@dataclass(frozen=True)
+class NotifierResult:
+    slack_ok: bool
+    email_ok: bool
+    errors: list[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.errors is None:
+            object.__setattr__(self, "errors", [])
+
+
 _DATACLASS_BY_NAME: dict[str, type] = {
     "source-collector": SourceCollectorResult,
     "pr-summarizer": PrSummary,
@@ -71,6 +82,7 @@ _DATACLASS_BY_NAME: dict[str, type] = {
     "content-validator": ValidationResult,
     "gap-detector": GapVerdict,
     "publish-verifier": VerifyVerdict,
+    "notifier": NotifierResult,
 }
 
 

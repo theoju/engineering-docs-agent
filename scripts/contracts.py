@@ -33,9 +33,19 @@ class PrSummary:
             object.__setattr__(self, "doc_targets", [])
 
 
+@dataclass(frozen=True)
+class PageAuthorResult:
+    ok: bool
+    path: str | None = None
+    action: str | None = None
+    diff_summary: str | None = None
+    error: str | None = None
+
+
 _DATACLASS_BY_NAME: dict[str, type] = {
     "source-collector": SourceCollectorResult,
     "pr-summarizer": PrSummary,
+    "page-author": PageAuthorResult,
 }
 
 

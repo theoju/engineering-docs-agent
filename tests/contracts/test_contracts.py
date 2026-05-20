@@ -39,3 +39,13 @@ def test_pr_summarizer_validates_and_parses():
     assert isinstance(result, PrSummary)
     assert result.pr_number == 1
     assert result.error is None
+
+
+def test_page_author_validates_and_parses():
+    from contracts import validate_and_parse, PageAuthorResult
+
+    raw = json.loads((FAKES / "fake_page_author.json").read_text())
+    result, errors = validate_and_parse("page-author", raw)
+    assert errors == []
+    assert isinstance(result, PageAuthorResult)
+    assert result.ok is True

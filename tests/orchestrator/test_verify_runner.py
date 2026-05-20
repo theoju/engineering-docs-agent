@@ -97,3 +97,19 @@ def test_verify_runner_success_promotes(tmp_path):
     assert "current_run" not in state, (
         "current_run should be cleared after successful promotion"
     )
+
+
+def test_verify_runner_uses_gh_client_for_pr_view(tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import verify_runner
+    import gh_client
+
+    fake = gh_client.FakeGhClient(
+        pr_view_files=gh_client.GhResult(ok=True, value=["docs/site-src/foo.md"]),
+    )
+    monkeypatch.setattr(verify_runner, "GhClient", lambda *a, **kw: fake)
+
+    _init_host(tmp_path)
+    rc = verify_runner.run(tmp_path, 42, dry_run_dir=FAKES_VERIFY_OK)
+    assert any(c[0] == "pr_view_files" for c in fake.calls)
+    assert rc == 0

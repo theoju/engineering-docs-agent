@@ -1,11 +1,12 @@
 """Verify runner. Invoked by the post-merge workflow."""
 
 from __future__ import annotations
-import argparse, json, subprocess, sys
+import argparse, json, sys
 from pathlib import Path
 
 # Allow importing from sibling script.
 sys.path.insert(0, str(Path(__file__).parent))
+from gh_client import GhClient  # noqa: E402
 from orchestrator_runner import detect_repo, dispatch_subagent, load_yaml, load_json  # noqa: E402
 
 
@@ -15,24 +16,10 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
 
     repo = detect_repo(repo_root)
 
-    if dry_run_dir is not None:
-        changed_paths: list[str] = []
-    else:
-        try:
-            r = subprocess.run(
-                ["gh", "pr", "view", str(pr_number), "--json", "files"],
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            changed_paths = [f["path"] for f in json.loads(r.stdout).get("files", [])]
-        except (
-            subprocess.CalledProcessError,
-            json.JSONDecodeError,
-            FileNotFoundError,
-        ) as e:
-            # Even if we can't enumerate paths, still notify users of the verify failure.
+    gh = GhClient(repo_root)
+    view = gh.pr_view_files(pr_number)
+    if not view.ok:
+        if dry_run_dir is None:
             dispatch_subagent(
                 "notifier",
                 {
@@ -40,7 +27,7 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
                         "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
                         "build_status": "verify_runner_error",
                         "failed_urls": [],
-                        "partial_reasons": [f"gh pr view failed: {str(e)[:200]}"],
+                        "partial_reasons": [view.error or "gh failed"],
                     },
                     "slack_config": cfg.get("notifications", {}).get("slack", {}),
                     "email_config": cfg.get("notifications", {}).get("email", {}),
@@ -49,6 +36,10 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
                 dry_run_dir=dry_run_dir,
             )
             return 1
+        # dry-run mode tolerates missing gh; proceed with empty changed_paths
+        changed_paths: list[str] = []
+    else:
+        changed_paths = view.value or []
 
     verdict = dispatch_subagent(
         "publish-verifier",

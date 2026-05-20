@@ -26,6 +26,8 @@ def is_stub_path(path: Path, patterns: list[str]) -> bool:
 
 
 def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
+    if not path.exists():
+        return False, "file not found"
     tier1 = config.get("lint", {}).get("tier1", {})
     patterns = tier1.get("stub_paths", []) if isinstance(tier1, dict) else []
     if not is_stub_path(path, patterns):

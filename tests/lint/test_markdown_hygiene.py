@@ -47,3 +47,23 @@ def test_hierarchy(tmp_path):
     rc, out = _run([FIX / "bad_hierarchy.md"], cfg)
     assert rc == 1
     assert "hierarchy" in out["results"][0]["message"].lower()
+
+
+def test_missing_file_returns_failure(tmp_path):
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("{}")
+    nonexistent = tmp_path / "does-not-exist.md"
+    rc, out = _run([nonexistent], cfg)
+    assert rc == 1
+    assert "not found" in out["results"][0]["message"].lower()
+
+
+def test_unpaired_fence_detected(tmp_path):
+    p = tmp_path / "unpaired.md"
+    # 3 fences total: opener with lang, closer, opener with lang (no closer)
+    p.write_text("# x\n\n```python\ncode\n```\n\n```ruby\nmore\n")
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("{}")
+    rc, out = _run([p], cfg)
+    assert rc == 1
+    assert "unpaired" in out["results"][0]["message"].lower()

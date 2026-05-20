@@ -20,6 +20,8 @@ def is_external(target: str) -> bool:
 
 
 def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
+    if not path.exists():
+        return False, "file not found"
     broken = []
     for m in LINK_RE.finditer(path.read_text()):
         target = m.group(1)

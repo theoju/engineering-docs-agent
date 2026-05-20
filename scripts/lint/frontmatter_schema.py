@@ -28,6 +28,8 @@ def parse_frontmatter(text: str) -> dict | None:
 
 
 def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
+    if not path.exists():
+        return False, "file not found"
     fm = parse_frontmatter(path.read_text())
     if fm is None:
         return False, "no frontmatter or YAML parse error"

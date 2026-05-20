@@ -22,6 +22,8 @@ def load_config(path: Path) -> dict[str, Any]:
 
 
 def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
+    if not path.exists():
+        return False, "file not found"
     text = path.read_text()
     problems: list[str] = []
     fences = list(FENCE_RE.finditer(text))
@@ -29,6 +31,8 @@ def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
         lang = fences[i].group(1)
         if not lang:
             problems.append(f"code fence at offset {fences[i].start()} has no language")
+    if len(fences) % 2 != 0:
+        problems.append(f"unpaired code fence (count={len(fences)})")
     prev_level = 0
     for m in HEADING_RE.finditer(text):
         level = len(m.group(1))

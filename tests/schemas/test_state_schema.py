@@ -39,3 +39,9 @@ def test_full_state_valid():
 def test_missing_version_rejected():
     with pytest.raises(ValidationError):
         validate({}, SCHEMA)
+
+
+def test_current_run_requires_started_at():
+    bad = {"version": "1", "current_run": {"head_sha": "x"}}
+    with pytest.raises(ValidationError):
+        validate(bad, SCHEMA)

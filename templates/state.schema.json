@@ -15,6 +15,7 @@
     },
     "current_run": {
       "type": "object",
+      "required": ["started_at"],
       "properties": {
         "started_at": { "type": "string" },
         "head_sha": { "type": "string" },
@@ -25,6 +26,7 @@
     },
     "dismissed_gap_flags": {
       "type": "object",
+      "description": "Operator-set dismissals. Keys are {owner}/{name}#{pr}. Values are dismissal notes (free text).",
       "additionalProperties": { "type": "string" }
     },
     "cursors": { "type": "object" }

@@ -75,3 +75,8 @@ notifications:
     assert r.returncode == 0, r.stderr
     updated = json.loads(state.read_text())
     assert "current_run" in updated
+    whats_new = tmp_path / "docs" / "site-src" / "whats-new.md"
+    assert whats_new.exists(), "What's New file should be created"
+    content = whats_new.read_text()
+    assert "PR #1" in content
+    assert "Gaps flagged" in content

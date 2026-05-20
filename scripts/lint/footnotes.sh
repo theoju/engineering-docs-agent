@@ -15,8 +15,15 @@ done
 results_json=""
 any_failed=0
 
+if [[ ${#PATHS[@]} -eq 0 ]]; then
+  if [[ $JSON -eq 1 ]]; then
+    echo '{"rule":"footnotes","severity":"block","results":[]}'
+  fi
+  exit 0
+fi
+
 for p in "${PATHS[@]}"; do
-  refs=$(grep -oE '\[\^[a-zA-Z0-9_-]+\]' "$p" | grep -v ':' | sort -u || true)
+  refs=$(grep -vE '^\[\^[a-zA-Z0-9_-]+\]:' "$p" | grep -oE '\[\^[a-zA-Z0-9_-]+\]' | sort -u || true)
   defs=$(grep -oE '^\[\^[a-zA-Z0-9_-]+\]:' "$p" | sed 's/:$//' | sort -u || true)
   orphan_refs=$(comm -23 <(echo "$refs") <(echo "$defs"))
   orphan_defs=$(comm -13 <(echo "$refs") <(echo "$defs"))

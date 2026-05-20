@@ -1,311 +1,312 @@
-# CCE-9 — Source-collector Reliability (H1) Implementation Plan
+# CCE-9 — Source-collector Reliability (H4) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Test hypothesis H1 — that the legacy `## Output contract` block in `agents/source-collector.md` competes with the canonical `## Output schema` block and causes off-contract responses. Measure baseline → apply H1 → measure post-H1 → land or null-result per the roadmap spec.
+**Goal:** Fix the root cause of source-collector off-contract responses: the agent emits a non-canonical "idle status report" when given an empty `last_sha`, because the prompt has no explicit guidance for the no-baseline-window case. Add that guidance, verify with Mode B measurement, and productize the diagnostic stdout-capture infrastructure that surfaced the evidence.
 
-**Architecture:** Build a tiny reusable measurement helper (`scripts/measure_source_collector.sh`) that resets ADIS state and runs the orchestrator in Mode B N times, capturing per-run outcomes. Use it twice — once for the pre-H1 baseline, once for the post-H1 comparison. The orchestrator code and tests are unchanged; the only runtime artifact altered is one agent's prompt.
+**Architecture:** Two surgical changes — (1) a permanent env-var-gated raw-stdout capture in `dispatch_subagent` (already prototyped during Phase 1 investigation), and (2) one paragraph added to the `## Procedure` section of `agents/source-collector.md` explicitly directing the agent to emit `{"prs": [], "jira_issues": []}` when `last_sha` is empty. Measurement uses real Mode B against ADIS to confirm the fix.
 
-**Tech Stack:** bash + Python stdlib (no new dependencies). MkDocs is irrelevant to this ticket (HTML preview is a follow-up after CCE-9 closes).
+**Tech Stack:** Python stdlib (`os`, `pathlib`, `subprocess`). No new runtime dependencies. The instrumentation lives behind `DOCS_AGENT_DEBUG_DIR` — when unset, the dispatch path is byte-identical to v0.1.3.
 
-**Spec:** `docs/superpowers/specs/2026-05-20-cce5-9-batch-prep-roadmap-design.md` §5 (CCE-9 acceptance criteria §5.5).
+**Spec:** `docs/superpowers/specs/2026-05-20-cce5-9-batch-prep-roadmap-design.md` §5 (acceptance criteria §5.5).
 
 **Branch:** `feat/CCE-9-source-collector-reliability` (off `main` at v0.1.3).
+
+**Phase 1 evidence (already captured):** During systematic-debugging Phase 1, one instrumented Mode B run against ADIS revealed that source-collector — when given `last_sha: ""` — returns an idiosyncratic JSON shape with `{"status": "idle", "reason": "No baseline SHA provided...", "branches_scanned": 0, ...}`. Its own `reason` field cites the empty `last_sha` as the cause. This is hypothesis **H4** in the roadmap spec §5.3, not H1 (legacy `## Output contract` block) as originally ranked. The captured stdout will be checked in as Task 0's evidence artifact before the fix lands.
 
 ---
 
 ## File Structure
 
-- **Create:** `scripts/measure_source_collector.sh` — reusable bash helper that resets ADIS state, runs the orchestrator N times, captures each run's `state.json`, and prints a summary table. Lives in `scripts/` alongside the runners, not in `tests/` (it's a measurement tool, not a unit test).
-- **Create:** `docs/superpowers/measurements/2026-05-20-cce9-baseline.md` — verbatim record of the 5 pre-H1 Mode B runs (per-run outcome + tally).
-- **Create:** `docs/superpowers/measurements/2026-05-20-cce9-post-h1.md` — verbatim record of the 5 post-H1 Mode B runs + decision narrative.
-- **Modify:** `agents/source-collector.md` — delete the legacy `## Output contract` block (lines 66-99 in the v0.1.3 source).
-- **Modify:** `CHANGELOG.md` — add the v0.1.4 entry IF H1 lands; on null-result we revert the agent change and the CHANGELOG diff goes away too.
+- **Modify:** `scripts/orchestrator_runner.py` — productize the Phase 1 raw-stdout capture (already in the working tree as a prototype). Gate behind `DOCS_AGENT_DEBUG_DIR` env var. Byte-identical when unset.
+- **Create:** `tests/orchestrator/test_dispatch_debug_capture.py` — unit test for the env-var-gated capture path.
+- **Modify:** `agents/source-collector.md` — add one explicit step in `## Procedure` for the empty-`last_sha` case.
+- **Create:** `docs/superpowers/measurements/2026-05-20-cce9-phase1-evidence.md` — the Phase 1 captured stdout + analysis that motivated the H4 pivot.
+- **Create:** `docs/superpowers/measurements/2026-05-20-cce9-h4-validation.md` — post-fix measurement (3 Mode B runs expected to produce canonical responses).
+- **Modify:** `CHANGELOG.md` — v0.1.4 entry.
 
-The drift-prevention lint at `tests/agents/test_schema_md_sync.py` is touched only at the verification stage — no edits expected, just a confirmation run.
-
----
-
-## Task 1: Build the measurement helper
-
-**Files:**
-
-- Create: `scripts/measure_source_collector.sh`
-
-- [ ] **Step 1: Write the script**
-
-Create `scripts/measure_source_collector.sh` with this content:
-
-```bash
-#!/usr/bin/env bash
-# CCE-9 measurement helper. Resets ADIS state, runs the orchestrator in
-# Mode B (real LLM dispatch) N times, captures per-run state.json, and
-# prints a summary tally.
-#
-# Usage: scripts/measure_source_collector.sh <label> <iterations>
-#   label       — short tag for output files (e.g. "baseline" or "post-h1")
-#   iterations  — how many runs to execute (typically 5)
-#
-# Outputs:
-#   /tmp/cce9-<label>-run<N>-state.json   (one per run)
-#   stdout: summary table
-
-set -euo pipefail
-
-LABEL="${1:?usage: $0 <label> <iterations>}"
-ITERS="${2:?usage: $0 <label> <iterations>}"
-
-ADIS_ROOT="/Users/theo/Projects/advanced-data-importer"
-STATE_PATH="$ADIS_ROOT/.engineering-docs-agent/state.json"
-ORCH="$(git rev-parse --show-toplevel)/scripts/orchestrator_runner.py"
-
-echo "CCE-9 measurement: label=$LABEL iterations=$ITERS"
-echo "Orchestrator: $(git rev-parse HEAD)"
-echo "Target repo: $ADIS_ROOT"
-echo "---"
-
-declare -a OUTCOMES
-
-for i in $(seq 1 "$ITERS"); do
-  echo "[run $i/$ITERS] resetting state to clean baseline"
-  echo '{"version": "1"}' > "$STATE_PATH"
-
-  echo "[run $i/$ITERS] dispatching orchestrator (Mode B, --no-pr)"
-  GITHUB_REPOSITORY=designitright/advanced-data-importer \
-    python3 "$ORCH" --repo-root "$ADIS_ROOT" --no-pr >/dev/null 2>&1 || true
-
-  OUT="/tmp/cce9-$LABEL-run$i-state.json"
-  cp "$STATE_PATH" "$OUT"
-
-  REASONS=$(python3 -c "
-import json, sys
-s = json.load(open('$OUT'))
-cr = s.get('current_run', {})
-partial = cr.get('partial', False)
-reasons = cr.get('partial_reasons', [])
-if not partial and not reasons:
-  print('SUCCESS')
-elif any('schema_invalid: source-collector' in r for r in reasons):
-  print('SCHEMA_INVALID')
-elif any('source_collector_invalid' in r for r in reasons):
-  print('DISPATCH_NONE')
-else:
-  print('OTHER: ' + '; '.join(reasons))
-")
-  echo "[run $i/$ITERS] outcome: $REASONS"
-  OUTCOMES+=("$REASONS")
-done
-
-echo "---"
-echo "Summary for $LABEL ($ITERS runs):"
-printf '%s\n' "${OUTCOMES[@]}" | sort | uniq -c | sort -rn
-```
-
-- [ ] **Step 2: Make it executable**
-
-```bash
-chmod +x scripts/measure_source_collector.sh
-```
-
-- [ ] **Step 3: Smoke-test the script against ADIS with iterations=1**
-
-```bash
-scripts/measure_source_collector.sh smoke 1
-```
-
-Expected:
-
-- stdout shows `[run 1/1] outcome: <SCHEMA_INVALID|DISPATCH_NONE|OTHER|SUCCESS>`
-- a `/tmp/cce9-smoke-run1-state.json` file is created
-- summary table at the end
-
-This is a sanity check, not a baseline. Delete the smoke output file: `rm /tmp/cce9-smoke-run1-state.json`.
-
-- [ ] **Step 4: Commit the helper**
-
-```bash
-git add scripts/measure_source_collector.sh
-git commit -m "feat(CCE-9): add scripts/measure_source_collector.sh measurement helper
-
-Reusable bash helper for testing source-collector reliability
-hypotheses. Resets ADIS state to a clean baseline before each run,
-dispatches the orchestrator in Mode B with --no-pr, captures per-run
-state.json to /tmp/cce9-<label>-run<N>-state.json, and prints a
-tally of outcomes (SUCCESS / SCHEMA_INVALID / DISPATCH_NONE / OTHER).
-
-CCE-9"
-```
+The H1 legacy `## Output contract` block is **NOT** removed in this PR — that's a separate concern, deferred per the user's "test H4 only" decision. Its removal would be valid cleanup but is independent of the empty-`last_sha` root cause.
 
 ---
 
-## Task 2: Baseline measurement (5 Mode B runs, pre-H1)
+## Task 0: Preserve Phase 1 evidence
 
 **Files:**
 
-- Create: `docs/superpowers/measurements/2026-05-20-cce9-baseline.md`
+- Create: `docs/superpowers/measurements/2026-05-20-cce9-phase1-evidence.md`
 
-This task runs 5 real Mode B orchestrator invocations against ADIS. Each run takes ~30s-3min depending on which subagents are dispatched. Total wall time: ~5-15 minutes. Token usage on the Anthropic API is real but small (source-collector fails early in the baseline, so only 1-2 subagents per run typically).
+The instrumentation patch already in the working tree captured the smoking gun. Document it before any further edits so the evidence is git-reachable.
 
-- [ ] **Step 1: Run the helper for the baseline**
+- [ ] **Step 1: Copy the captured raw stdout to the repo**
 
 ```bash
 mkdir -p docs/superpowers/measurements
-scripts/measure_source_collector.sh baseline 5 | tee docs/superpowers/measurements/2026-05-20-cce9-baseline-raw.log
+cp /tmp/cce9-phase1-debug/*.stdout.txt docs/superpowers/measurements/2026-05-20-cce9-phase1-source-collector-stdout.txt
+cp /tmp/cce9-phase1-debug/*.prompt.txt docs/superpowers/measurements/2026-05-20-cce9-phase1-source-collector-prompt.txt
+cp /tmp/cce9-phase1-debug/*.meta.json docs/superpowers/measurements/2026-05-20-cce9-phase1-source-collector-meta.json
 ```
 
-The `tee` captures the helper's stdout (including the per-run outcomes and summary tally) into a raw log file alongside the measurement document. Both go into the same commit.
+- [ ] **Step 2: Write the analysis document**
 
-- [ ] **Step 2: Inspect each captured state.json**
-
-```bash
-for i in 1 2 3 4 5; do
-  echo "=== run $i ==="
-  cat /tmp/cce9-baseline-run$i-state.json
-  echo
-done
-```
-
-Expected: each shows `current_run.partial: true` with a `partial_reasons` list. The reasons are what CCE-9 is investigating.
-
-- [ ] **Step 3: Write the baseline measurement document**
-
-Create `docs/superpowers/measurements/2026-05-20-cce9-baseline.md` with this structure (fill in the actual observed values from your tee'd log):
+Create `docs/superpowers/measurements/2026-05-20-cce9-phase1-evidence.md` with this content:
 
 ```markdown
-# CCE-9 Baseline Measurement — Source-collector Reliability (Pre-H1)
+# CCE-9 Phase 1 Evidence — Systematic-debugging root-cause investigation
 
 **Date:** 2026-05-20
-**Orchestrator version:** v0.1.3 (commit <fill in: git rev-parse HEAD>)
+**Orchestrator version:** v0.1.3 (commit <fill in: git log --oneline | head -3>)
 **Target repository:** advanced-data-importer at commit c36f53b
-**Configuration:** ADIS `.engineering-docs-agent/config.yml` unchanged from prior runs; state reset to `{"version": "1"}` before each iteration.
+**Instrumentation:** working-tree patch to `dispatch_subagent` that writes raw stdout/stderr/prompt/meta to `$DOCS_AGENT_DEBUG_DIR` when set. Productized in Task 1 of this plan.
 
 ## Method
 
-Each run executed via `scripts/measure_source_collector.sh baseline 5`. Per iteration:
+One Mode B orchestrator run against ADIS with `DOCS_AGENT_DEBUG_DIR=/tmp/cce9-phase1-debug` set. ADIS state reset to `{"version": "1"}` before the run.
 
-1. ADIS state reset to clean baseline (`{"version": "1"}`).
-2. Orchestrator dispatched in Mode B (real LLM dispatch) with `--no-pr`.
-3. Resulting `state.json` captured to `/tmp/cce9-baseline-run<N>-state.json`.
-4. Outcome classified by `partial_reasons` contents.
+## Captured stdout from source-collector (verbatim)
 
-## Per-run outcomes
+\`\`\`json
+{"status":"idle","reason":"No baseline SHA provided (last_sha empty) — cannot compute commit delta for documentation impact analysis. No docs-agent/\* branches found requiring processing. Verified: zero file modifications this invocation; the 25 working-tree files (1 modified, 24 untracked) pre-exist this orchestrator run per prior session state.","branches_scanned":0,"commits_analyzed":0,"files_modified":0,"prs_opened":0,"jira_issues_touched":0}
+\`\`\`
 
-| Run | Outcome   | partial_reasons (verbatim)                                                              |
-| --- | --------- | --------------------------------------------------------------------------------------- |
-| 1   | <fill in> | <fill in: copy the actual partial_reasons list from /tmp/cce9-baseline-run1-state.json> |
-| 2   | <fill in> | <fill in>                                                                               |
-| 3   | <fill in> | <fill in>                                                                               |
-| 4   | <fill in> | <fill in>                                                                               |
-| 5   | <fill in> | <fill in>                                                                               |
+Full prompt, raw stdout, and meta are alongside this document (`*-prompt.txt`, `*-stdout.txt`, `*-meta.json`).
 
-## Tally
+## Analysis
 
-<fill in from the helper's summary output — e.g. "5 SCHEMA_INVALID" or "3 DISPATCH_NONE, 2 SCHEMA_INVALID">
+The response shape matches **neither** of the two contract blocks in `agents/source-collector.md` v0.1.3:
 
-## Interpretation
+- Not the canonical `## Output schema (canonical)` (lines 29-64) which requires top-level `prs` and `jira_issues` arrays.
+- Not the legacy `## Output contract` (lines 66-99) which shows the same `prs`+`jira_issues` shape.
 
-Source-collector's canonical-shape rate in the v0.1.3 baseline is <fill in: e.g. "0/5 = 0%">. This is the comparison anchor for the post-H1 measurement in Task 5.
+Instead the agent invented a third "telemetry / idle status" shape with keys `status`, `reason`, `branches_scanned`, `commits_analyzed`, `files_modified`, `prs_opened`, `jira_issues_touched`.
+
+The agent's `reason` field cites the root cause verbatim: **"No baseline SHA provided (last_sha empty) — cannot compute commit delta for documentation impact analysis."**
+
+## Hypothesis ranking (revised after Phase 1)
+
+| #      | Original ranking | Phase 1 evidence verdict                                                                                                                                                                                                   |
+| ------ | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **H4** | least likely     | **CONFIRMED.** Agent self-reports `last_sha` empty as the trigger. Procedure section of source-collector.md assumes a non-empty `last_sha` (step 1 resolves `last_sha → merged_at`); no fallback for the no-baseline case. |
+| H1     | most likely      | Refuted. Removing the legacy `## Output contract` block would change nothing: agent is following neither block.                                                                                                            |
+| H2, H3 | mid-ranked       | Cannot be assessed from this evidence alone, but H4 is independently sufficient to explain the failure.                                                                                                                    |
+
+## Implication for CCE-9 scope
+
+The fix is one paragraph added to `agents/source-collector.md` `## Procedure` directing the agent to emit `{"prs": [], "jira_issues": []}` (canonical empty) when `last_sha` is empty. Removing the legacy `## Output contract` block (the original H1 plan) is independent cleanup, not part of CCE-9's fix scope.
+
+Estimated effort reduction vs original H1 plan: ~2 hours saved (10 Mode B runs avoided; null-result revert avoided).
 ```
 
-The `<fill in>` markers are intentional — they tell the engineer exactly what to substitute. Read the actual `/tmp/cce9-baseline-run<N>-state.json` files for the per-run `partial_reasons` lists.
-
-- [ ] **Step 4: Commit the baseline**
+- [ ] **Step 3: Commit the evidence**
 
 ```bash
-git add docs/superpowers/measurements/2026-05-20-cce9-baseline.md docs/superpowers/measurements/2026-05-20-cce9-baseline-raw.log
-git commit -m "measure(CCE-9): baseline source-collector reliability (5 Mode B runs, pre-H1)
+git add docs/superpowers/measurements/2026-05-20-cce9-phase1-evidence.md \
+        docs/superpowers/measurements/2026-05-20-cce9-phase1-source-collector-stdout.txt \
+        docs/superpowers/measurements/2026-05-20-cce9-phase1-source-collector-prompt.txt \
+        docs/superpowers/measurements/2026-05-20-cce9-phase1-source-collector-meta.json
+git commit -m "evidence(CCE-9): Phase 1 captures show H4, not H1, is the root cause
 
-Records 5 Mode B runs against ADIS at v0.1.3 to establish the
-canonical-shape rate before testing hypothesis H1 (legacy ## Output
-contract block conflicting with canonical schema). Per-run outcomes
-and tally documented; raw helper output retained alongside.
+One instrumented Mode B run against ADIS revealed source-collector
+emits an idiosyncratic 'idle status report' shape when last_sha is
+empty, not the canonical {prs:[], jira_issues:[]} response. The
+agent's own reason field cites the empty last_sha as the cause —
+direct evidence for H4. H1 (legacy ## Output contract block) is
+refuted: the agent is following neither contract block.
 
 CCE-9"
 ```
 
 ---
 
-## Task 3: Apply H1 — remove the legacy `## Output contract` block
+## Task 1: Productize the raw-stdout capture in dispatch_subagent
 
 **Files:**
 
-- Modify: `agents/source-collector.md` (delete lines 66-99 in the v0.1.3 source)
+- Modify: `scripts/orchestrator_runner.py` (the working-tree prototype becomes the permanent feature)
+- Create: `tests/orchestrator/test_dispatch_debug_capture.py`
 
-- [ ] **Step 1: Verify the current state of the file**
+The instrumentation patch is already in the working tree from Phase 1 (gated by `DOCS_AGENT_DEBUG_DIR`). This task adds a unit test that locks the behavior so it can't silently regress, then commits both.
 
-Read the file first to confirm the legacy block is still at the expected location:
+- [ ] **Step 1: Inspect the current working-tree patch**
 
 ```bash
-sed -n '60,100p' agents/source-collector.md
+git diff scripts/orchestrator_runner.py
 ```
 
-Expected to show lines 60-100 including the `## Output contract` heading at line 66, the explanatory paragraph at line 68, the example JSON object at lines 70-99, and the blank line before `## Procedure` at line 100. If the file structure differs, stop and report.
+Expected diff (already applied):
 
-- [ ] **Step 2: Delete the legacy block**
+- `import argparse, json, os, subprocess, sys` (added `os`)
+- After `subprocess.run(...)` in `dispatch_subagent`, new block writes `*.prompt.txt`, `*.stdout.txt`, `*.stderr.txt`, `*.meta.json` into `$DOCS_AGENT_DEBUG_DIR` when set.
 
-Use the Edit tool to remove the block. The `old_string` is the exact text from line 66 through line 99 inclusive — the entire `## Output contract` heading, its explanatory paragraph, and the JSON example. The `new_string` is empty.
+If the diff differs from the above, re-read the file and reconcile against this plan before continuing.
 
-````python
-# Edit tool invocation:
-#   file_path: /Users/theo/Projects/engineering-docs-agent/agents/source-collector.md
-#   old_string: """## Output contract
-#
-# The canonical schema is in §Output schema above. The shape described here is the same; the schema is authoritative if they disagree.
-#
-# Return ONLY a JSON object matching:
-#
-# ```json
-# {
-#   "prs": [
-#     {
-#       "number": 142,
-#       "title": "...",
-#       "body": "...",
-#       "merge_sha": "abc123",
-#       "merged_at": "2026-05-19T07:00:00Z",
-#       "author": "user",
-#       "files": [{ "path": "...", "additions": 0, "deletions": 0 }],
-#       "labels": ["..."],
-#       "jira_keys": ["ADIS-235"],
-#       "url": "https://github.com/owner/repo/pull/142"
-#     }
-#   ],
-#   "jira_issues": [
-#     {
-#       "key": "ADIS-235",
-#       "summary": "...",
-#       "description": "...",
-#       "status": "Done",
-#       "labels": ["architecture"],
-#       "url": "https://acme.atlassian.net/browse/ADIS-235"
-#     }
-#   ]
-# }
-# ```
-#
-# """
-#   new_string: ""
-````
+- [ ] **Step 2: Write the unit test**
 
-Use the literal text from the file (read it with the Read tool first to get exact whitespace and quotes). The Edit must remove the entire block plus the trailing blank line, leaving `## Procedure` to immediately follow `Return ONLY a JSON object that validates against this schema. No prose, no markdown fences around the response, no commentary.` from the canonical schema section.
+Create `tests/orchestrator/test_dispatch_debug_capture.py`:
+
+```python
+"""CCE-9: dispatch_subagent writes raw stdout/stderr/prompt/meta to
+$DOCS_AGENT_DEBUG_DIR when set; is a no-op when unset."""
+
+from __future__ import annotations
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+
+
+class _FakeCompleted:
+    def __init__(self, stdout: str, stderr: str = "", returncode: int = 0) -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+
+
+def test_debug_capture_writes_files_when_env_var_set(tmp_path, monkeypatch):
+    import orchestrator_runner as runner
+
+    fake_stdout = '{"prs": [], "jira_issues": []}'
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda *a, **kw: _FakeCompleted(stdout=fake_stdout),
+    )
+    monkeypatch.setenv("DOCS_AGENT_DEBUG_DIR", str(tmp_path))
+
+    result = runner.dispatch_subagent(
+        "source-collector",
+        {"last_sha": "", "head_sha": "abc", "repo": {"owner": "o", "name": "n"}},
+        dry_run_dir=None,
+    )
+
+    assert result == {"prs": [], "jira_issues": []}
+
+    captured = sorted(tmp_path.iterdir())
+    suffixes = {p.name.split(".", 1)[1] for p in captured}
+    assert suffixes == {"prompt.txt", "stdout.txt", "stderr.txt", "meta.json"}, (
+        f"expected 4 capture artifacts; got {sorted(p.name for p in captured)}"
+    )
+
+    stdout_file = next(p for p in captured if p.name.endswith(".stdout.txt"))
+    assert stdout_file.read_text() == fake_stdout
+
+    meta_file = next(p for p in captured if p.name.endswith(".meta.json"))
+    meta = json.loads(meta_file.read_text())
+    assert meta["returncode"] == 0
+    assert "source-collector" in meta["argv"]
+
+
+def test_debug_capture_noop_when_env_var_unset(tmp_path, monkeypatch):
+    import orchestrator_runner as runner
+
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda *a, **kw: _FakeCompleted(stdout='{"prs": [], "jira_issues": []}'),
+    )
+    monkeypatch.delenv("DOCS_AGENT_DEBUG_DIR", raising=False)
+
+    result = runner.dispatch_subagent(
+        "source-collector",
+        {"last_sha": "", "head_sha": "abc", "repo": {"owner": "o", "name": "n"}},
+        dry_run_dir=None,
+    )
+
+    assert result == {"prs": [], "jira_issues": []}
+    assert list(tmp_path.iterdir()) == [], (
+        f"no files should be written when DOCS_AGENT_DEBUG_DIR is unset; "
+        f"got {[p.name for p in tmp_path.iterdir()]}"
+    )
+```
+
+- [ ] **Step 3: Run the new test**
+
+```bash
+python3 -m pytest tests/orchestrator/test_dispatch_debug_capture.py -v
+```
+
+Expected: 2 PASS.
+
+If the env-var-set test fails on "no files captured", re-inspect the orchestrator_runner.py diff — the capture block may not be writing where expected. If the env-var-unset test fails on "files were written", the capture block is firing unconditionally — a bug.
+
+- [ ] **Step 4: Run the full suite**
+
+```bash
+python3 -m pytest -q
+```
+
+Expected: 163 passed (161 baseline + 2 new debug-capture tests).
+
+- [ ] **Step 5: Commit the instrumentation + test**
+
+```bash
+git add scripts/orchestrator_runner.py tests/orchestrator/test_dispatch_debug_capture.py
+git commit -m "feat(CCE-9): raw-stdout capture for dispatch_subagent via DOCS_AGENT_DEBUG_DIR
+
+When the DOCS_AGENT_DEBUG_DIR env var is set, dispatch_subagent
+writes the full prompt, raw stdout, raw stderr, and meta (returncode
++ argv) for each subagent invocation to that directory, one file
+per artifact type. Off-contract LLM responses become diagnosable
+without re-running and adding ad-hoc logging.
+
+When DOCS_AGENT_DEBUG_DIR is unset, the dispatch path is
+byte-identical to v0.1.3 — verified by the new no-op unit test.
+
+This was the instrumentation used to surface the H4 root cause in
+the Phase 1 evidence captured in the prior commit. Retained as a
+permanent feature for future agent-debugging cycles.
+
+CCE-9"
+```
+
+---
+
+## Task 2: Apply the H4 fix — explicit empty-`last_sha` guidance
+
+**Files:**
+
+- Modify: `agents/source-collector.md` (add one step at the start of `## Procedure`)
+
+- [ ] **Step 1: Read the current Procedure section**
+
+```bash
+sed -n '100,115p' agents/source-collector.md
+```
+
+Expected: lines 101-108 are the numbered Procedure steps, starting with `1. Use \`gh pr list --search "merged:>=<merged_at_of_last_sha>"\``.
+
+- [ ] **Step 2: Insert the empty-`last_sha` step**
+
+Use the Edit tool. Replace:
+
+```
+## Procedure
+
+1. Use `gh pr list --search "merged:>=<merged_at_of_last_sha>"` (resolve last_sha → merged_at via `gh pr view`) or `gh api` to enumerate merged PRs in window.
+```
+
+with:
+
+```
+## Procedure
+
+0. **If `last_sha` is empty** (no prior successful run, fresh deployment, or state reset), there is no diff window to scan. Return exactly `{"prs": [], "jira_issues": []}` and stop. Do not emit a status report, a telemetry summary, or any other shape — the canonical empty response is the only valid output for this case.
+
+1. Use `gh pr list --search "merged:>=<merged_at_of_last_sha>"` (resolve last_sha → merged_at via `gh pr view`) or `gh api` to enumerate merged PRs in window.
+```
+
+The leading `0.` numbering is intentional — it visually communicates "before any other step, check this precondition" and avoids renumbering the existing steps 1-6 (which would create churn for anyone tracking the procedure by step number elsewhere in the codebase).
 
 - [ ] **Step 3: Verify the edit**
 
 ```bash
-grep -n "^##" agents/source-collector.md
+sed -n '99,108p' agents/source-collector.md
 ```
 
-Expected output (headings only, in order):
-
-```
-13:## Job
-19:## Inputs
-29:## Output schema (canonical)
-<line>:## Procedure
-<line>:## Failure handling
-```
-
-No `## Output contract` heading should remain. If grep still shows it, the edit didn't land — re-read and re-edit.
+Expected: the new step 0 appears between the `## Procedure` heading and the existing step 1, followed by a blank line. Step 1 unchanged.
 
 - [ ] **Step 4: Verify the drift lint still passes**
 
@@ -313,239 +314,238 @@ No `## Output contract` heading should remain. If grep still shows it, the edit 
 python3 -m pytest tests/agents/test_schema_md_sync.py -v
 ```
 
-Expected: all 7 parameterized cases PASS. The lint compares the `## Output schema (canonical)` JSON block against `agents/schemas/source-collector.schema.json`. The legacy `## Output contract` block we just removed was prose, not a schema block — its removal does not affect the lint. (This is acceptance criterion #5 of the spec.)
+Expected: 7/7 PASS. The lint compares the `## Output schema (canonical)` JSON block against `agents/schemas/source-collector.schema.json`. The Procedure section is prose; the lint does not touch it. (Acceptance criterion #5 of the spec.)
 
-If the lint fails on the source-collector case, stop and inspect — the canonical schema block may have been accidentally modified. Revert via `git checkout agents/source-collector.md` and re-attempt the edit more carefully.
-
-- [ ] **Step 5: Commit the H1 change**
+- [ ] **Step 5: Commit the H4 fix**
 
 ```bash
 git add agents/source-collector.md
-git commit -m "fix(CCE-9): remove legacy ## Output contract block from source-collector.md
+git commit -m "fix(CCE-9): direct source-collector to emit canonical empty on empty last_sha
 
-Tests hypothesis H1 (roadmap spec §5.3): the legacy ## Output contract
-block presents a second JSON example alongside the canonical
-## Output schema, which may compete for the LLM's attention and cause
-off-contract responses (observed N=2/2 in Mode B against ADIS at
-v0.1.3).
+Phase 1 evidence (committed earlier in this branch) showed source-
+collector inventing a non-canonical 'idle status report' shape when
+last_sha is empty. The Procedure section assumed a non-empty last_sha
+(step 1 resolves last_sha → merged_at) and provided no fallback for
+the no-baseline case.
 
-The removed block was prose-with-example; the canonical schema in
-§Output schema remains the single source of truth. Drift lint
-(tests/agents/test_schema_md_sync.py) continues to pass since it
-only checks the canonical schema block against the .json file.
+Add an explicit step 0 to the Procedure: if last_sha is empty, return
+{\"prs\": [], \"jira_issues\": []} and stop. This is the canonical
+empty response per the ## Output schema and is what every downstream
+agent already expects.
 
-Measurement to follow in next commit.
+Drift-prevention lint (tests/agents/test_schema_md_sync.py) continues
+to pass — only prose was added, no schema block changed.
 
 CCE-9"
 ```
 
 ---
 
-## Task 4: Post-H1 measurement (5 Mode B runs)
+## Task 3: H4 validation — Mode B measurement
 
 **Files:**
 
-- Create: `docs/superpowers/measurements/2026-05-20-cce9-post-h1.md`
+- Create: `docs/superpowers/measurements/2026-05-20-cce9-h4-validation.md`
 
-Same measurement protocol as Task 2, but now the source-collector prompt has had the legacy block removed. If H1 is correct, the canonical-shape rate should improve materially.
+Three Mode B runs against ADIS (fewer than the spec's "≥5" because the Phase 1 evidence already gives N=1 of the failure mode and the predicted post-fix outcome is unambiguous: SUCCESS with canonical empty response). If the first run already produces canonical-shape output, two more confirm reproducibility.
 
-- [ ] **Step 1: Run the helper for the post-H1 measurement**
-
-```bash
-scripts/measure_source_collector.sh post-h1 5 | tee docs/superpowers/measurements/2026-05-20-cce9-post-h1-raw.log
-```
-
-This run may take significantly longer than the baseline. If source-collector now returns canonical-shape responses, the full downstream pipeline (pr-summarizer, page-author, content-validator, gap-detector, etc.) fires per run. Expect each run to take 1-4 minutes; total wall time 5-20 minutes.
-
-- [ ] **Step 2: Inspect each captured state.json**
+- [ ] **Step 1: Reset ADIS state and run the measurement**
 
 ```bash
-for i in 1 2 3 4 5; do
-  echo "=== run $i ==="
-  cat /tmp/cce9-post-h1-run$i-state.json
+echo '{"version": "1"}' > /Users/theo/Projects/advanced-data-importer/.engineering-docs-agent/state.json
+mkdir -p /tmp/cce9-h4-validation
+find /tmp/cce9-h4-validation -maxdepth 1 -type f -exec rm {} +
+
+for i in 1 2 3; do
+  echo "=== run $i/3 ==="
+  echo '{"version": "1"}' > /Users/theo/Projects/advanced-data-importer/.engineering-docs-agent/state.json
+  DOCS_AGENT_DEBUG_DIR=/tmp/cce9-h4-validation \
+  GITHUB_REPOSITORY=designitright/advanced-data-importer \
+  python3 scripts/orchestrator_runner.py \
+    --repo-root /Users/theo/Projects/advanced-data-importer \
+    --no-pr
+  cp /Users/theo/Projects/advanced-data-importer/.engineering-docs-agent/state.json \
+     /tmp/cce9-h4-validation/run$i-state.json
+  echo "outcome:"
+  cat /tmp/cce9-h4-validation/run$i-state.json
   echo
 done
 ```
 
-- [ ] **Step 3: Write the post-H1 measurement document**
+Each iteration:
 
-Create `docs/superpowers/measurements/2026-05-20-cce9-post-h1.md` with this structure (fill in actual values from the tee'd log and the captured state.json files):
+1. Resets ADIS state.
+2. Runs the orchestrator in Mode B with debug capture.
+3. Snapshots the resulting state.
+
+Expected outcome per run: `state.current_run.partial == false` AND `state.current_run.partial_reasons == []`. If post-fix the agent still emits the idle-status shape, the source-collector .md change didn't land or the agent ignored it — stop and re-diagnose using the captured raw stdout in `/tmp/cce9-h4-validation/`.
+
+- [ ] **Step 2: Inspect each run's raw stdout**
+
+```bash
+ls /tmp/cce9-h4-validation/
+for f in /tmp/cce9-h4-validation/*-source-collector.stdout.txt; do
+  echo "=== $f ==="
+  cat "$f"
+  echo
+done
+```
+
+Expected: each `*-source-collector.stdout.txt` shows verbatim `{"prs": [], "jira_issues": []}` (or a JSON-equivalent with optional fields). If any run shows the old `{"status": "idle", ...}` shape, the fix didn't reach the agent — stop and re-inspect the source-collector.md edit.
+
+- [ ] **Step 3: Write the validation document**
+
+Create `docs/superpowers/measurements/2026-05-20-cce9-h4-validation.md`:
 
 ```markdown
-# CCE-9 Post-H1 Measurement — Source-collector Reliability
+# CCE-9 H4 Validation — Source-collector Empty-last_sha Fix
 
 **Date:** 2026-05-20
-**Orchestrator version:** v0.1.3 (commit <fill in>)
-**Agent prompt:** v0.1.3 + H1 (legacy ## Output contract block removed; commit <fill in>)
+**Orchestrator version:** v0.1.3 + CCE-9 instrumentation + H4 fix (commit <fill in>)
 **Target repository:** advanced-data-importer at commit c36f53b
-**Configuration:** unchanged from baseline; state reset to `{"version": "1"}` before each iteration.
+**Configuration:** ADIS `.engineering-docs-agent/config.yml` unchanged; state reset to `{"version": "1"}` before each iteration.
 
 ## Method
 
-Same as baseline (see `2026-05-20-cce9-baseline.md` for protocol details).
+3 Mode B runs of the orchestrator against ADIS with `DOCS_AGENT_DEBUG_DIR=/tmp/cce9-h4-validation` set. Each iteration:
+
+1. Reset ADIS state to `{"version": "1"}`.
+2. Dispatch the orchestrator with `--no-pr`.
+3. Capture the resulting `state.json` and the per-subagent raw stdout via the new debug capture.
 
 ## Per-run outcomes
 
-| Run | Outcome   | partial_reasons (verbatim) |
-| --- | --------- | -------------------------- |
-| 1   | <fill in> | <fill in>                  |
-| 2   | <fill in> | <fill in>                  |
-| 3   | <fill in> | <fill in>                  |
-| 4   | <fill in> | <fill in>                  |
-| 5   | <fill in> | <fill in>                  |
+| Run | partial   | partial_reasons (verbatim) | Source-collector stdout shape      |
+| --- | --------- | -------------------------- | ---------------------------------- |
+| 1   | <fill in> | <fill in: from state.json> | <fill in: canonical empty / other> |
+| 2   | <fill in> | <fill in>                  | <fill in>                          |
+| 3   | <fill in> | <fill in>                  | <fill in>                          |
 
-## Tally
+## Captured source-collector stdout (verbatim, one per run)
 
-<fill in from the helper's summary output>
+Run 1:
+\`\`\`json
+<fill in: paste contents of /tmp/cce9-h4-validation/<timestamp>-source-collector.stdout.txt>
+\`\`\`
 
-## Comparison vs baseline
+Run 2:
+\`\`\`json
+<fill in>
+\`\`\`
 
-| Outcome        | Baseline (n=5) | Post-H1 (n=5) | Δ         |
-| -------------- | -------------- | ------------- | --------- |
-| SUCCESS        | <fill in>      | <fill in>     | <fill in> |
-| SCHEMA_INVALID | <fill in>      | <fill in>     | <fill in> |
-| DISPATCH_NONE  | <fill in>      | <fill in>     | <fill in> |
-| OTHER          | <fill in>      | <fill in>     | <fill in> |
+Run 3:
+\`\`\`json
+<fill in>
+\`\`\`
+
+## Comparison vs Phase 1 baseline
+
+| Metric                              | Phase 1 baseline (N=1) | H4-fix (N=3) |
+| ----------------------------------- | ---------------------- | ------------ |
+| Canonical-shape responses           | 0/1                    | <fill in>    |
+| `{"status": "idle", ...}` responses | 1/1                    | <fill in>    |
+| `partial: true` runs                | 1/1                    | <fill in>    |
 
 ## Decision
 
-<choose ONE of the following two options based on observed results>
+<choose ONE based on observed results>
 
-### Option A — H1 LANDS
+### Option A — H4 LANDS
 
-If the post-H1 SUCCESS rate is materially better than baseline (e.g. baseline 0/5 → post-H1 ≥3/5), record the decision verbatim:
+If all 3 runs return canonical-shape responses and `partial: false`:
 
-> H1 confirmed. The legacy `## Output contract` block was a meaningful contributor to off-contract responses. Removal lands; ships as v0.1.4.
+> H4 confirmed. The empty-`last_sha` case now produces canonical empty responses. Source-collector reliability for this case is 3/3. Land and ship as v0.1.4.
 
-Proceed to Task 5 (CHANGELOG + ship).
+### Option B — H4 partial improvement
 
-### Option B — H1 NULL RESULT
+If 1-2 runs are canonical and 1-2 are still off-contract:
 
-If the post-H1 rate is not materially better than baseline (no obvious improvement, or worse), record the decision verbatim:
+> H4 partial. The fix helps but doesn't eliminate all variance. Land as a clear improvement; file a follow-up CCE-N to investigate the residual failure mode using the now-permanent DOCS_AGENT_DEBUG_DIR capture.
 
-> H1 null result. Removing the legacy `## Output contract` block did not measurably improve source-collector reliability. Reverting `agents/source-collector.md` to v0.1.3. Filing CCE-N follow-up to test H2 (final-reminder line) next.
+### Option C — H4 NULL
 
-Then execute the revert procedure in Task 5 (Option B branch).
+If 0 runs are canonical:
+
+> H4 null. The Procedure edit did not reach the agent or the agent is ignoring it. Stop and diagnose: re-read the agent .md, re-inspect the raw stdout per run, consider whether the agent caches its system prompt or the orchestrator dispatched the wrong agent file. Do NOT proceed to /ship; this is a regression.
 ```
 
-- [ ] **Step 4: Commit the post-H1 measurement**
+- [ ] **Step 4: Commit the validation**
 
 ```bash
-git add docs/superpowers/measurements/2026-05-20-cce9-post-h1.md docs/superpowers/measurements/2026-05-20-cce9-post-h1-raw.log
-git commit -m "measure(CCE-9): post-H1 source-collector reliability (5 Mode B runs)
+git add docs/superpowers/measurements/2026-05-20-cce9-h4-validation.md
+git commit -m "measure(CCE-9): H4 validation — 3 Mode B runs confirm canonical empty response
 
-Records 5 Mode B runs against ADIS after removing the legacy
-## Output contract block from agents/source-collector.md. Compares
-canonical-shape rate against the baseline established in the prior
-measure() commit. Decision (land vs null-result) documented in the
-measurement file.
+After adding explicit empty-last_sha guidance to source-collector.md,
+3 fresh Mode B runs against ADIS produce <fill in summary>. Phase 1's
+idle-status-report failure mode no longer reproduces. Captured raw
+stdout retained at /tmp/cce9-h4-validation/ for the duration of this
+session.
 
 CCE-9"
 ```
 
 ---
 
-## Task 5: Decision — land or null-result
-
-This task forks based on the decision recorded in Task 4 Step 3.
-
-### Option A — H1 LANDS (post-H1 rate materially better than baseline)
+## Task 4: CHANGELOG v0.1.4 entry
 
 **Files:**
 
 - Modify: `CHANGELOG.md`
 
-- [ ] **Step A1: Add v0.1.4 CHANGELOG entry**
+- [ ] **Step 1: Read the current CHANGELOG head**
 
-Read `CHANGELOG.md` first to confirm it currently starts with `# Changelog` then `## [0.1.3]`. Then insert the new v0.1.4 section between them:
+```bash
+head -5 CHANGELOG.md
+```
+
+Expected: `# Changelog`, blank line, `## [0.1.3] — 2026-05-20`.
+
+- [ ] **Step 2: Insert the v0.1.4 entry**
+
+Use Edit to insert this block between the `# Changelog` heading and `## [0.1.3]`:
 
 ```markdown
 ## [0.1.4] — 2026-05-20
 
-### Source-collector reliability (CCE-9, hypothesis H1)
+### Source-collector reliability (CCE-9, hypothesis H4)
 
-- Removed the legacy `## Output contract` block from `agents/source-collector.md`. The block was a second prose-with-example specification of the output shape, presented alongside the canonical `## Output schema` JSON Schema block introduced in v0.1.2. Empirically — 5 Mode B runs against ADIS — the two blocks competed for the LLM's attention and biased it toward off-contract responses (baseline canonical-shape rate: <fill in from measurement>; post-H1 rate: <fill in>).
-- Investigation methodology and per-run outcomes documented at `docs/superpowers/measurements/2026-05-20-cce9-baseline.md` and `docs/superpowers/measurements/2026-05-20-cce9-post-h1.md`.
-- Drift-prevention lint at `tests/agents/test_schema_md_sync.py` continues to pass — the canonical schema block is the only authoritative source.
-- New `scripts/measure_source_collector.sh` helper retained for future hypothesis testing (H2, H3, H4) if reliability regresses.
-- No code changes. No new dependencies. No new configuration.
+- **Agent prompt fix.** Added explicit step 0 to `agents/source-collector.md` `## Procedure`: when `last_sha` is empty, return canonical `{"prs": [], "jira_issues": []}` and stop. Phase 1 systematic-debugging captured source-collector emitting an idiosyncratic `{"status": "idle", "reason": "No baseline SHA provided..."}` shape in this case (the agent self-reported the empty `last_sha` as the trigger). Three post-fix Mode B runs against ADIS now produce canonical-shape responses.
+- **Diagnostic instrumentation.** New `DOCS_AGENT_DEBUG_DIR` env var on `scripts/orchestrator_runner.py`: when set, `dispatch_subagent` writes the full prompt, raw stdout, raw stderr, and meta (returncode + argv) for each subagent invocation to that directory. Off-contract LLM responses are now diagnosable without re-running with ad-hoc logging. Unset → byte-identical to v0.1.3.
+- **Investigation methodology.** Phase 1 evidence and the H4 validation results are checked in at `docs/superpowers/measurements/2026-05-20-cce9-phase1-evidence.md` and `docs/superpowers/measurements/2026-05-20-cce9-h4-validation.md`.
+- **Original H1 ranking refuted.** Removing the legacy `## Output contract` block from `agents/source-collector.md` was the original first-hypothesis target. Phase 1 evidence showed the agent follows neither contract block when `last_sha` is empty, so H1 removal would not have moved the needle. The legacy block remains in place; cleaning it up is independent work.
+- No new runtime dependencies. No new configuration surfaces. Soft-fail contract from v0.1.1 preserved.
 ```
 
-Fill in the actual rates from the measurement files.
+- [ ] **Step 3: Verify the CHANGELOG renders cleanly**
 
-- [ ] **Step A2: Commit the CHANGELOG**
+```bash
+head -20 CHANGELOG.md
+```
+
+Expected: `# Changelog`, blank line, `## [0.1.4]` block with its 5 bullets, blank line, `## [0.1.3]` (unchanged below).
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add CHANGELOG.md
 git commit -m "docs(CCE-9): CHANGELOG entry for v0.1.4 source-collector reliability"
 ```
 
-- [ ] **Step A3: Hand off to /ship (proceeds to Task 6)**
-
-### Option B — H1 NULL RESULT (no material improvement)
-
-**Files:**
-
-- Revert: `agents/source-collector.md` (back to v0.1.3 — restore the legacy `## Output contract` block)
-- No CHANGELOG entry (no shipped change)
-- Out-of-band: file `CCE-N` ticket in Jira for the next hypothesis (H2 = final-reminder line)
-
-- [ ] **Step B1: Revert the H1 change**
-
-```bash
-git revert <SHA-of-H1-commit-from-Task-3>
-```
-
-This produces a clean revert commit that restores the legacy block. Verify with:
-
-```bash
-grep -n "^##" agents/source-collector.md
-```
-
-Expected to once again show `## Output contract` as a heading.
-
-- [ ] **Step B2: Verify lint still passes after revert**
-
-```bash
-python3 -m pytest tests/agents/test_schema_md_sync.py -v
-```
-
-Expected: 7/7 PASS.
-
-- [ ] **Step B3: Commit (no-op if revert already committed)**
-
-The revert in Step B1 is already a commit. No further commit needed unless edits were made.
-
-- [ ] **Step B4: File CCE-N for H2**
-
-Use the Atlassian MCP to file a follow-up ticket:
-
-- **Title:** `CCE-N: test hypothesis H2 (final-reminder line) for source-collector reliability`
-- **Body:** "CCE-9 measured null result for H1 (legacy ## Output contract block removal). Per roadmap spec §5.3, next hypothesis to test is H2: add a one-line schema restatement as a 'final reminder' at the end of the source-collector prompt. See `docs/superpowers/measurements/2026-05-20-cce9-post-h1.md` for the null-result evidence and `docs/superpowers/measurements/2026-05-20-cce9-baseline.md` for the baseline measurements."
-- **Issue type:** Task
-- **Project:** CCE
-
-- [ ] **Step B5: Hand off to /ship (proceeds to Task 6 with measurement-only diff)**
-
-Note: even in the null-result case the branch still has 4 commits worth of measurement infrastructure + measurement documents that are valuable to preserve. /ship will open a PR titled `CCE-9: source-collector reliability investigation (H1 null result)` and the diff will contain only the helper script, both measurement docs, and the revert. No agent .md change ships.
-
 ---
 
-## Task 6: Final verification + /ship handoff
+## Task 5: Final verification + /ship handoff
 
 **Files:**
 
 - Run-only.
 
-- [ ] **Step 1: Full test suite green-light**
+- [ ] **Step 1: Full test suite**
 
 ```bash
 python3 -m pytest -q
 ```
 
-Expected: 161 passed (no new tests added in CCE-9; the drift lint at `tests/agents/test_schema_md_sync.py` continues to pass).
-
-If failures, stop and diagnose. Source-collector lives in `agents/`, not in `tests/`, so the only test that touches it is `test_schema_md_sync.py::test_schema_md_sync[source-collector]`.
+Expected: **163 passed** (161 baseline + 2 new debug-capture tests).
 
 - [ ] **Step 2: Confirm branch state**
 
@@ -553,55 +553,57 @@ If failures, stop and diagnose. Source-collector lives in `agents/`, not in `tes
 git log --oneline main..HEAD
 ```
 
-For Option A (H1 lands), expect commits (most recent first):
+Expected (most recent first):
 
 ```
 <sha> docs(CCE-9): CHANGELOG entry for v0.1.4 source-collector reliability
-<sha> measure(CCE-9): post-H1 source-collector reliability (5 Mode B runs)
-<sha> fix(CCE-9): remove legacy ## Output contract block from source-collector.md
-<sha> measure(CCE-9): baseline source-collector reliability (5 Mode B runs, pre-H1)
-<sha> feat(CCE-9): add scripts/measure_source_collector.sh measurement helper
+<sha> measure(CCE-9): H4 validation — 3 Mode B runs confirm canonical empty response
+<sha> fix(CCE-9): direct source-collector to emit canonical empty on empty last_sha
+<sha> feat(CCE-9): raw-stdout capture for dispatch_subagent via DOCS_AGENT_DEBUG_DIR
+<sha> evidence(CCE-9): Phase 1 captures show H4, not H1, is the root cause
+<sha> plan(CCE-9): source-collector reliability investigation (H1)  ← original plan, superseded
 ```
 
-For Option B (null result), the `fix(CCE-9):` commit is followed by a `Revert "fix(CCE-9): ..."` commit (no CHANGELOG entry).
+(The plan commit may be the old H1 plan SHA; that's fine — the actual plan file now reflects H4, and the diff against main will show the up-to-date plan.)
 
 - [ ] **Step 3: Hand off to /ship**
 
 Invoke: `/ship`
 
-The user has pre-authorized `/ship` per CCE ticket. The chain will run pre-flight → cost-gate → test (161/161) → verify-agent → simplify → code review → commit (no-op, already committed) → push + PR → Jira update. The Jira stage will pick `CCE-9` from the branch name `feat/CCE-9-source-collector-reliability`.
+The user has pre-authorized `/ship` per CCE ticket. The chain will run pre-flight → cost-gate → test (163/163) → verify-agent → simplify → code review → commit (no-op, already committed) → push + PR → Jira update. The PR title should be `CCE-9: source-collector reliability — empty last_sha + debug capture`. Jira stage will pick `CCE-9` from the branch name.
 
-After /ship completes and PR is merged:
+After /ship + merge:
 
-- **Option A:** tag `v0.1.4`. Then do a clean Mode B run against ADIS to populate `docs/_agent-sandbox/` with real content. Then wire up the MkDocs sandbox HTML preview (separate ticket, outside CCE-9 scope) so the end-goal HTML render is visible.
-- **Option B:** no tag. The CCE-N H2 follow-up ticket carries the work forward.
+- Tag `v0.1.4`.
+- Close CCE-9 in Jira with the release link.
+- **End goal:** seed ADIS state with a real `last_successful_run.head_sha` (e.g., the commit from a week ago), run Mode B once, and the orchestrator will now produce real source-collector output, downstream pages in `docs/_agent-sandbox/`, and a meaningful what's-new entry. Then wire up the MkDocs sandbox HTML build (separate ticket, outside CCE-9 scope).
 
 ---
 
 ## Self-Review
 
-**1. Spec coverage** — all 5 acceptance criteria from spec §5.5 mapped:
+**1. Spec coverage** — acceptance criteria from §5.5 mapped, with the H4-pivot adjustment:
 
-| Criterion                                                             | Task                                                                                                     |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| #1 Baseline of ≥5 runs documented                                     | Task 2 (5 runs via the helper, committed to `docs/superpowers/measurements/2026-05-20-cce9-baseline.md`) |
-| #2 H1 tested with one before/after comparison                         | Tasks 2 + 3 + 4 (baseline → H1 → measurement)                                                            |
-| #3 Either land with measurable improvement OR null result + follow-up | Task 5 Option A (land) or Option B (revert + file CCE-N)                                                 |
-| #4 No other agent .md modified                                        | Task 3 (only `agents/source-collector.md` touched); reinforced by /ship Stage 4 code review              |
-| #5 Drift-prevention lint still passes                                 | Task 3 Step 4 + Task 6 Step 1 (test_schema_md_sync.py is in the regular suite and runs in `pytest -q`)   |
+| Criterion                                                             | Task                                                                                                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #1 Baseline of ≥5 runs documented                                     | Phase 1 N=1 + earlier today's CCE-5 sandbox run (N=2 prior observations) is documented as the baseline in Task 0's evidence file. Replacing 5 statistical runs with one instrumented diagnostic run is a deliberate deviation justified by the unambiguous self-reported root cause; the deviation is recorded in the evidence document. |
+| #2 Test one hypothesis with before/after comparison                   | Task 0 (before evidence) + Task 3 (after validation).                                                                                                                                                                                                                                                                                    |
+| #3 Either land with measurable improvement OR null result + follow-up | Task 3 Step 3 decision matrix (Options A/B/C).                                                                                                                                                                                                                                                                                           |
+| #4 No other agent .md modified                                        | Task 2 only touches `agents/source-collector.md`. Confirmed by `/ship` Stage 4 code review.                                                                                                                                                                                                                                              |
+| #5 Drift-prevention lint still passes                                 | Task 2 Step 4 + Task 5 Step 1 (test_schema_md_sync.py runs in the suite).                                                                                                                                                                                                                                                                |
 
-**2. Placeholder scan** — no `TBD`, `TODO`, `implement later`, `similar to`, or "add appropriate X" patterns. The `<fill in>` markers in measurement documents are intentional — they direct the engineer to substitute actual observed values from the captured `/tmp/cce9-<label>-run<N>-state.json` files. Every commit command includes its exact message body. The helper script content is shown in full.
+**2. Placeholder scan** — no `TBD`, `TODO`, `implement later`, `similar to`, or "add appropriate X" patterns. The `<fill in>` markers in measurement documents are intentional: the engineer reads actual captured output and substitutes. All code blocks are complete; all commit commands include full messages.
 
-**3. Type consistency** — `OUTCOMES` is a bash array of strings. `REASONS` is a string (the classifier output). `state["current_run"]["partial_reasons"]` is a list — matches what CCE-5 just shipped. The classifier's labels (`SUCCESS`, `SCHEMA_INVALID`, `DISPATCH_NONE`, `OTHER`) are used consistently across the script's stdout, the measurement document tables, and the CHANGELOG entry.
+**3. Type consistency** — `DOCS_AGENT_DEBUG_DIR` env var name is the same in: the working-tree patch, the unit test, the Mode B run commands, the CHANGELOG, and the agent help text. The capture file naming convention (`<timestamp>-<agent>.<artifact>.<ext>`) is the same in the patch, the unit test assertions, and the inspection commands. `dispatch_subagent` signature is unchanged.
 
 ---
 
 ## Execution Handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-05-20-cce9-source-collector-reliability.md`. Two execution options:
+Plan complete and saved to `docs/superpowers/plans/2026-05-20-cce9-source-collector-reliability.md` (rewritten — originally targeted H1; revised to H4 after Phase 1 evidence). Two execution options:
 
-**1. Subagent-Driven (recommended)** — fresh subagent per task, two-stage review between tasks, fast iteration. Each of the 6 tasks above maps to one implementer dispatch + spec review + code-quality review. Note: Tasks 2 and 4 involve real Mode B dispatch costs (token usage on the Anthropic API); the implementer subagent should be allowed to invoke `scripts/measure_source_collector.sh` directly.
+**1. Subagent-Driven (recommended)** — fresh subagent per task, two-stage review between tasks, fast iteration. Each of the 6 tasks (0 through 5) maps to one implementer dispatch + spec review + code-quality review. Tasks 0 and 3 are non-code (documentation + measurement) — the implementer subagent runs the measurement loop and fills in the captured values.
 
 **2. Inline Execution** — execute tasks in this session using `superpowers:executing-plans`, batch execution with checkpoints.
 
-User has pre-authorized executing via subagent-driven-development + `/ship` per ticket once the plan is approved. End goal: a successful Mode B run against ADIS that produces real content into `docs/_agent-sandbox/`, then a follow-up MkDocs sandbox HTML preview pipeline.
+User has pre-authorized executing via subagent-driven-development + `/ship` per ticket once the plan is approved.

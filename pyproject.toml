@@ -1,0 +1,19 @@
+[project]
+name = "engineering-docs-agent"
+version = "0.1.0"
+description = "Nightly docs-PR generator plugin for Claude Code"
+requires-python = ">=3.11"
+dependencies = [
+  "pyyaml>=6.0",
+  "jsonschema>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+  "pytest-cov>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

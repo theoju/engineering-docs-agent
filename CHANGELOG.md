@@ -4,7 +4,7 @@
 
 ### Foundation
 
-- New `scripts/contracts.py`: typed dataclasses for all 7 subagent outputs + `validate_and_parse` against per-agent JSON schemas in `agents/schemas/`.
+- New `scripts/contracts.py`: typed dataclasses for all 7 subagent outputs + `validate_and_parse` against per-agent JSON schemas in `agents/schemas/`. _Runtime enforcement (wiring `validate_and_parse` into `dispatch_subagent`) is deferred to v0.1.2; the production dispatch still consumes raw dicts but tolerates malformed output via the None-return path added in B2._
 - New `scripts/gh_client.py`: `GhClient` wraps all gh CLI calls with `GhResult` (ok/value/error). `FakeGhClient` for tests.
 - New `scripts/state_io.py`: `load_config_validated` and `load_state_validated` hard-fail with exit 2 on schema violations. Also hosts `add_partial`, `cleanup_empty_parents`, `load_voice_samples`, `resolve_lens`.
 - New per-subagent schemas in `agents/schemas/`.

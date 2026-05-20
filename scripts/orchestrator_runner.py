@@ -289,11 +289,19 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                     fail_path = repo_root / fail_path
                 # Verify path is inside repo_root before any destructive op.
                 try:
-                    fail_path.resolve().relative_to(repo_root.resolve())
+                    rel = fail_path.resolve().relative_to(repo_root.resolve())
                 except ValueError:
                     state["current_run"]["partial"] = True
                     state["current_run"]["partial_reasons"].append(
                         f"lint_block_unsafe_path: {fail['path']} (outside repo)"
+                    )
+                    continue
+                # Reject empty / "." paths that would cause git checkout HEAD -- .
+                # to restore the entire working tree.
+                if str(rel) in (".", ""):
+                    state["current_run"]["partial"] = True
+                    state["current_run"]["partial_reasons"].append(
+                        f"lint_block_unsafe_path: empty path"
                     )
                     continue
                 # If the file exists in HEAD, restore it (edit case).
@@ -455,8 +463,18 @@ def open_or_append_pr(
     partial: bool,
     partial_reasons: list[str],
 ) -> int | None:
-    subprocess.run(["git", "-C", str(repo_root), "checkout", "-B", branch], check=True)
-    subprocess.run(["git", "-C", str(repo_root), "add", "."], check=True)
+    checkout = subprocess.run(
+        ["git", "-C", str(repo_root), "checkout", "-B", branch],
+        capture_output=True,
+        text=True,
+    )
+    if checkout.returncode != 0:
+        return None
+    add = subprocess.run(
+        ["git", "-C", str(repo_root), "add", "."], capture_output=True, text=True
+    )
+    if add.returncode != 0:
+        return None
     commit_msg = f"docs(agent): run {now_iso}"
     if partial:
         commit_msg += " (partial)"

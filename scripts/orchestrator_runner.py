@@ -135,6 +135,32 @@ def dispatch_subagent(
         return None
 
 
+def dispatch_validated(
+    name: str,
+    inputs: dict,
+    *,
+    dry_run_dir: Path | None,
+    cwd: Path | None = None,
+) -> tuple[dict | None, list[str]]:
+    """Compose dispatch_subagent with validate_and_parse.
+
+    Returns:
+      Schema-valid:   (raw_dict, [])
+      Schema-invalid: (None, ["schema_invalid: <name>: <field-detail>"])
+      Dispatch-None:  (None, [])  — caller adds its own generic reason
+      Schema-missing: (None, ["schema_missing: <name>"]) — corrupted install
+    """
+    raw = dispatch_subagent(name, inputs, dry_run_dir=dry_run_dir, cwd=cwd)
+    if raw is None:
+        return None, []
+    from contracts import validate_and_parse
+
+    validated, reasons = validate_and_parse(name, raw)
+    if validated is None:
+        return None, reasons
+    return raw, []
+
+
 def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     state_path = repo_root / ".engineering-docs-agent" / "state.json"

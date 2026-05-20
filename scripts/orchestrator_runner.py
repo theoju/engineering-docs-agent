@@ -158,6 +158,7 @@ def dispatch_validated(
     validated, reasons = validate_and_parse(name, raw)
     if validated is None:
         return None, reasons
+    # Return raw (not the dataclass) so call sites can keep using dict.get() patterns.
     return raw, []
 
 

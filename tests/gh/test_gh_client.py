@@ -1,0 +1,57 @@
+from __future__ import annotations
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+
+FIXTURES = Path(__file__).parent.parent / "gh_fixtures"
+
+
+def _fake_run(stdout="", stderr="", returncode=0, raise_exc=None):
+    def _r(*args, **kwargs):
+        if raise_exc:
+            raise raise_exc
+        return subprocess.CompletedProcess(
+            args[0], returncode, stdout=stdout, stderr=stderr
+        )
+
+    return _r
+
+
+def test_pr_view_files_parses_canned(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    canned = (FIXTURES / "pr_view_files_ok.json").read_text()
+    monkeypatch.setattr("gh_client.subprocess.run", _fake_run(stdout=canned))
+
+    gh = GhClient(tmp_path)
+    r = gh.pr_view_files(42)
+    assert r.ok
+    assert r.value == ["docs/site-src/foo.md", "docs/site-src/bar.md"]
+
+
+def test_pr_view_files_gh_not_installed(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    monkeypatch.setattr(
+        "gh_client.subprocess.run", _fake_run(raise_exc=FileNotFoundError())
+    )
+
+    gh = GhClient(tmp_path)
+    r = gh.pr_view_files(42)
+    assert not r.ok
+    assert r.error == "gh_not_installed"
+
+
+def test_pr_view_files_bad_json(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    monkeypatch.setattr("gh_client.subprocess.run", _fake_run(stdout="not json"))
+    gh = GhClient(tmp_path)
+    r = gh.pr_view_files(42)
+    assert not r.ok
+    assert r.error.startswith("gh_bad_json")

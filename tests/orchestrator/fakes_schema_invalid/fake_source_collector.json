@@ -1,0 +1,12 @@
+{
+  "status": "success",
+  "modifications": [],
+  "summary": "No source changes detected in the specified window.",
+  "head_sha": "abc123def456",
+  "branches_scanned": ["main"],
+  "events_processed": 0,
+  "verification": {
+    "schema_compliance": "pass",
+    "validation_errors": []
+  }
+}

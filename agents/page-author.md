@@ -28,7 +28,29 @@ Voice must match the provided samples.
 - `voice_samples`: list of `{path, content}` — recent pages from the same lens, plus CLAUDE.md content if available, plus optional `docs-agent-voice.md` content
 - `frontmatter_template`: dict with required keys per spec §6.1 (`status`, `sources`, `synthesized_into`)
 
+## Output schema (canonical)
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "page-author output",
+  "type": "object",
+  "required": ["ok"],
+  "properties": {
+    "path": { "type": "string" },
+    "action": { "type": "string" },
+    "diff_summary": { "type": "string" },
+    "ok": { "type": "boolean" },
+    "error": { "type": ["string", "null"] }
+  }
+}
+```
+
+Return ONLY a JSON object that validates against this schema. No prose, no markdown fences around the response, no commentary.
+
 ## Output contract
+
+The canonical schema is in §Output schema above. The shape described here is the same; the schema is authoritative if they disagree.
 
 Write/edit the file, then return:
 

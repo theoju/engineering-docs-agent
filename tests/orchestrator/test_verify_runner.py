@@ -164,9 +164,9 @@ def test_verify_runner_writes_state_even_on_dispatch_failure(tmp_path, monkeypat
     def raise_on_publish_verifier(name, inputs, *, dry_run_dir, cwd=None):
         if name == "publish-verifier":
             raise RuntimeError("simulated crash")
-        return {"slack_ok": True, "email_ok": True, "errors": []}
+        return ({"slack_ok": True, "email_ok": True, "errors": []}, [])
 
-    monkeypatch.setattr(verify_runner, "dispatch_subagent", raise_on_publish_verifier)
+    monkeypatch.setattr(verify_runner, "dispatch_validated", raise_on_publish_verifier)
 
     with pytest.raises(RuntimeError):
         verify_runner.run(tmp_path, 42, dry_run_dir=FAKES_VERIFY_OK)

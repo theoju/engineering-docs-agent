@@ -1,0 +1,7 @@
+{
+  "pr_id": "owner/repo#1",
+  "needs_spec": false,
+  "reasoning": "placeholder",
+  "confidence": "medium",
+  "tier": "llm"
+}

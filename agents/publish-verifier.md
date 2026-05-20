@@ -24,7 +24,27 @@ After a docs-agent PR merges:
 - `publishing_config`: `{ base_url, build_workflow, url_map_rule, verify_timeout_seconds }`
 - `repo`: `{ owner, name }`
 
+## Output schema (canonical)
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "publish-verifier output",
+  "type": "object",
+  "required": ["verified", "failed", "build_status"],
+  "properties": {
+    "verified": { "type": "array", "items": { "type": "string" } },
+    "failed": { "type": "array", "items": { "type": "string" } },
+    "build_status": { "type": "string" }
+  }
+}
+```
+
+Return ONLY a JSON object that validates against this schema. No prose, no markdown fences around the response, no commentary.
+
 ## Output contract
+
+The canonical schema is in §Output schema above. The shape described here is the same; the schema is authoritative if they disagree.
 
 ```json
 {

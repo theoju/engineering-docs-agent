@@ -7,7 +7,7 @@ from pathlib import Path
 # Allow importing from sibling script.
 sys.path.insert(0, str(Path(__file__).parent))
 from gh_client import GhClient  # noqa: E402
-from orchestrator_runner import detect_repo, dispatch_subagent  # noqa: E402
+from orchestrator_runner import detect_repo, dispatch_subagent, dispatch_validated  # noqa: E402
 from state_io import (  # noqa: E402
     ConfigError,
     StateError,
@@ -36,6 +36,7 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
     view = gh.pr_view_files(pr_number)
     if not view.ok:
         if dry_run_dir is None:
+            # Fire-and-forget: return value discarded, no state to thread reasons into.
             dispatch_subagent(
                 "notifier",
                 {
@@ -60,7 +61,7 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
 
     state_path = repo_root / ".engineering-docs-agent" / "state.json"
     try:
-        verdict = dispatch_subagent(
+        verdict, verify_reasons = dispatch_validated(
             "publish-verifier",
             {
                 "merged_pr_number": pr_number,
@@ -71,9 +72,14 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
             dry_run_dir=dry_run_dir,
             cwd=repo_root,
         )
+        for r in verify_reasons:
+            state.setdefault("current_run", {}).setdefault(
+                "partial_reasons", []
+            ).append(r)
+            state["current_run"]["partial"] = True
         if verdict is None:
             verdict = {"verified": [], "failed": [], "build_status": "verifier_invalid"}
-        dispatch_subagent(
+        _notifier_result, notifier_reasons = dispatch_validated(
             "notifier",
             {
                 "digest": {
@@ -89,6 +95,11 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
             dry_run_dir=dry_run_dir,
             cwd=repo_root,
         )
+        for r in notifier_reasons:
+            state.setdefault("current_run", {}).setdefault(
+                "partial_reasons", []
+            ).append(r)
+            state["current_run"]["partial"] = True
 
         failed_urls = verdict.get("failed", [])
         build_status = verdict.get("build_status")

@@ -21,7 +21,48 @@ then run any LLM-based semantic checks not implementable as scripts
 - `config_path`: path to the host's `.engineering-docs-agent/config.yml`
 - `voice_samples`: voice sample bundle (only used if `voice_consistency` is enabled in tier 2)
 
+## Output schema (canonical)
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "content-validator output",
+  "type": "object",
+  "required": ["passed", "failed"],
+  "properties": {
+    "passed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" },
+          "rules": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "failed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "rule", "severity", "message"],
+        "properties": {
+          "path": { "type": "string" },
+          "rule": { "type": "string" },
+          "severity": { "type": "string", "enum": ["block", "warn"] },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  }
+}
+```
+
+Return ONLY a JSON object that validates against this schema. No prose, no markdown fences around the response, no commentary.
+
 ## Output contract
+
+The canonical schema is in §Output schema above. The shape described here is the same; the schema is authoritative if they disagree.
 
 ```json
 {

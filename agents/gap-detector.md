@@ -22,7 +22,29 @@ judgment.
 - `config`: `{ allowlist_paths: [glob], size_filter: {min_loc, min_files} }`
 - `dismissed_flags`: set of PR IDs (e.g. `"owner/repo#138"`) where humans previously dismissed a gap
 
+## Output schema (canonical)
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "gap-detector output",
+  "type": "object",
+  "required": ["pr_id", "needs_spec"],
+  "properties": {
+    "pr_id": { "type": "string" },
+    "needs_spec": { "type": "boolean" },
+    "reasoning": { "type": "string" },
+    "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+    "tier": { "type": "string" }
+  }
+}
+```
+
+Return ONLY a JSON object that validates against this schema. No prose, no markdown fences around the response, no commentary.
+
 ## Output contract
+
+The canonical schema is in §Output schema above. The shape described here is the same; the schema is authoritative if they disagree.
 
 ```json
 {

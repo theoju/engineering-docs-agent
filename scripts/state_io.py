@@ -92,3 +92,11 @@ def load_voice_samples(repo_root: Path, config: dict) -> list[dict]:
         if total >= cap:
             break
     return samples
+
+
+def resolve_lens(config: dict, lens: str) -> tuple[Path, dict]:
+    """Normalize lens_paths entry to (Path, options_dict)."""
+    value = config["docs"]["lens_paths"][lens]
+    if isinstance(value, str):
+        return Path(value), {}
+    return Path(value["path"]), {k: v for k, v in value.items() if k != "path"}

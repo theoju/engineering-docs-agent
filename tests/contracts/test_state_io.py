@@ -196,3 +196,25 @@ def test_load_voice_samples_skips_missing(tmp_path):
     cfg = {"voice": {"sample_paths": ["does-not-exist.md"]}}
     samples = load_voice_samples(tmp_path, cfg)
     assert samples == []
+
+
+def test_resolve_lens_string_form():
+    from state_io import resolve_lens
+
+    cfg = {"docs": {"lens_paths": {"core": "docs/core"}}}
+    path, opts = resolve_lens(cfg, "core")
+    assert str(path) == "docs/core"
+    assert opts == {}
+
+
+def test_resolve_lens_dict_form():
+    from state_io import resolve_lens
+
+    cfg = {
+        "docs": {
+            "lens_paths": {"archive": {"path": "docs/archive", "archive_index": True}}
+        }
+    }
+    path, opts = resolve_lens(cfg, "archive")
+    assert str(path) == "docs/archive"
+    assert opts == {"archive_index": True}

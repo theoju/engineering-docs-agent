@@ -9,6 +9,7 @@ FAKES = Path(__file__).parent / "fakes"
 FAKES_BLOCK = Path(__file__).parent / "fakes_block"
 FAKES_UNSAFE = Path(__file__).parent / "fakes_unsafe"
 FAKES_SC_ERROR = Path(__file__).parent / "fakes_sc_error"
+FAKES_EMPTY = Path(__file__).parent / "fakes_empty"
 
 
 def _run_inproc(tmp_path: Path, fakes_dir: Path):
@@ -443,6 +444,50 @@ def test_stale_current_run_cleared_on_next_run(tmp_path):
     assert "stale_current_run_cleared" in state["current_run"]["partial_reasons"]
     # New current_run replaces the old; the old head_sha is gone
     assert state["current_run"]["head_sha"] != "olddeadbeef"
+
+
+def test_zero_pr_run_does_not_write_whats_new(tmp_path):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    _init_host(tmp_path)
+    rc = runner.run(tmp_path, dry_run_dir=FAKES_EMPTY, no_pr=True)
+    assert rc == 0
+
+    whats_new = tmp_path / "docs" / "site-src" / "whats-new.md"
+    assert not whats_new.exists(), "no PRs => no whats_new write"
+
+
+def test_git_push_failure_adds_partial(tmp_path, monkeypatch):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+    import gh_client
+
+    importlib.reload(runner)
+
+    fake = gh_client.FakeGhClient()
+    monkeypatch.setattr(runner, "GhClient", lambda *a, **kw: fake)
+
+    real_run = runner.subprocess.run
+
+    def selective(cmd, *a, **kw):
+        if cmd[:2] == ["git", "-C"] and "push" in cmd:
+            return type(
+                "R", (), {"returncode": 1, "stdout": "", "stderr": "remote rejected"}
+            )()
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(runner.subprocess, "run", selective)
+
+    state_path = _init_host(tmp_path)
+    rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=False)
+    assert rc == 1
+
+    state = json.loads(state_path.read_text())
+    reasons = state["current_run"]["partial_reasons"]
+    assert any("push_failed" in r for r in reasons)
 
 
 def test_source_collector_error_propagates_partial(tmp_path):

@@ -349,20 +349,23 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             continue
         gap_verdicts.append(verdict)
 
-    # Prepend What's New entry
-    whats_new = repo_root / config["docs"]["whats_new_file"]
-    whats_new.parent.mkdir(parents=True, exist_ok=True)
-    entry_lines = [f"## {now}"]
-    for s in summaries:
-        entry_lines.append(f"- PR #{s.get('pr_number')}: {s.get('what_changed', '')}")
-    gaps_flagged = [v for v in gap_verdicts if v.get("needs_spec")]
-    if gaps_flagged:
-        entry_lines.append("### Gaps flagged")
-        for g in gaps_flagged:
-            entry_lines.append(f"- {g['pr_id']}: {g['reasoning']}")
-    entry = "\n".join(entry_lines) + "\n\n"
-    existing = whats_new.read_text() if whats_new.exists() else ""
-    whats_new.write_text(entry + existing)
+    # Prepend What's New entry (only if we have PRs to report)
+    if prs:
+        whats_new = repo_root / config["docs"]["whats_new_file"]
+        whats_new.parent.mkdir(parents=True, exist_ok=True)
+        entry_lines = [f"## {now}"]
+        for s in summaries:
+            entry_lines.append(
+                f"- PR #{s.get('pr_number')}: {s.get('what_changed', '')}"
+            )
+        gaps_flagged = [v for v in gap_verdicts if v.get("needs_spec")]
+        if gaps_flagged:
+            entry_lines.append("### Gaps flagged")
+            for g in gaps_flagged:
+                entry_lines.append(f"- {g['pr_id']}: {g['reasoning']}")
+        entry = "\n".join(entry_lines) + "\n\n"
+        existing = whats_new.read_text() if whats_new.exists() else ""
+        whats_new.write_text(entry + existing)
 
     state["current_run"]["pr_number"] = None
     state_path.write_text(json.dumps(state, indent=2))
@@ -379,6 +382,8 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         partial_reasons=state["current_run"]["partial_reasons"],
     )
     if pr_number is None:
+        add_partial(state, "push_failed: see logs")
+        state_path.write_text(json.dumps(state, indent=2))
         return 1
     state["current_run"]["pr_number"] = pr_number
     state_path.write_text(json.dumps(state, indent=2))

@@ -1,0 +1,34 @@
+# templates/workflow-verify.yml — post-merge verification
+# Drop into the host repo at .github/workflows/docs-agent-verify.yml
+name: docs-agent verify
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'docs-agent/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install plugin deps
+        run: pip install pyyaml
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Run publish-verifier
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          MERGED_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python scripts/verify_runner.py --repo-root . --pr-number "$MERGED_PR_NUMBER"

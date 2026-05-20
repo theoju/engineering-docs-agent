@@ -1,0 +1,10 @@
+{
+  "pr_number": 1,
+  "what_changed": "shared page edit",
+  "why": "convergence",
+  "breaking": false,
+  "doc_targets": [
+    { "lens": "core", "action": "edit", "page_hint": "connectors/foo.md" }
+  ],
+  "notes": null
+}

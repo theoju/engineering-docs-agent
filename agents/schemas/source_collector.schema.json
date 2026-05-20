@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "source-collector output",
+  "type": "object",
+  "required": ["prs", "jira_issues"],
+  "properties": {
+    "prs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["number", "url"],
+        "properties": {
+          "number": { "type": "integer" },
+          "url": { "type": "string" },
+          "title": { "type": "string" },
+          "body": { "type": ["string", "null"] },
+          "merge_sha": { "type": "string" },
+          "merged_at": { "type": "string" },
+          "author": { "type": "string" },
+          "files": { "type": "array" },
+          "labels": { "type": "array" },
+          "jira_keys": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "jira_issues": { "type": "array" },
+    "error": { "type": ["string", "null"] },
+    "partial": { "type": "boolean" }
+  }
+}

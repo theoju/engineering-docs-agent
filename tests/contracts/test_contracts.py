@@ -1,0 +1,95 @@
+from __future__ import annotations
+import json
+import sys
+from pathlib import Path
+
+# Make scripts/ importable.
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+
+FAKES = Path(__file__).parent.parent / "orchestrator" / "fakes"
+
+
+def test_source_collector_validates_and_parses():
+    from contracts import validate_and_parse, SourceCollectorResult
+
+    raw = json.loads((FAKES / "fake_source_collector.json").read_text())
+    result, errors = validate_and_parse("source-collector", raw)
+    assert errors == []
+    assert isinstance(result, SourceCollectorResult)
+    assert len(result.prs) == 1
+    assert result.partial is False
+
+
+def test_source_collector_rejects_malformed():
+    from contracts import validate_and_parse
+
+    raw = {"prs": "not-a-list", "jira_issues": []}
+    result, errors = validate_and_parse("source-collector", raw)
+    assert result is None
+    assert errors
+    assert "schema_invalid" in errors[0]
+
+
+def test_pr_summarizer_validates_and_parses():
+    from contracts import validate_and_parse, PrSummary
+
+    raw = json.loads((FAKES / "fake_pr_summarizer.json").read_text())
+    result, errors = validate_and_parse("pr-summarizer", raw)
+    assert errors == []
+    assert isinstance(result, PrSummary)
+    assert result.pr_number == 1
+    assert result.error is None
+
+
+def test_page_author_validates_and_parses():
+    from contracts import validate_and_parse, PageAuthorResult
+
+    raw = json.loads((FAKES / "fake_page_author.json").read_text())
+    result, errors = validate_and_parse("page-author", raw)
+    assert errors == []
+    assert isinstance(result, PageAuthorResult)
+    assert result.ok is True
+
+
+def test_content_validator_validates_and_parses():
+    from contracts import validate_and_parse, ValidationResult
+
+    raw = json.loads((FAKES / "fake_content_validator.json").read_text())
+    result, errors = validate_and_parse("content-validator", raw)
+    assert errors == []
+    assert isinstance(result, ValidationResult)
+    assert result.failed == []
+
+
+def test_gap_detector_validates_and_parses():
+    from contracts import validate_and_parse, GapVerdict
+
+    raw = json.loads((FAKES / "fake_gap_detector.json").read_text())
+    result, errors = validate_and_parse("gap-detector", raw)
+    assert errors == []
+    assert isinstance(result, GapVerdict)
+    assert result.pr_id == "unknown/unknown#1"
+
+
+def test_publish_verifier_validates_and_parses():
+    from contracts import validate_and_parse, VerifyVerdict
+
+    raw = {
+        "verified": ["https://example.com/foo"],
+        "failed": [],
+        "build_status": "success",
+    }
+    result, errors = validate_and_parse("publish-verifier", raw)
+    assert errors == []
+    assert isinstance(result, VerifyVerdict)
+    assert result.failed == []
+
+
+def test_notifier_validates_and_parses():
+    from contracts import validate_and_parse, NotifierResult
+
+    raw = json.loads((FAKES / "fake_notifier.json").read_text())
+    result, errors = validate_and_parse("notifier", raw)
+    assert errors == []
+    assert isinstance(result, NotifierResult)
+    assert result.slack_ok is True

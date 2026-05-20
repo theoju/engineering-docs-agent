@@ -1,0 +1,11 @@
+{
+  "name": "engineering-docs-agent-marketplace",
+  "description": "Self-hosted marketplace for engineering-docs-agent.",
+  "plugins": [
+    {
+      "name": "engineering-docs-agent",
+      "source": ".",
+      "version": "0.1.1"
+    }
+  ]
+}

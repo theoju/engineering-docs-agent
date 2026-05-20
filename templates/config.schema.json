@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "engineering-docs-agent config",
+  "type": "object",
+  "required": ["docs", "sources", "lint", "publishing", "notifications"],
+  "properties": {
+    "docs": {
+      "type": "object",
+      "required": [
+        "framework",
+        "source_dir",
+        "whats_new_file",
+        "agent_editable_paths",
+        "lens_paths"
+      ],
+      "properties": {
+        "framework": {
+          "type": "string",
+          "enum": ["mkdocs", "docusaurus"],
+          "description": "Docusaurus support is partial in v0.1; build validation skipped."
+        },
+        "source_dir": { "type": "string" },
+        "whats_new_file": { "type": "string" },
+        "agent_editable_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "lens_paths": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "archive_index": { "type": "boolean" }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "required": ["git"],
+      "properties": {
+        "git": {
+          "type": "object",
+          "required": ["host"],
+          "properties": { "host": { "type": "string" } }
+        },
+        "jira": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "project_keys": { "type": "array", "items": { "type": "string" } },
+            "base_url": { "type": "string" }
+          }
+        }
+      }
+    },
+    "trigger": { "type": "object" },
+    "gap_detection": { "type": "object" },
+    "voice": {
+      "type": "object",
+      "properties": {
+        "sample_paths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "lint": {
+      "type": "object",
+      "properties": {
+        "tier1": {},
+        "tier2": { "type": "object" },
+        "tier3": { "type": "object" },
+        "stub_paths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "publishing": {
+      "type": "object",
+      "required": ["base_url", "build_workflow", "url_map_rule"],
+      "properties": {
+        "base_url": { "type": "string" },
+        "build_workflow": { "type": "string" },
+        "url_map_rule": { "type": "string" },
+        "verify_timeout_seconds": { "type": "integer" }
+      }
+    },
+    "notifications": { "type": "object" }
+  }
+}

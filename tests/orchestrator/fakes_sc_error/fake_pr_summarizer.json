@@ -1,0 +1,10 @@
+{
+  "pr_number": 1,
+  "what_changed": "Adds a foo connector",
+  "why": "Customer demand",
+  "breaking": false,
+  "doc_targets": [
+    { "lens": "core", "action": "create", "page_hint": "connectors/foo.md" }
+  ],
+  "notes": null
+}

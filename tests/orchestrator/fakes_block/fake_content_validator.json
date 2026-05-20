@@ -1,0 +1,11 @@
+{
+  "passed": [],
+  "failed": [
+    {
+      "path": "docs/site-src/core/connectors/foo.md",
+      "rule": "frontmatter_schema",
+      "severity": "block",
+      "message": "missing required field: status"
+    }
+  ]
+}

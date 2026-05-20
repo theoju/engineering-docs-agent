@@ -1,0 +1,6 @@
+{
+  "files": [
+    { "path": "docs/site-src/foo.md", "additions": 10, "deletions": 0 },
+    { "path": "docs/site-src/bar.md", "additions": 5, "deletions": 2 }
+  ]
+}

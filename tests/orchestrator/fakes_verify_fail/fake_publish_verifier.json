@@ -1,0 +1,5 @@
+{
+  "verified": [],
+  "failed": ["https://example.com/connectors/foo"],
+  "build_status": "success"
+}

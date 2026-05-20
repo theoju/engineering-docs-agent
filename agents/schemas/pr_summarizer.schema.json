@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "pr-summarizer output",
+  "type": "object",
+  "required": ["pr_number"],
+  "properties": {
+    "pr_number": { "type": "integer" },
+    "what_changed": { "type": ["string", "null"] },
+    "why": { "type": ["string", "null"] },
+    "breaking": { "type": "boolean" },
+    "doc_targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["lens", "action", "page_hint"],
+        "properties": {
+          "lens": { "type": "string" },
+          "action": { "type": "string", "enum": ["create", "edit"] },
+          "page_hint": { "type": "string" }
+        }
+      }
+    },
+    "notes": { "type": ["string", "null"] },
+    "error": { "type": ["string", "null"] }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "passed": [
+    {
+      "path": "docs/site-src/core/connectors/foo.md",
+      "rules": ["frontmatter_schema"]
+    }
+  ],
+  "failed": []
+}

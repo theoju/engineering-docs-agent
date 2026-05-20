@@ -91,23 +91,42 @@ def detect_jira_hint(cwd: Path) -> dict | None:
     return None
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--json", action="store_true")
-    args = parser.parse_args()
-    cwd = Path.cwd()
+def discover(cwd: Path) -> dict:
+    """Discover host repo settings. Returns a structured dict with optional warnings."""
+    warnings: list[dict] = []
     framework = detect_framework(cwd)
+    if framework == "docusaurus":
+        warnings.append(
+            {
+                "code": "docusaurus_v0.1_unsupported",
+                "message": (
+                    "Docusaurus detected; v0.1 only validates mkdocs builds. "
+                    "Other lint rules still run."
+                ),
+            }
+        )
     source_dir = detect_source_dir(cwd, framework)
     lens_paths = detect_lens_paths(cwd, source_dir)
     ci = detect_ci(cwd)
     jira_hint = detect_jira_hint(cwd)
-    out = {
+    out: dict = {
         "framework": framework,
         "source_dir": source_dir,
         "lens_paths": lens_paths,
         "ci": ci,
         "jira_hint": jira_hint,
     }
+    if warnings:
+        out["warnings"] = warnings
+    return out
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    cwd = Path.cwd()
+    out = discover(cwd)
     if args.json:
         json.dump(out, sys.stdout)
     else:

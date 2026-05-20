@@ -130,6 +130,11 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     if sources is None:
         add_partial(state, "source_collector_invalid: returned None")
         sources = {"prs": [], "jira_issues": []}
+    else:
+        if sources.get("error"):
+            add_partial(state, f"source_collector_error: {sources['error']}")
+        if sources.get("partial"):
+            add_partial(state, "source_collector_partial: true")
 
     prs = sources.get("prs", [])
     jira_issues = sources.get("jira_issues", []) or []
@@ -151,6 +156,12 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         )
         if summary is None:
             add_partial(state, f"pr_summarizer_invalid: pr={pr['number']}")
+            continue
+        if summary.get("error"):
+            add_partial(
+                state,
+                f"pr_summarizer_error: pr={pr['number']}: {summary['error']}",
+            )
             continue
         summaries.append(summary)
 

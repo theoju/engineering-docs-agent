@@ -8,6 +8,7 @@ RUNNER = Path(__file__).parent.parent.parent / "scripts" / "orchestrator_runner.
 FAKES = Path(__file__).parent / "fakes"
 FAKES_BLOCK = Path(__file__).parent / "fakes_block"
 FAKES_UNSAFE = Path(__file__).parent / "fakes_unsafe"
+FAKES_SC_ERROR = Path(__file__).parent / "fakes_sc_error"
 
 
 def _run_inproc(tmp_path: Path, fakes_dir: Path):
@@ -389,3 +390,20 @@ def test_dispatch_subagent_handles_claude_not_installed(monkeypatch, tmp_path):
     monkeypatch.setattr(runner.subprocess, "run", raise_fnf)
     result = runner.dispatch_subagent("source-collector", {}, dry_run_dir=None)
     assert result is None
+
+
+def test_source_collector_error_propagates_partial(tmp_path):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    state_path = _init_host(tmp_path)
+    rc = runner.run(tmp_path, dry_run_dir=FAKES_SC_ERROR, no_pr=True)
+    assert rc == 0
+
+    state = json.loads(state_path.read_text())
+    reasons = state["current_run"]["partial_reasons"]
+    assert any("source_collector_error" in r for r in reasons)
+    assert any("source_collector_partial" in r for r in reasons)
+    assert state["current_run"]["partial"] is True

@@ -26,6 +26,24 @@ class GhClient:
             extract=lambda d: [f["path"] for f in d.get("files", [])],
         )
 
+    def pr_list_for_branch(self, branch: str) -> GhResult:
+        return self._run_json(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "number",
+                "-L",
+                "1",
+            ],
+            extract=lambda d: d[0]["number"] if d else None,
+        )
+
     def _run_json(self, cmd: list[str], *, extract: Callable[[Any], Any]) -> GhResult:
         try:
             r = subprocess.run(

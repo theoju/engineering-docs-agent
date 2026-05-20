@@ -55,3 +55,29 @@ def test_pr_view_files_bad_json(monkeypatch, tmp_path):
     r = gh.pr_view_files(42)
     assert not r.ok
     assert r.error.startswith("gh_bad_json")
+
+
+def test_pr_list_for_branch_empty(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    monkeypatch.setattr(
+        "gh_client.subprocess.run",
+        _fake_run(stdout=(FIXTURES / "pr_list_empty.json").read_text()),
+    )
+    gh = GhClient(tmp_path)
+    r = gh.pr_list_for_branch("docs-agent/2026-05-20T07")
+    assert r.ok
+    assert r.value is None
+
+
+def test_pr_list_for_branch_existing(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    monkeypatch.setattr(
+        "gh_client.subprocess.run",
+        _fake_run(stdout=(FIXTURES / "pr_list_existing.json").read_text()),
+    )
+    gh = GhClient(tmp_path)
+    r = gh.pr_list_for_branch("docs-agent/2026-05-20T07")
+    assert r.ok
+    assert r.value == 142

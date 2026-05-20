@@ -41,19 +41,105 @@ def test_dispatch_uses_print_and_agent_flags(monkeypatch):
     assert "--input" not in cmd, f"legacy --input flag: {cmd}"
 
 
-def test_dispatch_passes_inputs_as_prompt_payload(monkeypatch):
-    """The inputs dict is serialized as the -p prompt argument."""
+def test_dispatch_embeds_inputs_inside_execution_framing(monkeypatch):
+    """CCE-3 A: prompt wraps the JSON in <inputs>...</inputs> with execution framing.
+
+    Locks the byte-for-byte payload contract: a future refactor that reformats
+    the JSON (sorting keys, pretty-printing, escape changes) would break this.
+    Also pins specific framing phrases so a weakening edit (dropping the
+    no-prose / no-markdown / execute-the-Job instructions) is caught here
+    rather than at runtime against a live LLM.
+    """
+    captured: dict = {}
+    monkeypatch.setattr(subprocess, "run", _fake_run_capture(captured, stdout="{}"))
+
+    inputs = {"target_path": "docs/x.md", "lens": "core"}
+    orchestrator_runner.dispatch_subagent("page-author", inputs, dry_run_dir=None)
+
+    cmd = captured["cmd"]
+    prompt = cmd[cmd.index("-p") + 1]
+
+    # Framing markers present.
+    assert "<inputs>" in prompt and "</inputs>" in prompt
+
+    # Pin specific framing phrases — a weakening edit fails the test, not the LLM.
+    for required_phrase in (
+        "Execute the Job",
+        "Return ONLY",
+        "no prose",
+        "no markdown fences",
+        "no clarifying questions",
+    ):
+        assert required_phrase in prompt, (
+            f"framing weakened: missing {required_phrase!r}"
+        )
+
+    # Payload must appear byte-for-byte (json.dumps output, unmodified).
+    expected_payload = json.dumps(inputs)
+    assert expected_payload in prompt, (
+        "payload was transformed inside framing (re-serialized?)"
+    )
+
+    # And it must appear between the markers, not elsewhere.
+    start = prompt.index("<inputs>") + len("<inputs>")
+    end = prompt.index("</inputs>")
+    assert expected_payload in prompt[start:end]
+
+
+def test_dispatch_threads_cwd_to_subprocess(monkeypatch, tmp_path):
+    """CCE-3 B: when cwd is passed, subprocess.run receives it."""
     captured: dict = {}
     monkeypatch.setattr(subprocess, "run", _fake_run_capture(captured, stdout="{}"))
 
     orchestrator_runner.dispatch_subagent(
-        "page-author", {"target_path": "docs/x.md", "lens": "core"}, dry_run_dir=None
+        "notifier", {"x": 1}, dry_run_dir=None, cwd=tmp_path
     )
 
+    assert captured["kwargs"].get("cwd") == str(tmp_path)
+
+
+def test_dispatch_omits_cwd_when_not_provided(monkeypatch):
+    """Default behavior: no cwd kwarg means subprocess inherits parent CWD."""
+    captured: dict = {}
+    monkeypatch.setattr(subprocess, "run", _fake_run_capture(captured, stdout="{}"))
+
+    orchestrator_runner.dispatch_subagent("notifier", {}, dry_run_dir=None)
+
+    assert "cwd" not in captured["kwargs"] or captured["kwargs"].get("cwd") is None
+
+
+def test_dispatch_auto_passes_plugin_dir(monkeypatch):
+    """CCE-3 C1: argv contains --plugin-dir pointing at the plugin root."""
+    captured: dict = {}
+    monkeypatch.setattr(subprocess, "run", _fake_run_capture(captured, stdout="{}"))
+
+    orchestrator_runner.dispatch_subagent("notifier", {}, dry_run_dir=None)
+
     cmd = captured["cmd"]
-    p_index = cmd.index("-p")
-    payload = cmd[p_index + 1]
-    assert json.loads(payload) == {"target_path": "docs/x.md", "lens": "core"}
+    assert "--plugin-dir" in cmd
+    plugin_dir = Path(cmd[cmd.index("--plugin-dir") + 1])
+    # Plugin root is two levels up from orchestrator_runner.py (scripts/ → repo root).
+    expected = Path(orchestrator_runner.__file__).resolve().parent.parent
+    assert plugin_dir.resolve() == expected
+    # And it should actually contain the agents directory.
+    assert (plugin_dir / "agents").is_dir()
+
+
+def test_dispatch_passes_allowed_tools_union(monkeypatch):
+    """CCE-3 C2: --allowedTools lists the union of tools the agents need."""
+    captured: dict = {}
+    monkeypatch.setattr(subprocess, "run", _fake_run_capture(captured, stdout="{}"))
+
+    orchestrator_runner.dispatch_subagent("notifier", {}, dry_run_dir=None)
+
+    cmd = captured["cmd"]
+    assert "--allowedTools" in cmd
+    tools_arg = cmd[cmd.index("--allowedTools") + 1]
+    # The union across the seven agent .md files.
+    for required in ("Bash", "Read", "Write", "Edit", "WebFetch"):
+        assert required in tools_arg, (
+            f"{required} missing from --allowedTools={tools_arg}"
+        )
 
 
 def test_dispatch_returns_none_on_missing_binary(monkeypatch):

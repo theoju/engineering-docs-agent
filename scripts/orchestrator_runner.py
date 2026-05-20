@@ -61,15 +61,40 @@ def load_json(p: Path) -> dict[str, Any] | None:
         return None
 
 
+_PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+_AGENT_ALLOWED_TOOLS: tuple[str, ...] = ("Bash", "Read", "Write", "Edit", "WebFetch")
+_EXECUTION_FRAMING = (
+    "You are running in production as part of the engineering-docs-agent "
+    "orchestrator pipeline.\n\n"
+    "Your inputs (JSON) are below. Execute the Job defined in your system "
+    "prompt using these inputs. Return ONLY a JSON object matching your "
+    "output contract — no prose, no markdown fences, no commentary, no "
+    "clarifying questions.\n\n"
+    "<inputs>\n{payload}\n</inputs>\n"
+)
+
+
 def dispatch_subagent(
-    name: str, inputs: dict, *, dry_run_dir: Path | None
+    name: str,
+    inputs: dict,
+    *,
+    dry_run_dir: Path | None,
+    cwd: Path | None = None,
 ) -> dict | None:
     """Dispatch a subagent. Returns parsed JSON output, or None on failure.
 
     In dry-run mode, reads from `<dry_run_dir>/fake_<name_with_underscores>.json`
     instead of invoking Claude. Returns None if the fixture is missing.
 
-    In production, returns None if:
+    In production, the subprocess invocation:
+    - wraps `inputs` in execution framing so Claude executes the agent's
+      Job rather than analyzing the JSON as content (CCE-3 A)
+    - sets `cwd` so the agent loads the target repo's CLAUDE.md and its
+      git/gh state, not the plugin's (CCE-3 B)
+    - passes `--plugin-dir` and `--allowedTools` so agents resolve and can
+      run their declared tools non-interactively (CCE-3 C)
+
+    Returns None if:
     - the `claude` binary is not installed (FileNotFoundError)
     - the subagent process exits with a non-zero return code
     - the subagent emits empty stdout
@@ -80,14 +105,23 @@ def dispatch_subagent(
         if not fixture.exists():
             return None
         return load_json(fixture)
-    payload = json.dumps(inputs)
+    prompt = _EXECUTION_FRAMING.format(payload=json.dumps(inputs))
+    argv = [
+        "claude",
+        "-p",
+        prompt,
+        "--agent",
+        name,
+        "--plugin-dir",
+        str(_PLUGIN_ROOT),
+        "--allowedTools",
+        " ".join(_AGENT_ALLOWED_TOOLS),
+    ]
+    run_kwargs: dict = {"capture_output": True, "text": True, "check": False}
+    if cwd is not None:
+        run_kwargs["cwd"] = str(cwd)
     try:
-        r = subprocess.run(
-            ["claude", "-p", payload, "--agent", name],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        r = subprocess.run(argv, **run_kwargs)
     except FileNotFoundError:
         return None
     if r.returncode != 0:
@@ -164,7 +198,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     }
     if jira_payload:
         sc_inputs["jira"] = jira_payload
-    sources = dispatch_subagent("source-collector", sc_inputs, dry_run_dir=dry_run_dir)
+    sources = dispatch_subagent(
+        "source-collector", sc_inputs, dry_run_dir=dry_run_dir, cwd=repo_root
+    )
     if sources is None:
         add_partial(state, "source_collector_invalid: returned None")
         sources = {"prs": [], "jira_issues": []}
@@ -191,6 +227,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                 "lens_names": list(config.get("docs", {}).get("lens_paths", {}).keys()),
             },
             dry_run_dir=dry_run_dir,
+            cwd=repo_root,
         )
         if summary is None:
             add_partial(state, f"pr_summarizer_invalid: pr={pr['number']}")
@@ -254,6 +291,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                 },
             },
             dry_run_dir=dry_run_dir,
+            cwd=repo_root,
         )
         if out is None:
             add_partial(state, f"page_author_invalid: {rel}")
@@ -276,6 +314,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                 "voice_samples": voice_samples,
             },
             dry_run_dir=dry_run_dir,
+            cwd=repo_root,
         )
         if validation is None:
             add_partial(state, "content_validator_invalid: returned None")
@@ -375,6 +414,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                 "dismissed_flags": list(dismissed),
             },
             dry_run_dir=dry_run_dir,
+            cwd=repo_root,
         )
         if verdict is None:
             add_partial(state, f"gap_detector_invalid: pr_id={pr_id}")
@@ -443,6 +483,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             "mode": "run",
         },
         dry_run_dir=dry_run_dir,
+        cwd=repo_root,
     )
     if notifier_result is None:
         add_partial(state, "notifier_invalid: returned None")

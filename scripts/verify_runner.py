@@ -50,6 +50,7 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
                     "mode": "verify",
                 },
                 dry_run_dir=dry_run_dir,
+                cwd=repo_root,
             )
             return 1
         # dry-run mode tolerates missing gh; proceed with empty changed_paths
@@ -68,6 +69,7 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
                 "repo": repo,
             },
             dry_run_dir=dry_run_dir,
+            cwd=repo_root,
         )
         if verdict is None:
             verdict = {"verified": [], "failed": [], "build_status": "verifier_invalid"}
@@ -85,6 +87,7 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
                 "mode": "verify",
             },
             dry_run_dir=dry_run_dir,
+            cwd=repo_root,
         )
 
         failed_urls = verdict.get("failed", [])

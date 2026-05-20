@@ -42,10 +42,17 @@ class PageAuthorResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class ValidationResult:
+    passed: list[dict]
+    failed: list[dict]
+
+
 _DATACLASS_BY_NAME: dict[str, type] = {
     "source-collector": SourceCollectorResult,
     "pr-summarizer": PrSummary,
     "page-author": PageAuthorResult,
+    "content-validator": ValidationResult,
 }
 
 

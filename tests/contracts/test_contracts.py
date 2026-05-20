@@ -49,3 +49,13 @@ def test_page_author_validates_and_parses():
     assert errors == []
     assert isinstance(result, PageAuthorResult)
     assert result.ok is True
+
+
+def test_content_validator_validates_and_parses():
+    from contracts import validate_and_parse, ValidationResult
+
+    raw = json.loads((FAKES / "fake_content_validator.json").read_text())
+    result, errors = validate_and_parse("content-validator", raw)
+    assert errors == []
+    assert isinstance(result, ValidationResult)
+    assert result.failed == []

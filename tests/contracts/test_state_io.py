@@ -110,3 +110,45 @@ def test_add_partial_idempotent_on_same_reason():
     state = {"current_run": {"partial": True, "partial_reasons": ["dup"]}}
     add_partial(state, "dup")
     assert state["current_run"]["partial_reasons"] == ["dup"]
+
+
+def test_cleanup_empty_parents_removes_empty_dirs(tmp_path):
+    from state_io import cleanup_empty_parents
+
+    deep = tmp_path / "a" / "b" / "c"
+    deep.mkdir(parents=True)
+    f = deep / "leaf.md"
+    f.write_text("x")
+    f.unlink()
+
+    cleanup_empty_parents(f, until=tmp_path)
+
+    assert not (tmp_path / "a").exists()
+    assert tmp_path.exists()
+
+
+def test_cleanup_empty_parents_stops_at_non_empty(tmp_path):
+    from state_io import cleanup_empty_parents
+
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    sibling = tmp_path / "a" / "keep.md"
+    sibling.write_text("x")
+    f = tmp_path / "a" / "b" / "leaf.md"
+    f.write_text("x")
+    f.unlink()
+
+    cleanup_empty_parents(f, until=tmp_path)
+
+    assert (tmp_path / "a").exists()
+    assert sibling.exists()
+    assert not (tmp_path / "a" / "b").exists()
+
+
+def test_cleanup_empty_parents_never_removes_until(tmp_path):
+    from state_io import cleanup_empty_parents
+
+    f = tmp_path / "leaf.md"
+    f.write_text("x")
+    f.unlink()
+    cleanup_empty_parents(f, until=tmp_path)
+    assert tmp_path.exists()

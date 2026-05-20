@@ -51,3 +51,15 @@ def add_partial(state: dict, reason: str) -> None:
     cr.setdefault("partial_reasons", [])
     if reason not in cr["partial_reasons"]:
         cr["partial_reasons"].append(reason)
+
+
+def cleanup_empty_parents(path: Path, *, until: Path) -> None:
+    """Walk up from path.parent removing empty dirs; stop at `until` (exclusive)."""
+    until_resolved = until.resolve()
+    current = path.parent.resolve()
+    while current != until_resolved and until_resolved in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent

@@ -196,8 +196,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     # CCE-5: Always begin a new run with a fresh current_run. partial_reasons
     # from a prior run must not carry forward — persistent root causes will
     # re-accumulate naturally on this run's own dispatches; transient reasons
-    # belong to the run that produced them. The stale-clear diagnostic below
-    # writes into the FRESH current_run, preserving the intra-invocation signal.
+    # belong to the run that produced them.
     prior_run = state.pop("current_run", None)
     now = datetime.now(timezone.utc).isoformat()
     state["current_run"] = {
@@ -213,6 +212,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             try:
                 prior_dt = datetime.fromisoformat(prior_started.replace("Z", "+00:00"))
                 if (datetime.now(timezone.utc) - prior_dt) > timedelta(hours=24):
+                    # add_partial writes into the already-initialised fresh current_run
                     add_partial(state, "stale_current_run_cleared")
             except ValueError:
                 pass

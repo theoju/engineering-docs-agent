@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 import yaml
 
-from state_io import load_voice_samples
+from state_io import add_partial, load_voice_samples, resolve_lens
 
 
 def detect_repo(repo_root: Path) -> dict[str, str]:
@@ -132,6 +132,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         summaries.append(summary)
 
     # Page authoring: aggregate doc_targets per lens.
+    import fnmatch
+
+    editable_globs = config.get("docs", {}).get("agent_editable_paths", [])
     per_lens: dict[str, list[dict]] = {}
     for s in summaries:
         for t in s.get("doc_targets", []):
@@ -139,11 +142,25 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
 
     authored: list[str] = []
     for lens, batch in per_lens.items():
+        try:
+            lens_path, _opts = resolve_lens(config, lens)
+        except KeyError:
+            for item in batch:
+                add_partial(state, f"unknown_lens: {lens}")
+            continue
         for item in batch:
             t = item["target"]
-            target_path = (
-                repo_root / config["docs"]["lens_paths"][lens] / t["page_hint"]
-            )
+            target_path = repo_root / lens_path / t["page_hint"]
+            try:
+                rel = target_path.resolve().relative_to(repo_root.resolve())
+            except ValueError:
+                add_partial(state, f"unsafe_page_path: {t['page_hint']}")
+                continue
+            if editable_globs and not any(
+                fnmatch.fnmatch(str(rel), g) for g in editable_globs
+            ):
+                add_partial(state, f"unsafe_page_path: {rel}")
+                continue
             target_path.parent.mkdir(parents=True, exist_ok=True)
             out = dispatch_subagent(
                 "page-author",

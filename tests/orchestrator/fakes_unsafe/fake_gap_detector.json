@@ -1,0 +1,7 @@
+{
+  "pr_id": "x/y#1",
+  "needs_spec": true,
+  "reasoning": "allowlist hit",
+  "confidence": "high",
+  "tier": "allowlist"
+}

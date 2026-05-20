@@ -7,6 +7,7 @@ from pathlib import Path
 RUNNER = Path(__file__).parent.parent.parent / "scripts" / "orchestrator_runner.py"
 FAKES = Path(__file__).parent / "fakes"
 FAKES_BLOCK = Path(__file__).parent / "fakes_block"
+FAKES_UNSAFE = Path(__file__).parent / "fakes_unsafe"
 
 
 def _run_inproc(tmp_path: Path, fakes_dir: Path):
@@ -251,3 +252,24 @@ def test_voice_samples_loaded_and_passed_to_authoring(tmp_path, monkeypatch):
         paths = [s["path"] for s in entry["voice_samples"]]
         assert "voice/tone.md" in paths
         assert "CLAUDE.md" in paths
+
+
+def test_unsafe_page_path_filtered_logs_partial(tmp_path):
+    """page_hint containing .. should not touch the filesystem."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    state_path = _init_host(tmp_path)
+    rc = runner.run(tmp_path, dry_run_dir=FAKES_UNSAFE, no_pr=True)
+    assert rc == 0
+
+    # Filesystem outside the lens path was not touched
+    assert not (tmp_path.parent.parent / "etc" / "passwd.md").exists()
+    # No "etc" dir was created at any level
+    assert not (tmp_path / ".." / "etc").exists()
+
+    state = json.loads(state_path.read_text())
+    reasons = state["current_run"]["partial_reasons"]
+    assert any("unsafe_page_path" in r for r in reasons)

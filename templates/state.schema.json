@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "engineering-docs-agent state",
+  "type": "object",
+  "required": ["version"],
+  "properties": {
+    "version": { "type": "string" },
+    "last_successful_run": {
+      "type": "object",
+      "properties": {
+        "completed_at": { "type": "string" },
+        "head_sha": { "type": "string" },
+        "pr_number": { "type": "integer" }
+      }
+    },
+    "current_run": {
+      "type": "object",
+      "properties": {
+        "started_at": { "type": "string" },
+        "head_sha": { "type": "string" },
+        "partial": { "type": "boolean" },
+        "partial_reasons": { "type": "array", "items": { "type": "string" } },
+        "pr_number": { "type": ["integer", "null"] }
+      }
+    },
+    "dismissed_gap_flags": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "cursors": { "type": "object" }
+  }
+}

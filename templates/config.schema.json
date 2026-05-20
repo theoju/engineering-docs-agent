@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "engineering-docs-agent config",
+  "type": "object",
+  "required": ["docs", "sources", "lint", "publishing", "notifications"],
+  "properties": {
+    "docs": {
+      "type": "object",
+      "required": [
+        "framework",
+        "source_dir",
+        "whats_new_file",
+        "agent_editable_paths",
+        "lens_paths"
+      ],
+      "properties": {
+        "framework": { "type": "string", "enum": ["mkdocs", "docusaurus"] },
+        "source_dir": { "type": "string" },
+        "whats_new_file": { "type": "string" },
+        "agent_editable_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "lens_paths": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "required": ["git"],
+      "properties": {
+        "git": {
+          "type": "object",
+          "required": ["host"],
+          "properties": { "host": { "type": "string" } }
+        },
+        "jira": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "project_keys": { "type": "array", "items": { "type": "string" } },
+            "base_url": { "type": "string" }
+          }
+        }
+      }
+    },
+    "trigger": { "type": "object" },
+    "gap_detection": { "type": "object" },
+    "voice": { "type": "object" },
+    "lint": { "type": "object" },
+    "publishing": {
+      "type": "object",
+      "required": ["base_url", "build_workflow", "url_map_rule"],
+      "properties": {
+        "base_url": { "type": "string" },
+        "build_workflow": { "type": "string" },
+        "url_map_rule": { "type": "string" },
+        "verify_timeout_seconds": { "type": "integer" }
+      }
+    },
+    "notifications": { "type": "object" }
+  }
+}

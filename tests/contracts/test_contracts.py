@@ -28,3 +28,14 @@ def test_source_collector_rejects_malformed():
     assert result is None
     assert errors
     assert "schema_invalid" in errors[0]
+
+
+def test_pr_summarizer_validates_and_parses():
+    from contracts import validate_and_parse, PrSummary
+
+    raw = json.loads((FAKES / "fake_pr_summarizer.json").read_text())
+    result, errors = validate_and_parse("pr-summarizer", raw)
+    assert errors == []
+    assert isinstance(result, PrSummary)
+    assert result.pr_number == 1
+    assert result.error is None

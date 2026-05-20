@@ -18,8 +18,24 @@ class SourceCollectorResult:
     partial: bool = False
 
 
+@dataclass(frozen=True)
+class PrSummary:
+    pr_number: int
+    what_changed: str | None = None
+    why: str | None = None
+    breaking: bool = False
+    doc_targets: list[dict] = None  # type: ignore[assignment]
+    notes: str | None = None
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.doc_targets is None:
+            object.__setattr__(self, "doc_targets", [])
+
+
 _DATACLASS_BY_NAME: dict[str, type] = {
     "source-collector": SourceCollectorResult,
+    "pr-summarizer": PrSummary,
 }
 
 

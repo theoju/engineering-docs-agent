@@ -124,9 +124,9 @@ def dispatch_subagent(
         r = subprocess.run(argv, **run_kwargs)
     except FileNotFoundError:
         return None
-    # CCE-9 Phase 1 instrumentation: capture raw subagent stdout/stderr/rc
-    # when DOCS_AGENT_DEBUG_DIR is set. Working-tree only; will be reverted
-    # or productized before /ship.
+    # CCE-9 diagnostic instrumentation: when DOCS_AGENT_DEBUG_DIR is set,
+    # capture raw subagent prompt/stdout/stderr/meta into that directory.
+    # No-op otherwise.
     debug_dir = os.environ.get("DOCS_AGENT_DEBUG_DIR")
     if debug_dir:
         debug_path = Path(debug_dir)

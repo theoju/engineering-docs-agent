@@ -181,10 +181,18 @@ def dispatch_subagent(
     - passes `--plugin-dir` and `--allowedTools` so agents resolve and can
       run their declared tools non-interactively (CCE-3 C)
 
+    When DOCS_AGENT_DEBUG_DIR is set (CCE-9 + CCE-12):
+    - dispatch uses `--output-format stream-json --verbose` so we observe
+      ground-truth tool-call sequence
+    - raw NDJSON event stream is persisted to <agent>.stream.jsonl
+    - extended <agent>.meta.json carries a tool_use summary block
+    - the dict returned to callers is parsed from the FINAL assistant
+      message's concatenated text content (caller contract preserved)
+
     Returns None if:
     - the `claude` binary is not installed (FileNotFoundError)
     - the subagent process exits with a non-zero return code
-    - the subagent emits empty stdout
+    - the subagent emits empty stdout (or in stream-json mode, no assistant text)
     - the subagent emits unparseable JSON
     """
     if dry_run_dir is not None:
@@ -192,8 +200,9 @@ def dispatch_subagent(
         if not fixture.exists():
             return None
         return load_json(fixture)
+
     prompt = _EXECUTION_FRAMING.format(payload=json.dumps(inputs))
-    argv = [
+    base_argv = [
         "claude",
         "-p",
         prompt,
@@ -204,6 +213,13 @@ def dispatch_subagent(
         "--allowedTools",
         " ".join(_AGENT_ALLOWED_TOOLS),
     ]
+    debug_dir = os.environ.get("DOCS_AGENT_DEBUG_DIR")
+    argv = (
+        base_argv + ["--output-format", "stream-json", "--verbose"]
+        if debug_dir
+        else base_argv
+    )
+
     run_kwargs: dict = {"capture_output": True, "text": True, "check": False}
     if cwd is not None:
         run_kwargs["cwd"] = str(cwd)
@@ -216,28 +232,55 @@ def dispatch_subagent(
         r = subprocess.run(argv, **run_kwargs)
     except FileNotFoundError:
         return None
-    # CCE-9 diagnostic instrumentation: when DOCS_AGENT_DEBUG_DIR is set,
-    # capture raw subagent prompt/stdout/stderr/meta into that directory.
-    # No-op otherwise.
-    debug_dir = os.environ.get("DOCS_AGENT_DEBUG_DIR")
+
+    # Parse subagent output. In stream-json mode the canonical JSON is the
+    # final assistant message's text content; in simple-print mode it IS
+    # the raw stdout.
+    raw_stdout = r.stdout or ""
+    tool_use_summary: dict | None = None
+    if debug_dir:
+        events: list[dict] = []
+        for line in raw_stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                # Skip malformed lines; raw stream.jsonl preserves them for forensics.
+                continue
+        canonical_text = _extract_final_assistant_text(events)
+        tool_use_summary = _summarize_tool_use(events)
+    else:
+        canonical_text = raw_stdout
+
+    # CCE-9 + CCE-12: when DOCS_AGENT_DEBUG_DIR is set, write forensics
+    # artifacts. The extra stream.jsonl is stream-json-only; the tool_use
+    # block in meta.json is also stream-json-only.
     if debug_dir:
         debug_path = Path(debug_dir)
         debug_path.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         base = debug_path / f"{ts}-{name}"
         base.with_suffix(".prompt.txt").write_text(prompt)
-        base.with_suffix(".stdout.txt").write_text(r.stdout or "")
+        # stdout.txt holds the caller view (extracted canonical JSON), so
+        # readers can diff against the simple-print mode's stdout.txt
+        # without knowing which dispatch path produced it.
+        base.with_suffix(".stdout.txt").write_text(canonical_text)
         base.with_suffix(".stderr.txt").write_text(r.stderr or "")
-        base.with_suffix(".meta.json").write_text(
-            json.dumps({"returncode": r.returncode, "argv": argv}, indent=2)
-        )
+        base.with_suffix(".stream.jsonl").write_text(raw_stdout)
+        meta_payload: dict = {"returncode": r.returncode, "argv": argv}
+        if tool_use_summary is not None:
+            meta_payload["tool_use"] = tool_use_summary
+        base.with_suffix(".meta.json").write_text(json.dumps(meta_payload, indent=2))
+
     if r.returncode != 0:
         return None
-    stdout = (r.stdout or "").strip()
-    if not stdout:
+    canonical_text = canonical_text.strip()
+    if not canonical_text:
         return None
     try:
-        return json.loads(stdout)
+        return json.loads(canonical_text)
     except json.JSONDecodeError:
         return None
 

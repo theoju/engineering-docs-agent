@@ -34,16 +34,32 @@ def test_debug_capture_writes_files_when_env_var_set(tmp_path, monkeypatch):
         dry_run_dir=None,
     )
 
-    assert result == {"prs": [], "jira_issues": []}
+    # CCE-12: with DOCS_AGENT_DEBUG_DIR set the dispatcher uses stream-json.
+    # This test's fake stdout is a single JSON object (not real NDJSON), so
+    # no assistant events are found and the canonical text is empty -> None.
+    # The capture artifacts are still written for forensics regardless.
+    assert result is None
 
     captured = sorted(tmp_path.iterdir())
     suffixes = {p.name.split(".", 1)[1] for p in captured}
-    assert suffixes == {"prompt.txt", "stdout.txt", "stderr.txt", "meta.json"}, (
-        f"expected 4 capture artifacts; got {sorted(p.name for p in captured)}"
-    )
+    assert suffixes == {
+        "prompt.txt",
+        "stdout.txt",
+        "stderr.txt",
+        "stream.jsonl",
+        "meta.json",
+    }, f"expected 5 capture artifacts; got {sorted(p.name for p in captured)}"
 
+    # CCE-12: in stream-json mode, stdout.txt holds the extracted final
+    # assistant text. Our fake CompletedProcess used a single JSON object
+    # as stdout (not real NDJSON), so the parser sees zero assistant events
+    # and the extracted text is empty.
     stdout_file = next(p for p in captured if p.name.endswith(".stdout.txt"))
-    assert stdout_file.read_text() == fake_stdout
+    assert stdout_file.read_text() == ""
+
+    # Raw fake stdout is preserved in stream.jsonl for forensics.
+    stream_file = next(p for p in captured if p.name.endswith(".stream.jsonl"))
+    assert stream_file.read_text() == fake_stdout
 
     meta_file = next(p for p in captured if p.name.endswith(".meta.json"))
     meta = json.loads(meta_file.read_text())

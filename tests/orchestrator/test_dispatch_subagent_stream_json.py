@@ -197,3 +197,104 @@ def test_summarize_tool_use_caps_calls_at_50_and_sets_truncated():
     assert len(summary["calls"]) == 50
     assert summary["calls_truncated"] is True
     assert summary["by_name"] == {"Bash": 51}
+
+
+class _FakeCompleted:
+    def __init__(self, stdout: str, stderr: str = "", returncode: int = 0) -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+
+
+def test_dispatch_uses_stream_json_when_debug_dir_set(tmp_path, monkeypatch):
+    import orchestrator_runner as runner
+
+    fixture = _FIXTURE_DIR / "source_collector_with_tools.jsonl"
+    ndjson_stdout = fixture.read_text()
+
+    captured_argv: list[list[str]] = []
+
+    def fake_run(*args, **kwargs):
+        captured_argv.append(list(args[0]))
+        return _FakeCompleted(stdout=ndjson_stdout)
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    monkeypatch.setenv("DOCS_AGENT_DEBUG_DIR", str(tmp_path))
+
+    result = runner.dispatch_subagent(
+        "source-collector",
+        {"last_sha": "x", "head_sha": "y", "repo": {"owner": "o", "name": "n"}},
+        dry_run_dir=None,
+    )
+
+    # 1. Caller contract preserved: parsed dict comes from the final assistant text.
+    assert result == {
+        "prs": [{"number": 42, "url": "https://example.com/pr/42", "title": "Add foo"}],
+        "jira_issues": [],
+    }
+
+    # 2. Subprocess argv carries the stream-json flags.
+    assert len(captured_argv) == 1
+    argv = captured_argv[0]
+    assert "--output-format" in argv
+    assert argv[argv.index("--output-format") + 1] == "stream-json"
+    assert "--verbose" in argv
+
+    # 3. All five forensics artifacts written.
+    artifacts = sorted(p.name for p in tmp_path.iterdir())
+    suffixes = {name.split(".", 1)[1] for name in artifacts}
+    assert suffixes == {
+        "prompt.txt",
+        "stdout.txt",
+        "stderr.txt",
+        "stream.jsonl",
+        "meta.json",
+    }, f"got {artifacts}"
+
+    # 4. stdout.txt = extracted canonical JSON (caller view), NOT raw NDJSON.
+    stdout_file = next(p for p in tmp_path.iterdir() if p.name.endswith(".stdout.txt"))
+    assert json.loads(stdout_file.read_text()) == result
+
+    # 5. stream.jsonl = raw NDJSON bytes (forensics).
+    stream_file = next(
+        p for p in tmp_path.iterdir() if p.name.endswith(".stream.jsonl")
+    )
+    assert stream_file.read_text() == ndjson_stdout
+
+    # 6. meta.json includes the tool_use summary block.
+    meta_file = next(p for p in tmp_path.iterdir() if p.name.endswith(".meta.json"))
+    meta = json.loads(meta_file.read_text())
+    assert meta["returncode"] == 0
+    assert "source-collector" in meta["argv"]
+    assert meta["tool_use"]["total_calls"] == 2
+    assert meta["tool_use"]["by_name"] == {"Bash": 2}
+    assert meta["tool_use"]["stop_reason"] == "end_turn"
+
+
+def test_dispatch_uses_simple_print_when_debug_dir_unset(tmp_path, monkeypatch):
+    import orchestrator_runner as runner
+
+    captured_argv: list[list[str]] = []
+
+    def fake_run(*args, **kwargs):
+        captured_argv.append(list(args[0]))
+        return _FakeCompleted(stdout='{"prs":[],"jira_issues":[]}')
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    monkeypatch.delenv("DOCS_AGENT_DEBUG_DIR", raising=False)
+
+    result = runner.dispatch_subagent(
+        "source-collector",
+        {"last_sha": "x", "head_sha": "y", "repo": {"owner": "o", "name": "n"}},
+        dry_run_dir=None,
+    )
+
+    assert result == {"prs": [], "jira_issues": []}
+
+    # No stream-json flags in argv when gate is off.
+    argv = captured_argv[0]
+    assert "--output-format" not in argv
+    assert "--verbose" not in argv
+
+    # No debug artifacts written.
+    assert list(tmp_path.iterdir()) == []

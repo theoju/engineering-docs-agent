@@ -217,7 +217,5 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# engineering-docs-agent runtime state — see .engineering-docs-agent/state.example.json
-# for the seed template. Each orchestrator run mutates state.json (current_run,
-# last_successful_run); host repos copy state.example.json → state.json on first setup.
+# engineering-docs-agent runtime state (seed template: state.example.json)
 .engineering-docs-agent/state.json

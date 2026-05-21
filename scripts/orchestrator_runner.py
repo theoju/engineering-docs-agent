@@ -27,8 +27,6 @@ from state_io import (
 
 def detect_repo(repo_root: Path) -> dict[str, str]:
     """Detect GitHub owner/name from git remote or GITHUB_REPOSITORY env."""
-    import os
-
     if env := os.environ.get("GITHUB_REPOSITORY"):
         if "/" in env:
             owner, name = env.split("/", 1)

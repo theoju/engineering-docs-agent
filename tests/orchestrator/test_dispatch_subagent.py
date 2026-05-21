@@ -183,3 +183,24 @@ def test_dispatch_returns_none_on_empty_stdout(monkeypatch):
             orchestrator_runner.dispatch_subagent("notifier", {}, dry_run_dir=None)
             is None
         ), f"empty stdout {empty!r} should return None"
+
+
+def test_dispatch_passes_bare_flag(monkeypatch):
+    """CCE-15: dispatch must pass `--bare` so SessionStart hooks (e.g. the
+    explanatory-output-style plugin's hook that injects '★ Insight ─'
+    formatting) don't contaminate the subagent's stdout with prose
+    preambles. `--bare` is the documented way to skip hooks, plugin sync,
+    auto-memory, attribution, and CLAUDE.md auto-discovery while still
+    loading explicit --plugin-dir + --agent context.
+    """
+    captured: dict = {}
+    monkeypatch.setattr(subprocess, "run", _fake_run_capture(captured, stdout="{}"))
+
+    orchestrator_runner.dispatch_subagent(
+        "source-collector", {"foo": "bar"}, dry_run_dir=None
+    )
+
+    cmd = captured["cmd"]
+    assert "--bare" in cmd, f"--bare not in argv: {cmd}"
+    # --bare must appear before -p/--agent so it governs the whole invocation.
+    assert cmd.index("--bare") < cmd.index("-p"), f"--bare must precede -p: {cmd}"

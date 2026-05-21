@@ -221,6 +221,12 @@ def dispatch_subagent(
     prompt = _EXECUTION_FRAMING.format(payload=json.dumps(inputs))
     base_argv = [
         "claude",
+        # CCE-15: --bare skips SessionStart hooks (including the
+        # explanatory-output-style plugin's hook that injects "★ Insight ─"
+        # formatting), plugin sync, auto-memory, attribution, and CLAUDE.md
+        # auto-discovery. Subagent role instructions still come from
+        # --plugin-dir + --agent below, so the agent context is unchanged.
+        "--bare",
         "-p",
         prompt,
         "--agent",

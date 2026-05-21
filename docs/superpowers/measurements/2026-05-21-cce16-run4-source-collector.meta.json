@@ -1,0 +1,56 @@
+{
+  "returncode": 0,
+  "argv": [
+    "claude",
+    "--setting-sources",
+    "project,local",
+    "-p",
+    "You are running in production as part of the engineering-docs-agent orchestrator pipeline.\n\nYour inputs (JSON) are below. Execute the Job defined in your system prompt using these inputs. Return ONLY a JSON object matching your output contract \u2014 no prose, no markdown fences, no commentary, no clarifying questions.\n\n<inputs>\n{\"last_sha\": \"a2a9dba273bf5ef82ef6d450d3eb44ee27e04681\", \"head_sha\": \"b2cd07af5cdcf0482515fc757a6ee6def3af278d\", \"repo\": {\"owner\": \"theoju\", \"name\": \"engineering-docs-agent\"}, \"pr_branch_filter\": [\"docs-agent/*\"]}\n</inputs>\n",
+    "--agent",
+    "source-collector",
+    "--plugin-dir",
+    "/Users/theo/Projects/engineering-docs-agent",
+    "--allowedTools",
+    "Bash Read Write Edit WebFetch",
+    "--output-format",
+    "stream-json",
+    "--verbose"
+  ],
+  "tool_use": {
+    "total_calls": 4,
+    "by_name": {
+      "Bash": 3,
+      "Read": 1
+    },
+    "calls": [
+      {
+        "name": "Bash",
+        "input_preview": "{\"command\": \"gh pr list --repo theoju/engineering-docs-agent --state merged --json number,url,title,body,mergeCommit,mergedAt,author,files,labels,headRefName --limit 50 2>&1\", \"description\": \"List mer",
+        "is_error": false,
+        "result_chars": 2251
+      },
+      {
+        "name": "Read",
+        "input_preview": "{\"file_path\": \"/Users/theo/.claude/projects/-Users-theo-Projects-engineering-docs-agent/de9faa83-88cc-45a9-a1ea-5261391061fd/tool-results/bxc9e2rpx.txt\"}",
+        "is_error": false,
+        "result_chars": 61849
+      },
+      {
+        "name": "Bash",
+        "input_preview": "{\"command\": \"git log --oneline a2a9dba273bf5ef82ef6d450d3eb44ee27e04681..b2cd07af5cdcf0482515fc757a6ee6def3af278d 2>&1\", \"description\": \"Show commits in the window last_sha..head_sha\"}",
+        "is_error": false,
+        "result_chars": 447
+      },
+      {
+        "name": "Bash",
+        "input_preview": "{\"command\": \"git log --merges --oneline a2a9dba273bf5ef82ef6d450d3eb44ee27e04681..b2cd07af5cdcf0482515fc757a6ee6def3af278d 2>&1\", \"description\": \"Check for merge commits in the window\"}",
+        "is_error": false,
+        "result_chars": 31
+      }
+    ],
+    "calls_truncated": false,
+    "turns": 5,
+    "stop_reason": "end_turn",
+    "duration_ms": 104392
+  }
+}

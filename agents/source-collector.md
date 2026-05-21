@@ -316,10 +316,14 @@ Before emitting, verify:
 - Have you invoked the tools required by Step 1, Step 3 (if applicable), and
   Step 5 (if applicable)?
 - If `prs: []`, was Step 1's tool output actually empty (not just unread)?
+- **If Step 5 was attempted (jira.enabled AND jira_keys non-empty) AND any
+  Jira fetch failed OR auth was missing**, did you set both `partial: true`
+  AND `error: "jira_auth_missing"` in the output? Emitting `jira_issues: []`
+  without those two fields after a failed Step 5 is a §6b contract violation.
 
-If either check fails, return to the missing step. Otherwise emit the final
-JSON per the Output schema. Return ONLY the JSON object — no prose, no
-markdown fences, no commentary.
+If any check fails, return to the missing step or add the missing fields.
+Otherwise emit the final JSON per the Output schema. Return ONLY the JSON
+object — no prose, no markdown fences, no commentary.
 
 ## Failure handling
 

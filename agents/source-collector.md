@@ -34,12 +34,14 @@ The orchestrator will pass you a JSON block named `inputs` containing:
   "title": "source-collector output",
   "type": "object",
   "required": ["prs", "jira_issues"],
+  "additionalProperties": false,
   "properties": {
     "prs": {
       "type": "array",
       "items": {
         "type": "object",
         "required": ["number", "url"],
+        "additionalProperties": false,
         "properties": {
           "number": { "type": "integer" },
           "url": { "type": "string" },

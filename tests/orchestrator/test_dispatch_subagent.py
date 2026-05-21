@@ -183,3 +183,29 @@ def test_dispatch_returns_none_on_empty_stdout(monkeypatch):
             orchestrator_runner.dispatch_subagent("notifier", {}, dry_run_dir=None)
             is None
         ), f"empty stdout {empty!r} should return None"
+
+
+def test_dispatch_passes_setting_sources_flag(monkeypatch):
+    """CCE-15: dispatch must pass `--setting-sources project,local` so
+    the user-level settings.json (where the explanatory-output-style
+    plugin is enabled by default) is skipped. Without this, the plugin's
+    SessionStart hook injects "★ Insight ─" prose into the subagent's
+    context, breaking _extract_final_assistant_text parsing as observed
+    in CCE-14 Run 4. Unlike --bare (originally tried but rejected
+    because it disables OAuth), this preserves keychain authentication.
+    """
+    captured: dict = {}
+    monkeypatch.setattr(subprocess, "run", _fake_run_capture(captured, stdout="{}"))
+
+    orchestrator_runner.dispatch_subagent(
+        "source-collector", {"foo": "bar"}, dry_run_dir=None
+    )
+
+    cmd = captured["cmd"]
+    assert "--setting-sources" in cmd, f"--setting-sources not in argv: {cmd}"
+    idx = cmd.index("--setting-sources")
+    assert cmd[idx + 1] == "project,local", (
+        f"--setting-sources value must be 'project,local': cmd[{idx + 1}] = {cmd[idx + 1]!r}"
+    )
+    # The flag must appear before -p so it governs the whole invocation.
+    assert idx < cmd.index("-p"), f"--setting-sources must precede -p: {cmd}"

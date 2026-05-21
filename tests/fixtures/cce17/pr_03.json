@@ -1,0 +1,19 @@
+{
+  "pr_number": 3,
+  "what_changed": "Completes production wiring of `dispatch_subagent` across three dimensions: (1) JSON payloads are now wrapped in `<inputs>\u2026</inputs>` framing with pinned execution instructions (`Execute the Job`, `Return ONLY`, `no prose`, `no markdown fences`, `no clarifying questions`) so the LLM executes the job rather than analyzing the raw JSON; (2) `subprocess.run()` receives an explicit `cwd` argument threaded through all nine call sites in `orchestrator_runner.py` and `verify_runner.py` so each agent loads the correct `CLAUDE.md`; (3) `--plugin-dir` (auto-detected via `Path(__file__).resolve().parent.parent`) and `--allowedTools Bash Read Write Edit WebFetch` are added to the CLI argv so agent plugins resolve without a user install and can execute their declared tools non-interactively. Ten new unit tests cover all three fixes plus failure-mode preservation; the full suite runs 146 green.",
+  "why": "The first live Mode B smoke test against ADIS exposed three compounding bugs at the same dispatch boundary, all rooted in `dispatch_subagent` treating the subprocess call as a fire-and-forget shell command rather than a configured agent dispatch. Without prompt framing the LLM emitted markdown clarifying questions instead of JSON; without CWD propagation agents inherited the parent process directory and loaded the wrong `CLAUDE.md` (confirmed by the smoke run referencing `scripts/state_io.py` from the wrong project); without `--plugin-dir` and `--allowedTools` agents failed to resolve unless the plugin was user-installed and could not execute their declared tools.",
+  "breaking": false,
+  "doc_targets": [
+    {
+      "lens": "core",
+      "action": "edit",
+      "page_hint": "agents/dispatch-subagent.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "create",
+      "page_hint": "specs/2026-05-20-dispatch-tool-permissions.md"
+    }
+  ],
+  "notes": "PR is stacked on CCE-2; must be merged after CCE-2 lands. Deferred items not blocking merge: strict output-schema enforcement, per-agent tool narrowing (currently union grant), partial_reasons carry-forward hygiene, and a --live pytest gate for CI cost control. Jira context was empty; summary drawn entirely from PR body."
+}

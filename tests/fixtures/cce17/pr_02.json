@@ -1,0 +1,19 @@
+{
+  "pr_number": 2,
+  "what_changed": "Fixed a silent total-failure in `dispatch_subagent` (`scripts/orchestrator_runner.py`) where every subagent call was returning `None` because the orchestrator used the legacy `claude agent <name> --input <json>` CLI form, which does not exist in Claude Code v2.x. The corrected invocation is `claude --setting-sources project,local -p <framed-prompt> --agent <name> --plugin-dir ... --allowedTools ...`. Six new unit tests in `tests/orchestrator/test_dispatch_subagent.py` lock in the updated argv shape, the execution-framing contract, and all four failure-mode branches (missing binary, non-zero exit, empty stdout, unparseable JSON). No behavior was changed beyond the argv fix; error handling is identical to before.",
+  "why": "Claude Code v2.x removed the positional `agent <name>` subcommand and the `--input` flag. Every production dispatch was returning a non-zero exit code, causing `dispatch_subagent` to return `None` silently and marking the entire pipeline run as failed while exiting 0 \u2014 a deceptively clean failure that obscured all downstream subagent output. CCE-2 tracks this as the root-cause fix for the v2.x CLI surface mismatch.",
+  "breaking": false,
+  "doc_targets": [
+    {
+      "lens": "core",
+      "action": "edit",
+      "page_hint": "orchestrator/dispatch-subagent.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "edit",
+      "page_hint": "reference/cli-surface.md"
+    }
+  ],
+  "notes": "Live Mode B smoke test against ADIS was deferred (requires plugin install or --plugin-dir wiring); tracked as a follow-up in CCE-2. The `--setting-sources project,local` flag added in this PR (CCE-15 hardening) is bundled into the same argv change and should be noted in any CLI-surface reference page."
+}

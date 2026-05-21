@@ -1,0 +1,19 @@
+{
+  "pr_number": 7,
+  "what_changed": "Wires the engineering-docs-agent plugin to run against its own repository as a dogfood and reference host. Adds `.engineering-docs-agent/config.yml` and `state.example.json` to configure the agent for this repo, creates `docs/_agent-sandbox/` as the agent-writable target directory (restricted via a narrow `agent_editable_paths` glob that keeps writes out of `docs/superpowers/` and other tracked dirs), updates the README with a \"Self-hosting (dogfood)\" bootstrap section, and pins the seed `last_successful_run.head_sha` to the v0.1.0 tag so the source-collector has a real diff window over CCE-1\u2026CCE-9 history. Publish-verification is explicitly deferred: `--no-pr` keeps the initial bootstrap run dry-run only until a `deploy.yml` workflow is added.",
+  "why": "CCE-11 called for the repo to serve as its own reference implementation, validating the plugin's config/state contracts against real commit history and giving new integrators a concrete self-hosting example. The dogfood setup also surfaces gaps in the bootstrap flow before it is documented for external users. No Jira context was returned for CCE-1, CCE-9, or CCE-11, so rationale is inferred entirely from the PR body.",
+  "breaking": false,
+  "doc_targets": [
+    {
+      "lens": "core",
+      "action": "edit",
+      "page_hint": "README.md"
+    },
+    {
+      "lens": "core",
+      "action": "create",
+      "page_hint": "docs/_agent-sandbox/README.md"
+    }
+  ],
+  "notes": "The superpowers lens is intentionally excluded \u2014 the agent_editable_paths glob explicitly blocks writes to docs/superpowers/. Publish-verification (deploy.yml + live PR creation) is out of scope for this PR and tracked separately. Jira context for CCE-1, CCE-9, and CCE-11 was not returned; why field is derived from PR body alone."
+}

@@ -1,0 +1,44 @@
+{
+  "pr_number": 12,
+  "what_changed": "Fixed a root-cause bug in the Claude CLI plugin manifest: the `author` field in `.claude-plugin/plugin.json` was a plain string, but the CLI's Zod validator requires an object with a `name` property. This caused the plugin to silently fail-load on every dispatch since commit 628a7262 (2026-05-19), meaning all prior CCE-12, CCE-14, and CCE-15 source-collector measurements had actually captured default Claude Code behavior rather than the subagent. The fix is accompanied by a new JSON Schema draft-07 file (`templates/plugin_manifest.schema.json`) and five pytest regression tests guarding against author-as-string and other manifest shape errors. A 5-run Mode B re-baseline was executed, confirming 5/5 successful plugin loads and 5/5 tool invocations; 25 forensic artifacts were committed under `docs/superpowers/measurements/`. Supersession notices were prepended to the CCE-12, CCE-14, and CCE-15 baseline docs to preserve audit-trail accuracy.",
+  "why": "The Claude CLI's Zod schema validator rejected the `author` string value (it expects `{ \"name\": \"...\" }`) and silently fell back to default behavior instead of surfacing an error, so the plugin never loaded from the moment it was first committed. Because every prior baseline dispatch never exercised the actual source-collector subagent, all behavioral conclusions from CCE-12, CCE-14, and CCE-15 were invalidated. Adding a JSON Schema and pytest coverage for the manifest shape catches this entire class of silent regression before it reaches production.",
+  "breaking": false,
+  "doc_targets": [
+    {
+      "lens": "superpowers",
+      "action": "create",
+      "page_hint": "docs/superpowers/measurements/2026-05-21-cce16-real-baseline.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "create",
+      "page_hint": "docs/superpowers/plans/2026-05-21-cce16-plugin-manifest-fix-and-rebaseline.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "edit",
+      "page_hint": "docs/superpowers/measurements/2026-05-20-cce12-tool-use-baseline.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "edit",
+      "page_hint": "docs/superpowers/measurements/2026-05-20-cce14-prompt-hardening-baseline.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "edit",
+      "page_hint": "docs/superpowers/measurements/2026-05-21-cce15-root-cause-baseline.md"
+    },
+    {
+      "lens": "core",
+      "action": "edit",
+      "page_hint": ".claude-plugin/plugin.json"
+    },
+    {
+      "lens": "core",
+      "action": "create",
+      "page_hint": "templates/plugin_manifest.schema.json"
+    }
+  ],
+  "notes": "CCE-17 is deferred to address the newly visible failure mode: 3 of 5 re-baseline runs fetched PRs beyond head_sha, returning out-of-window results. The CCE-15 production code changes (rescue helper, schema additionalProperties:false, --setting-sources flag) remain valid as defense-in-depth; only the behavioral conclusions of that baseline were invalidated. No Jira context was supplied; summary drawn entirely from the PR body."
+}

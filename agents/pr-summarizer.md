@@ -27,7 +27,8 @@ docs lenses + actions should reflect it.
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "pr-summarizer output",
   "type": "object",
-  "required": ["pr_number"],
+  "required": ["pr_number", "doc_targets"],
+  "additionalProperties": false,
   "properties": {
     "pr_number": { "type": "integer" },
     "what_changed": { "type": ["string", "null"] },
@@ -38,15 +39,27 @@ docs lenses + actions should reflect it.
       "items": {
         "type": "object",
         "required": ["lens", "action", "page_hint"],
+        "additionalProperties": false,
         "properties": {
-          "lens": { "type": "string" },
+          "lens": { "type": "string", "enum": ["core", "superpowers"] },
           "action": { "type": "string", "enum": ["create", "edit"] },
-          "page_hint": { "type": "string" }
+          "page_hint": {
+            "type": "string",
+            "allOf": [
+              { "pattern": "^[^/].*\\.md$" },
+              {
+                "not": {
+                  "pattern": "\\.(py|json|yml|yaml|ts|tsx|js|sh|toml|rs|go|java|cpp|c|h|hpp)$"
+                }
+              }
+            ]
+          }
         }
       }
     },
     "notes": { "type": ["string", "null"] },
-    "error": { "type": ["string", "null"] }
+    "error": { "type": ["string", "null"] },
+    "partial": { "type": "boolean" }
   }
 }
 ```

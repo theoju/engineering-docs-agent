@@ -1,4 +1,16 @@
-"""Schema enforcement for pr-summarizer output (CCE-17)."""
+"""Schema enforcement for pr-summarizer output (CCE-17).
+
+The schema enforces UNIVERSAL structural rules:
+- page_hint must be a relative (no leading slash) .md path
+- page_hint must not end in a source-code extension (.py, .json, .yml, etc.)
+- lens must be one of ["core", "superpowers"]
+- additionalProperties is false at root and on doc_targets items
+
+Host-config-specific rules (e.g., the production sandbox prefix
+`_agent-sandbox/`) live in the agent prompt and are enforced at runtime
+by the orchestrator's `agent_editable_paths` filter, not by the schema.
+That separation keeps the canonical schema portable across host configs.
+"""
 
 from __future__ import annotations
 import json
@@ -29,7 +41,8 @@ def test_minimal_valid(validator: Draft7Validator) -> None:
     validator.validate(doc)
 
 
-def test_create_page_hint_must_be_sandbox_relative(validator: Draft7Validator) -> None:
+def test_create_lens_relative_md_accepted(validator: Draft7Validator) -> None:
+    """The host-config sandbox prefix is documented in the prompt, not the schema."""
     doc = {
         "pr_number": 1,
         "doc_targets": [
@@ -39,7 +52,18 @@ def test_create_page_hint_must_be_sandbox_relative(validator: Draft7Validator) -
     validator.validate(doc)
 
 
-def test_create_rejects_source_tree_page_hint(validator: Draft7Validator) -> None:
+def test_create_rejects_leading_slash(validator: Draft7Validator) -> None:
+    doc = {
+        "pr_number": 1,
+        "doc_targets": [
+            {"lens": "core", "action": "create", "page_hint": "/abs/path.md"}
+        ],
+    }
+    with pytest.raises(ValidationError):
+        validator.validate(doc)
+
+
+def test_create_rejects_python_source(validator: Draft7Validator) -> None:
     doc = {
         "pr_number": 1,
         "doc_targets": [
@@ -54,27 +78,25 @@ def test_create_rejects_source_tree_page_hint(validator: Draft7Validator) -> Non
         validator.validate(doc)
 
 
-def test_create_rejects_repo_root_changelog(validator: Draft7Validator) -> None:
+def test_create_rejects_json_source(validator: Draft7Validator) -> None:
     doc = {
         "pr_number": 1,
         "doc_targets": [
-            {"lens": "core", "action": "create", "page_hint": "CHANGELOG.md"}
+            {
+                "lens": "core",
+                "action": "create",
+                "page_hint": ".claude-plugin/plugin.json",
+            }
         ],
     }
     with pytest.raises(ValidationError):
         validator.validate(doc)
 
 
-def test_create_rejects_lens_prefixed_page_hint(validator: Draft7Validator) -> None:
+def test_create_rejects_missing_md_extension(validator: Draft7Validator) -> None:
     doc = {
         "pr_number": 1,
-        "doc_targets": [
-            {
-                "lens": "superpowers",
-                "action": "create",
-                "page_hint": "docs/superpowers/measurements/foo.md",
-            }
-        ],
+        "doc_targets": [{"lens": "core", "action": "create", "page_hint": "CHANGELOG"}],
     }
     with pytest.raises(ValidationError):
         validator.validate(doc)

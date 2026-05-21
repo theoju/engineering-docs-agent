@@ -18,32 +18,18 @@
         "properties": {
           "lens": { "type": "string", "enum": ["core", "superpowers"] },
           "action": { "type": "string", "enum": ["create", "edit"] },
-          "page_hint": { "type": "string" }
-        },
-        "allOf": [
-          {
-            "if": { "properties": { "action": { "const": "create" } } },
-            "then": {
-              "properties": {
-                "page_hint": {
-                  "type": "string",
-                  "pattern": "^_agent-sandbox/[^/].*\\.md$"
+          "page_hint": {
+            "type": "string",
+            "allOf": [
+              { "pattern": "^[^/].*\\.md$" },
+              {
+                "not": {
+                  "pattern": "\\.(py|json|yml|yaml|ts|tsx|js|sh|toml|rs|go|java|cpp|c|h|hpp)$"
                 }
               }
-            }
-          },
-          {
-            "if": { "properties": { "action": { "const": "edit" } } },
-            "then": {
-              "properties": {
-                "page_hint": {
-                  "type": "string",
-                  "pattern": "^[^/].*\\.md$"
-                }
-              }
-            }
+            ]
           }
-        ]
+        }
       }
     },
     "notes": { "type": ["string", "null"] },

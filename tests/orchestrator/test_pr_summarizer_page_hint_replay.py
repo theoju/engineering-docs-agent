@@ -46,10 +46,13 @@ def test_replay_flags_known_bad_targets(validator: Draft7Validator) -> None:
         errors = list(validator.iter_errors(doc))
         if errors:
             bad_count += 1
-    assert bad_count >= 6, (
-        f"Expected at least 6 of the captured outputs to violate the tightened "
-        f"schema; got {bad_count}. The schema is too lenient or the fixtures "
-        f"have been hand-edited."
+    assert bad_count >= 2, (
+        f"Expected at least 2 of the captured outputs to violate the tightened "
+        f"schema (source-tree page_hints from PR #8 and PR #12); got {bad_count}. "
+        f"The schema is too lenient or the fixtures have been hand-edited.\n"
+        f"Note: lens-prefix-doubling and out-of-sandbox creates are NOT caught "
+        f"by the schema (they are host-config-specific). The orchestrator's "
+        f"unsafe_page_path filter catches those at runtime."
     )
 
 

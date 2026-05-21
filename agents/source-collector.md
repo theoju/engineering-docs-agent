@@ -128,16 +128,19 @@ The only valid path to `prs: []` is:
 
 Inferring `prs: []` from `git log`, `git branch`, schema introspection, or any other tool that is not `gh pr list` / `gh api pulls` is the same contract violation.
 
-**§6 — Fabricated `jira_issues` entries when auth fails**:
+**§6 — Mishandling Jira auth-failure (fabricated entries OR silent drop)**:
 
 When Jira authentication is missing (no `JIRA_EMAIL`/`JIRA_API_TOKEN` set)
-or fails (401/403 for all keys), you MUST emit `jira_issues: []` plus
-`partial: true` and `error: "jira_auth_missing"`. NEVER fabricate issue
-summaries from the PR's title/body to fill `jira_issues`. The orchestrator
-relies on `jira_issues` being authoritative ground-truth from Jira; a
-fabricated array corrupts the gap-detector's downstream analysis.
+or fails (401/403 for all keys), you MUST emit `jira_issues: []` PLUS
+both `partial: true` AND `error: "jira_auth_missing"`. Two related
+failure modes are forbidden:
 
-Bad:
+**§6a — Fabricated `jira_issues` from PR text.** NEVER synthesize issue
+summaries from the PR's title/body to fill `jira_issues`. The
+orchestrator treats `jira_issues` as authoritative ground-truth from
+Jira; fabrication corrupts the gap-detector's downstream analysis.
+
+Bad (fabricated):
 
 ```json
 {
@@ -152,16 +155,52 @@ Bad:
 }
 ```
 
-Good:
+**§6b — Silent auth-failure swallow.** Emitting `jira_issues: []` WITHOUT
+the `partial: true` + `error: "jira_auth_missing"` pair — when Step 5's
+fetch loop was actually attempted and failed — is also a contract
+violation. The orchestrator cannot distinguish "no keys parsed in Step 4"
+from "auth failed for every key" without the explicit error tag. This is
+the dominant failure mode observed in the 2026-05-21 full run: the agent
+ran curl with empty credentials, got Jira's 401-as-404 for all 14 CCE
+keys, then omitted `jira_issues` entirely from the output as if Step 5
+were a no-op.
+
+Bad (silent drop after attempted fetch):
 
 ```json
 {
-  "prs": [],
+  "prs": [
+    {
+      "number": 12,
+      "url": "https://github.com/x/y/pull/12",
+      "jira_keys": ["CCE-17"]
+    }
+  ],
+  "jira_issues": []
+}
+```
+
+Good (in both auth-missing and 401-for-all-keys cases):
+
+```json
+{
+  "prs": [
+    {
+      "number": 12,
+      "url": "https://github.com/x/y/pull/12",
+      "jira_keys": ["CCE-17"]
+    }
+  ],
   "jira_issues": [],
   "partial": true,
   "error": "jira_auth_missing"
 }
 ```
+
+The empty-`jira_issues`-without-partial-flag shape is ONLY valid when
+Step 4 parsed zero Jira keys (so Step 5 was correctly skipped). Whenever
+Step 5 attempted any fetch — successful or not — the output must record
+the outcome via `partial` + `error` when appropriate.
 
 ## Procedure
 
@@ -222,18 +261,22 @@ via the subprocess environment:
 - `JIRA_API_TOKEN` — API token from `https://id.atlassian.com/manage-profile/security/api-tokens`
 
 **Auth-missing detection:** Before attempting any Jira request, verify
-both env vars are present and non-empty:
+both env vars are present and non-empty. You can probe them inside the
+single Bash tool call that opens your fetch loop:
 
 ```bash
 if [ -z "${JIRA_EMAIL:-}" ] || [ -z "${JIRA_API_TOKEN:-}" ]; then
-  # auth missing → emit jira_auth_missing partial, skip Step 5
-  exit 0
+  echo "JIRA_AUTH_MISSING"
 fi
 ```
 
-If either is missing or empty, emit the final JSON with `partial: true`
-and `error: "jira_auth_missing"` (the populated `prs` array is still
-returned; `jira_issues` is `[]`):
+If that probe prints `JIRA_AUTH_MISSING`, do NOT call `curl` for any
+key. Skip the rest of Step 5's fetch loop and jump to Step 6 carrying
+the `jira_auth_missing` partial flag in your eventual JSON output (the
+populated `prs` array is still returned; `jira_issues` stays `[]`).
+This is a decision branch inside the agent's reasoning — `exit 0` would
+abort the entire subagent process, which is NOT the intent. Continue
+through Step 6 to emit:
 
 ```json
 {

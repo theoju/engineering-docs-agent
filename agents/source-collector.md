@@ -128,6 +128,25 @@ The only valid path to `prs: []` is:
 
 Inferring `prs: []` from `git log`, `git branch`, schema introspection, or any other tool that is not `gh pr list` / `gh api pulls` is the same contract violation.
 
+**§7 — PRs outside `last_sha..head_sha`**:
+
+Returning PRs whose `merge_sha` (mergeCommit.oid) is not in the output of
+`git rev-list last_sha..head_sha` is a contract violation. This was the
+dominant failure mode in 3 of 5 CCE-16 5-run baseline measurements — the
+agent ran `gh pr list --limit 50` and trusted the merged-at lower bound,
+ignoring the head_sha upper bound. The orchestrator will drop out-of-window
+PRs and surface `out_of_window_dropped` in partial reasons; do not rely on
+that safety net — the contract requires you to clip in Step 1.5.
+
+Bad (post-head PR included):
+
+```json
+{ "prs": [{ "number": 9, "merge_sha": "f0e774c3" }], "jira_issues": [] }
+```
+
+when `head_sha = b2cd07af` and `git rev-list a2a9dba..b2cd07af` does not
+contain `f0e774c3`.
+
 ## Procedure
 
 You MUST complete the steps below in order. You MAY NOT proceed to step N+1
@@ -152,12 +171,44 @@ The tool MUST be invoked even if you suspect the window is empty. Suspicion
 is not evidence; tool output is. Emitting `prs: []` without first invoking
 one of these tools is a contract violation (see Forbidden outputs §5).
 
-Resolve `last_sha → merged_at` via `gh pr view <last_sha>` if needed, then
-query merged PRs since that timestamp. Use:
+**Resolve BOTH bounds, not just the lower bound.**
 
-    gh pr list --state merged --search "merged:>=<merged_at_of_last_sha>"
+Resolve the lower bound: `last_sha → merged_at_of_last` via
+`gh api repos/<owner>/<name>/commits/<last_sha> --jq .commit.committer.date`.
 
-or the `gh api` equivalent.
+Resolve the upper bound: `head_sha → merged_at_of_head` via
+`gh api repos/<owner>/<name>/commits/<head_sha> --jq .commit.committer.date`.
+
+Then query with BOTH bounds:
+
+    gh pr list --state merged \
+      --search "merged:>=<merged_at_of_last> merged:<=<merged_at_of_head>"
+
+or the `gh api` equivalent. The merged-at upper bound is necessary because
+`gh pr list --limit N` returns the N most-recently-merged PRs by default,
+which may include PRs merged AFTER head_sha. Returning post-head PRs is a
+contract violation (see Forbidden outputs §7).
+
+### Step 1.5 (REQUIRED if Step 1 returned ≥1 PR) — Clip to SHA range
+
+The merged-at timestamps from Step 1 are not perfectly aligned to the SHA
+range (a PR's `merged_at` is the moment the merge commit was created, not
+the moment that commit became part of the head branch). The authoritative
+test is membership in `git rev-list last_sha..head_sha`.
+
+Run:
+
+    git rev-list <last_sha>..<head_sha>
+
+(Your current working directory already matches the target repo; the
+orchestrator sets `cwd` for you. No `-C <path>` argument is needed.)
+
+For each PR from Step 1, check whether its `mergeCommit.oid` (or
+`merge_commit_sha`) appears in the rev-list output. Drop any PR whose
+merge commit is NOT in that set. The orchestrator will also clip on its
+side as a safety net (defense-in-depth), but emitting only in-window PRs
+from the agent reduces telemetry noise and makes the agent's logic
+explicit.
 
 ### Step 2 — Apply branch filter
 
@@ -187,9 +238,12 @@ no keys were parsed in Step 4, skip this step.
 
 Before emitting, verify:
 
-- Have you invoked the tools required by Step 1, Step 3 (if applicable), and
-  Step 5 (if applicable)?
+- Have you invoked the tools required by Step 1, Step 3 (if applicable),
+  Step 1.5 (if applicable), and Step 5 (if applicable)?
 - If `prs: []`, was Step 1's tool output actually empty (not just unread)?
+- **For each PR you are about to return**: is its `merge_sha` in the output
+  of `git rev-list last_sha..head_sha` from Step 1.5? Emitting a PR whose
+  merge_sha is outside that range is a §7 contract violation.
 
 If either check fails, return to the missing step. Otherwise emit the final
 JSON per the Output schema. Return ONLY the JSON object — no prose, no

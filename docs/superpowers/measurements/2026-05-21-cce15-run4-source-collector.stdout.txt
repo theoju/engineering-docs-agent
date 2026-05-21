@@ -1,0 +1,1 @@
+{"sources":{"git_log":[],"prs":[],"jira_issues":[]},"warnings":["Production dispatch invoked in restricted environment; no git/PR/Jira fetch tools available — returning empty source set rather than fabricating data."]}

@@ -72,6 +72,52 @@ _EXECUTION_FRAMING = (
 )
 
 
+def _rescue_json_object(text: str) -> dict | None:
+    """Extract the first balanced JSON object from prose-contaminated
+    text. Returns the parsed dict on success, None otherwise.
+
+    Defense in depth for CCE-15. With --bare (Task 1) the SessionStart-
+    hook contamination pathway is closed, but other contamination
+    patterns may exist (CCE-14 Run 4 was an "★ Insight" preamble
+    injected by the explanatory-output-style plugin). When strict
+    json.loads on the dispatch output fails, callers can fall through
+    to this rescue.
+
+    Algorithm: find the first '{', scan forward tracking brace depth
+    while honoring JSON string state (open quote, escaped quote skip).
+    When depth returns to 0, attempt json.loads on the slice.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start : i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
 def _extract_final_assistant_text(events: list[dict]) -> str:
     """Concatenate all text blocks from the LAST assistant message that
     contains at least one text block. Returns empty string only if no
@@ -176,6 +222,7 @@ def dispatch_subagent(
     *,
     dry_run_dir: Path | None,
     cwd: Path | None = None,
+    out_reasons: list[str] | None = None,
 ) -> dict | None:
     """Dispatch a subagent. Returns parsed JSON output, or None on failure.
 
@@ -305,6 +352,15 @@ def dispatch_subagent(
     try:
         return json.loads(canonical_text)
     except json.JSONDecodeError:
+        # CCE-15: strict parse failed. Try prose-tolerant rescue. If we
+        # extract a valid object, surface the rescue event via
+        # out_reasons so dispatch_validated can roll it into the
+        # pipeline's partial_reasons summary.
+        rescued = _rescue_json_object(canonical_text)
+        if rescued is not None:
+            if out_reasons is not None:
+                out_reasons.append(f"prose_contamination_rescued: {name}")
+            return rescued
         return None
 
 

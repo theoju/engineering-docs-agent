@@ -198,6 +198,14 @@ def dispatch_subagent(
     - the dict returned to callers is parsed from the FINAL assistant
       message's concatenated text content (caller contract preserved)
 
+    Stream-json mode's per-run latency is dominated by the agent's
+    tool-call decisions, NOT the NDJSON parse overhead (CCE-14). The
+    CCE-12 baseline measured 3-6s for Category-A runs (zero tool calls)
+    versus 74s for the Run-2 outlier that made 5 tool calls. This mode
+    is appropriate for diagnostic measurement; for steady-state
+    production, leave DOCS_AGENT_DEBUG_DIR unset so the simple --print
+    path runs at full speed.
+
     Returns None if:
     - the `claude` binary is not installed (FileNotFoundError)
     - the subagent process exits with a non-zero return code

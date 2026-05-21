@@ -128,6 +128,41 @@ The only valid path to `prs: []` is:
 
 Inferring `prs: []` from `git log`, `git branch`, schema introspection, or any other tool that is not `gh pr list` / `gh api pulls` is the same contract violation.
 
+**§6 — Fabricated `jira_issues` entries when auth fails**:
+
+When Jira authentication is missing (no `JIRA_EMAIL`/`JIRA_API_TOKEN` set)
+or fails (401/403 for all keys), you MUST emit `jira_issues: []` plus
+`partial: true` and `error: "jira_auth_missing"`. NEVER fabricate issue
+summaries from the PR's title/body to fill `jira_issues`. The orchestrator
+relies on `jira_issues` being authoritative ground-truth from Jira; a
+fabricated array corrupts the gap-detector's downstream analysis.
+
+Bad:
+
+```json
+{
+  "prs": [],
+  "jira_issues": [
+    {
+      "key": "CCE-17",
+      "summary": "(inferred from PR title)",
+      "description": null
+    }
+  ]
+}
+```
+
+Good:
+
+```json
+{
+  "prs": [],
+  "jira_issues": [],
+  "partial": true,
+  "error": "jira_auth_missing"
+}
+```
+
 ## Procedure
 
 You MUST complete the steps below in order. You MAY NOT proceed to step N+1
@@ -179,9 +214,57 @@ matching only project keys listed in `jira.project_keys`.
 
 ### Step 5 (REQUIRED if jira.enabled AND any jira_keys present) — Fetch Jira issues
 
-For each unique Jira key, GET `{base_url}/rest/api/3/issue/{key}` and extract
-`summary`, `description`, `status`, `labels`. If `jira.enabled` is false OR
-no keys were parsed in Step 4, skip this step.
+**Auth contract:** Atlassian Cloud requires HTTP basic-auth with a user
+email + API token (NOT a password). The orchestrator passes credentials
+via the subprocess environment:
+
+- `JIRA_EMAIL` — Atlassian account email
+- `JIRA_API_TOKEN` — API token from `https://id.atlassian.com/manage-profile/security/api-tokens`
+
+**Auth-missing detection:** Before attempting any Jira request, verify
+both env vars are present and non-empty:
+
+```bash
+if [ -z "${JIRA_EMAIL:-}" ] || [ -z "${JIRA_API_TOKEN:-}" ]; then
+  # auth missing → emit jira_auth_missing partial, skip Step 5
+  exit 0
+fi
+```
+
+If either is missing or empty, emit the final JSON with `partial: true`
+and `error: "jira_auth_missing"` (the populated `prs` array is still
+returned; `jira_issues` is `[]`):
+
+```json
+{
+  "prs": [ ... populated ... ],
+  "jira_issues": [],
+  "partial": true,
+  "error": "jira_auth_missing"
+}
+```
+
+**Fetch path (only when both env vars are set):** For each unique Jira
+key, GET the issue:
+
+```bash
+curl -fsS -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+  "${BASE_URL}/rest/api/3/issue/${KEY}?fields=summary,description,status,labels" \
+  -H "Accept: application/json"
+```
+
+Note `-f` (fail on non-2xx) so a 401 produces a non-zero exit you can branch
+on, rather than parsing Jira's deliberately-ambiguous "Issue does not exist
+or you do not have permission to see it" body as if it were valid data.
+
+Extract `summary`, `description`, `status.name`, and `labels` from each
+response and append to `jira_issues`. If a specific key 401s, 403s, or
+404s, OMIT it from `jira_issues` (do NOT append a placeholder); other keys
+still succeed.
+
+If `jira.enabled` is false OR no keys were parsed in Step 4, skip this
+step (no partial reason needed — empty `jira_issues` is the canonical
+expected output).
 
 ### Step 6 — Emit final JSON
 

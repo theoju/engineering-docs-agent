@@ -268,12 +268,15 @@ def dispatch_subagent(
     prompt = _EXECUTION_FRAMING.format(payload=json.dumps(inputs))
     base_argv = [
         "claude",
-        # CCE-15: --bare skips SessionStart hooks (including the
-        # explanatory-output-style plugin's hook that injects "★ Insight ─"
-        # formatting), plugin sync, auto-memory, attribution, and CLAUDE.md
-        # auto-discovery. Subagent role instructions still come from
-        # --plugin-dir + --agent below, so the agent context is unchanged.
-        "--bare",
+        # CCE-15: --setting-sources project,local skips the user-level
+        # settings.json where the explanatory-output-style plugin is
+        # enabled (its SessionStart hook injects "★ Insight" prose into
+        # subprocess context, which broke CCE-14 Run 4's output parsing).
+        # Unlike --bare, this preserves OAuth/keychain authentication.
+        # Project + local settings still load, but this repo has no
+        # .claude/ dir so neither contributes plugin-enable state.
+        "--setting-sources",
+        "project,local",
         "-p",
         prompt,
         "--agent",

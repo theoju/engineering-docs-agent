@@ -185,13 +185,14 @@ def test_dispatch_returns_none_on_empty_stdout(monkeypatch):
         ), f"empty stdout {empty!r} should return None"
 
 
-def test_dispatch_passes_bare_flag(monkeypatch):
-    """CCE-15: dispatch must pass `--bare` so SessionStart hooks (e.g. the
-    explanatory-output-style plugin's hook that injects '★ Insight ─'
-    formatting) don't contaminate the subagent's stdout with prose
-    preambles. `--bare` is the documented way to skip hooks, plugin sync,
-    auto-memory, attribution, and CLAUDE.md auto-discovery while still
-    loading explicit --plugin-dir + --agent context.
+def test_dispatch_passes_setting_sources_flag(monkeypatch):
+    """CCE-15: dispatch must pass `--setting-sources project,local` so
+    the user-level settings.json (where the explanatory-output-style
+    plugin is enabled by default) is skipped. Without this, the plugin's
+    SessionStart hook injects "★ Insight ─" prose into the subagent's
+    context, breaking _extract_final_assistant_text parsing as observed
+    in CCE-14 Run 4. Unlike --bare (originally tried but rejected
+    because it disables OAuth), this preserves keychain authentication.
     """
     captured: dict = {}
     monkeypatch.setattr(subprocess, "run", _fake_run_capture(captured, stdout="{}"))
@@ -201,6 +202,10 @@ def test_dispatch_passes_bare_flag(monkeypatch):
     )
 
     cmd = captured["cmd"]
-    assert "--bare" in cmd, f"--bare not in argv: {cmd}"
-    # --bare must appear before -p/--agent so it governs the whole invocation.
-    assert cmd.index("--bare") < cmd.index("-p"), f"--bare must precede -p: {cmd}"
+    assert "--setting-sources" in cmd, f"--setting-sources not in argv: {cmd}"
+    idx = cmd.index("--setting-sources")
+    assert cmd[idx + 1] == "project,local", (
+        f"--setting-sources value must be 'project,local': cmd[{idx + 1}] = {cmd[idx + 1]!r}"
+    )
+    # The flag must appear before -p so it governs the whole invocation.
+    assert idx < cmd.index("-p"), f"--setting-sources must precede -p: {cmd}"

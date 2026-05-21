@@ -374,21 +374,30 @@ def dispatch_validated(
     """Compose dispatch_subagent with validate_and_parse.
 
     Returns:
-      Schema-valid:   (raw_dict, [])
-      Schema-invalid: (None, ["schema_invalid: <name>: <field-detail>"])
-      Dispatch-None:  (None, [])  — caller adds its own generic reason
-      Schema-missing: (None, ["schema_missing: <name>"]) — corrupted install
+      Schema-valid clean:           (raw_dict, [])
+      Schema-valid + rescued (CCE-15):
+                                    (raw_dict, ["prose_contamination_rescued: <name>"])
+      Schema-invalid:               (None, [...reasons including any rescue tag])
+      Dispatch-None:                (None, []) — caller adds its own generic reason
+      Schema-missing:               (None, ["schema_missing: <name>"])
     """
-    raw = dispatch_subagent(name, inputs, dry_run_dir=dry_run_dir, cwd=cwd)
+    # CCE-15: pass an out_reasons collector so dispatch_subagent can
+    # surface prose-contamination rescue events; merge them into the
+    # tuple returned to callers (orchestrator state accumulates them
+    # into state['current_run']['partial_reasons']).
+    dispatch_reasons: list[str] = []
+    raw = dispatch_subagent(
+        name, inputs, dry_run_dir=dry_run_dir, cwd=cwd, out_reasons=dispatch_reasons
+    )
     if raw is None:
-        return None, []
+        return None, dispatch_reasons
     from contracts import validate_and_parse
 
     validated, reasons = validate_and_parse(name, raw)
     if validated is None:
-        return None, reasons
+        return None, dispatch_reasons + reasons
     # Return raw (not the dataclass) so call sites can keep using dict.get() patterns.
-    return raw, []
+    return raw, dispatch_reasons
 
 
 def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:

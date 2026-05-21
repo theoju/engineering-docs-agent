@@ -162,7 +162,7 @@ def test_same_page_targets_batched_into_single_dispatch(tmp_path, monkeypatch):
     captured: list[dict] = []
     real = runner.dispatch_subagent
 
-    def spying(name, inputs, *, dry_run_dir, cwd=None):
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
         if name == "page-author":
             captured.append(inputs)
         return real(name, inputs, dry_run_dir=dry_run_dir)
@@ -229,7 +229,7 @@ def test_jira_input_forwarded_to_source_collector(tmp_path, monkeypatch):
     captured_inputs: dict[str, dict] = {}
     real_dispatch = orchestrator_runner.dispatch_subagent
 
-    def spying_dispatch(name, inputs, *, dry_run_dir, cwd=None):
+    def spying_dispatch(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
         captured_inputs[name] = inputs
         return real_dispatch(name, inputs, dry_run_dir=dry_run_dir)
 
@@ -264,7 +264,7 @@ def test_jira_context_threaded_to_pr_summarizer(tmp_path, monkeypatch):
     captured: dict[str, list] = {"summarizer_inputs": []}
     real_dispatch = runner.dispatch_subagent
 
-    def spying(name, inputs, *, dry_run_dir, cwd=None):
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
         if name == "pr-summarizer":
             captured["summarizer_inputs"].append(inputs)
         return real_dispatch(name, inputs, dry_run_dir=dry_run_dir)
@@ -289,7 +289,7 @@ def test_voice_samples_loaded_and_passed_to_authoring(tmp_path, monkeypatch):
     captured: list[dict] = []
     real_dispatch = runner.dispatch_subagent
 
-    def spying(name, inputs, *, dry_run_dir, cwd=None):
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
         if name in ("page-author", "content-validator"):
             captured.append(
                 {"name": name, "voice_samples": inputs.get("voice_samples")}
@@ -348,7 +348,7 @@ def test_gap_detector_receives_constructed_pr_id(tmp_path, monkeypatch):
     captured: list[dict] = []
     real = runner.dispatch_subagent
 
-    def spying(name, inputs, *, dry_run_dir, cwd=None):
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
         if name == "gap-detector":
             captured.append(inputs)
         return real(name, inputs, dry_run_dir=dry_run_dir)

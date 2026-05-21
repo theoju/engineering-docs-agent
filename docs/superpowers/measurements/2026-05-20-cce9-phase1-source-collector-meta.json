@@ -1,0 +1,14 @@
+{
+  "returncode": 0,
+  "argv": [
+    "claude",
+    "-p",
+    "You are running in production as part of the engineering-docs-agent orchestrator pipeline.\n\nYour inputs (JSON) are below. Execute the Job defined in your system prompt using these inputs. Return ONLY a JSON object matching your output contract \u2014 no prose, no markdown fences, no commentary, no clarifying questions.\n\n<inputs>\n{\"last_sha\": \"\", \"head_sha\": \"c36f53b598780dd219bc83a6601488d8381e2e75\", \"repo\": {\"owner\": \"designitright\", \"name\": \"advanced-data-importer\"}, \"pr_branch_filter\": [\"docs-agent/*\"], \"jira\": {\"enabled\": true, \"base_url\": \"https://designitright.atlassian.net\", \"project_keys\": [\"ADIS\"]}}\n</inputs>\n",
+    "--agent",
+    "source-collector",
+    "--plugin-dir",
+    "/Users/theo/Projects/engineering-docs-agent",
+    "--allowedTools",
+    "Bash Read Write Edit WebFetch"
+  ]
+}

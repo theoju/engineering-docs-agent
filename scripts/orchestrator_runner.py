@@ -6,7 +6,7 @@ instead of invoking Claude.
 """
 
 from __future__ import annotations
-import argparse, json, subprocess, sys
+import argparse, json, os, subprocess, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -27,8 +27,6 @@ from state_io import (
 
 def detect_repo(repo_root: Path) -> dict[str, str]:
     """Detect GitHub owner/name from git remote or GITHUB_REPOSITORY env."""
-    import os
-
     if env := os.environ.get("GITHUB_REPOSITORY"):
         if "/" in env:
             owner, name = env.split("/", 1)
@@ -124,6 +122,21 @@ def dispatch_subagent(
         r = subprocess.run(argv, **run_kwargs)
     except FileNotFoundError:
         return None
+    # CCE-9 diagnostic instrumentation: when DOCS_AGENT_DEBUG_DIR is set,
+    # capture raw subagent prompt/stdout/stderr/meta into that directory.
+    # No-op otherwise.
+    debug_dir = os.environ.get("DOCS_AGENT_DEBUG_DIR")
+    if debug_dir:
+        debug_path = Path(debug_dir)
+        debug_path.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        base = debug_path / f"{ts}-{name}"
+        base.with_suffix(".prompt.txt").write_text(prompt)
+        base.with_suffix(".stdout.txt").write_text(r.stdout or "")
+        base.with_suffix(".stderr.txt").write_text(r.stderr or "")
+        base.with_suffix(".meta.json").write_text(
+            json.dumps({"returncode": r.returncode, "argv": argv}, indent=2)
+        )
     if r.returncode != 0:
         return None
     stdout = (r.stdout or "").strip()

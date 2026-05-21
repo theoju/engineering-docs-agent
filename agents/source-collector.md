@@ -100,6 +100,8 @@ Return ONLY a JSON object matching:
 
 ## Procedure
 
+0. **If `last_sha` is empty** (no prior successful run, fresh deployment, or state reset), there is no diff window to scan. Return exactly `{"prs": [], "jira_issues": []}` and stop. Do not emit a status report, a telemetry summary, or any other shape — the canonical empty response is the only valid output for this case.
+
 1. Use `gh pr list --search "merged:>=<merged_at_of_last_sha>"` (resolve last_sha → merged_at via `gh pr view`) or `gh api` to enumerate merged PRs in window.
 2. Exclude PRs whose source branch matches any `pr_branch_filter` glob.
 3. For each PR: pull title, body, files (truncate to 200 entries), labels, `merge_commit_sha`, `merged_at`, `author.login`, `html_url`.

@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.1.4] — 2026-05-20
+
+### Source-collector reliability investigation (CCE-9 — partial fix + diagnostic infrastructure)
+
+This release ships two independently useful pieces from the CCE-9 systematic-debugging investigation, plus measurement evidence. The full source-collector reliability fix continues in CCE-10.
+
+**Diagnostic instrumentation (lands fully).**
+
+- New `DOCS_AGENT_DEBUG_DIR` env var on `scripts/orchestrator_runner.py`. When set, `dispatch_subagent` writes the full prompt, raw stdout, raw stderr, and meta (returncode + argv) for each subagent invocation to that directory, one file per artifact type. Off-contract LLM responses are now diagnosable without re-running and adding ad-hoc logging. Unset → byte-identical to v0.1.3.
+- New unit tests at `tests/orchestrator/test_dispatch_debug_capture.py` (2 cases) lock the on/off behavior. Total suite: 163 passed (161 baseline + 2 new).
+
+**Source-collector empty-`last_sha` guidance (lands; partial improvement).**
+
+- Added explicit step 0 to `agents/source-collector.md` `## Procedure`: when `last_sha` is empty, return canonical `{"prs": [], "jira_issues": []}` and stop. Phase 1 evidence had shown the agent inventing a non-canonical `{"status": "idle", ...}` shape in this case.
+- **Empirical result:** 3 Mode B runs against ADIS confirm the step 0 changes behavior — the agent now cites empty `last_sha` as its reason and early-exits — but it still emits the non-canonical `{"status": "idle", ...}` shape rather than the instructed `{"prs": [], "jira_issues": []}`. The step 0 is kept because the early-exit half is honored and the edit does no harm; the canonical-shape half awaits CCE-10.
+
+**Systematic-debugging artifacts (committed for reference).**
+
+- `docs/superpowers/measurements/2026-05-20-cce9-phase1-evidence.md` — original H4 confirmation + H1 refutation, with captured raw stdout.
+- `docs/superpowers/measurements/2026-05-20-cce9-h4-validation.md` — null+evidence narrative from the 3-run validation, with two new orthogonal root causes identified (stop-verify hook contamination + agent's "status report" reflex overriding three explicit canonical-shape signals).
+- Six raw-evidence artifact files (3× stdout, 3× state.json) alongside.
+
+**Follow-up filed.**
+
+- **CCE-10** — bundles hook-suppression + stronger canonical-shape forcing into one PR, using the new `DOCS_AGENT_DEBUG_DIR` capture as the measurement vehicle. See https://designitright.atlassian.net/browse/CCE-10.
+
+No new runtime dependencies. No new configuration surfaces. Soft-fail contract from v0.1.1 preserved.
+
 ## [0.1.3] — 2026-05-20
 
 ### State hygiene (CCE-5)

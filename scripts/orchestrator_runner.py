@@ -96,6 +96,71 @@ def _extract_final_assistant_text(events: list[dict]) -> str:
     )
 
 
+def _summarize_tool_use(events: list[dict]) -> dict:
+    """Walk a stream-json event list and produce a tool-use summary.
+
+    Two-pass algorithm:
+      1. Collect `tool_result` outcomes keyed by `tool_use_id` from user events.
+      2. Collect `tool_use` blocks from assistant events; join with outcomes
+         from pass 1 so each call gets its `is_error` and `result_chars`.
+
+    The `calls` list is capped at 50 to keep meta.json compact on chatty runs;
+    `calls_truncated` flips True when the cap engages. Run-level fields
+    (turns, stop_reason, duration_ms) come from the terminal `result` event.
+    """
+    errors_by_id: dict[str, bool] = {}
+    result_chars_by_id: dict[str, int] = {}
+
+    for ev in events:
+        if ev.get("type") != "user":
+            continue
+        for block in ev.get("message", {}).get("content", []):
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            tuid = block.get("tool_use_id", "")
+            errors_by_id[tuid] = bool(block.get("is_error", False))
+            content = block.get("content", "")
+            if isinstance(content, list):
+                content = "".join(
+                    c.get("text", "") for c in content if isinstance(c, dict)
+                )
+            result_chars_by_id[tuid] = len(str(content))
+
+    calls: list[dict] = []
+    for ev in events:
+        if ev.get("type") != "assistant":
+            continue
+        for block in ev.get("message", {}).get("content", []):
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            tuid = block.get("id", "")
+            input_preview = json.dumps(block.get("input", {}), default=str)[:200]
+            calls.append(
+                {
+                    "name": block.get("name", ""),
+                    "input_preview": input_preview,
+                    "is_error": errors_by_id.get(tuid, False),
+                    "result_chars": result_chars_by_id.get(tuid, 0),
+                }
+            )
+
+    by_name: dict[str, int] = {}
+    for c in calls:
+        by_name[c["name"]] = by_name.get(c["name"], 0) + 1
+
+    result_ev: dict = next((e for e in events if e.get("type") == "result"), {})
+
+    return {
+        "total_calls": len(calls),
+        "by_name": by_name,
+        "calls": calls[:50],
+        "calls_truncated": len(calls) > 50,
+        "turns": result_ev.get("num_turns"),
+        "stop_reason": result_ev.get("stop_reason"),
+        "duration_ms": result_ev.get("duration_ms"),
+    }
+
+
 def dispatch_subagent(
     name: str,
     inputs: dict,

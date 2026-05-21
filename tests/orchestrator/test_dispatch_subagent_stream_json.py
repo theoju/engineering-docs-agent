@@ -298,3 +298,39 @@ def test_dispatch_uses_simple_print_when_debug_dir_unset(tmp_path, monkeypatch):
 
     # No debug artifacts written.
     assert list(tmp_path.iterdir()) == []
+
+
+def test_extract_final_assistant_text_skips_pure_tool_use_final_turn():
+    """If the LAST assistant turn is purely tool_use blocks, prefer the
+    earlier assistant turn that had text. Forward-compat hardening — CCE-14.
+    """
+    import orchestrator_runner as runner
+
+    events = [
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "earlier answer with text"}],
+            },
+        },
+        {
+            "type": "user",
+            "message": {"role": "user", "content": []},
+        },
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tu_last",
+                        "name": "Bash",
+                        "input": {"command": "echo done"},
+                    },
+                ],
+            },
+        },
+    ]
+    assert runner._extract_final_assistant_text(events) == "earlier answer with text"

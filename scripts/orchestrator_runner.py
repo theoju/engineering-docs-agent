@@ -72,6 +72,30 @@ _EXECUTION_FRAMING = (
 )
 
 
+def _extract_final_assistant_text(events: list[dict]) -> str:
+    """Concatenate all text blocks from the LAST assistant message in a
+    stream-json event list. Returns empty string if no assistant message
+    is present or the final assistant has no text blocks.
+
+    The orchestrator's downstream contract is that dispatch returns the
+    canonical JSON dict; in stream-json mode the canonical JSON is the text
+    content of the final assistant turn — possibly split across multiple
+    text blocks if the model interleaved tool_use blocks.
+    """
+    last_assistant: dict | None = None
+    for ev in events:
+        if ev.get("type") == "assistant":
+            last_assistant = ev
+    if last_assistant is None:
+        return ""
+    content = last_assistant.get("message", {}).get("content", [])
+    return "".join(
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
 def dispatch_subagent(
     name: str,
     inputs: dict,

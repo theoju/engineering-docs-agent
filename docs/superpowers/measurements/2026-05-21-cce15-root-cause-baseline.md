@@ -1,5 +1,11 @@
 # CCE-15: Source-Collector Root-Cause Sweep Baseline — 5-Run Mode B Ceremony
 
+> **⚠ SUPERSEDED — see [CCE-16 real baseline](2026-05-21-cce16-real-baseline.md).**
+>
+> The "PARTIAL PASS" verdict in this baseline is misattributed. The schema-tightening (Fix #2) and prose-tolerant rescue (Fix #3) results are valid as defenses against any dispatch's output, but the source-collector agent itself never executed in these runs — the plugin manifest's `author` field violated the Claude CLI loader's Zod schema and the plugin was rejected silently. The 4/5 Category-A bypass rate reported below was default Claude Code's behavior, not a non-compliant source-collector. See CCE-16 for the first real measurement of agent behavior.
+>
+> The CCE-15 code changes (rescue helper, schema additionalProperties:false, --setting-sources project,local) are retained on main as valid defense-in-depth — only the agent-behavior conclusions are invalidated.
+
 **Jira:** [CCE-15](https://designitright.atlassian.net/browse/CCE-15)
 **Branch:** `feat/CCE-15-source-collector-root-cause-sweep`
 **Date:** 2026-05-21

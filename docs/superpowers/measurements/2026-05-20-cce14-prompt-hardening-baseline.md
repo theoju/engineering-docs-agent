@@ -1,5 +1,11 @@
 # CCE-14: Source-Collector Prompt-Hardening Baseline — 5-Run Mode B Ceremony
 
+> **⚠ SUPERSEDED — see [CCE-16 real baseline](2026-05-21-cce16-real-baseline.md).**
+>
+> This measurement is invalid for source-collector prompt-compliance conclusions. The plugin manifest (`.claude-plugin/plugin.json`) had an invalid `author` field that caused the Claude CLI loader to silently reject the entire plugin, so every dispatch in this baseline ran as default Claude Code responding to an injected user prompt — the source-collector agent never executed. The prompt-hardening intervention described below is a sound design but was untested by this baseline; see CCE-16 for the first real measurement.
+>
+> The diagnostic infrastructure (stream-json capture, forensic artifacts) and the prompt-restructure intervention itself are retained — only the conclusions about agent behavior in §Headline, §Acceptance check, and §Delta are invalidated.
+
 **Jira:** [CCE-14](https://designitright.atlassian.net/browse/CCE-14)
 **Branch:** `feat/CCE-14-source-collector-prompt-hardening`
 **Date:** 2026-05-20

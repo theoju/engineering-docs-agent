@@ -28,6 +28,23 @@ A Claude Code plugin: nightly docs-PR generator with publish verification and ti
    ```
 4. Configure GitHub secrets: `ANTHROPIC_API_KEY`, `SLACK_WEBHOOK_URL`, `JIRA_API_TOKEN`, `SMTP_*` as needed.
 
+## Self-hosting (dogfood)
+
+This repo is configured to run the agent against itself. The setup pattern doubles as a reference for new host repos:
+
+1. `.engineering-docs-agent/config.yml` — host config (framework, paths, Jira project keys, voice samples, publishing target).
+2. `.engineering-docs-agent/state.example.json` — seed template. Copy to `state.json` on first setup; the runtime file is gitignored so per-run mutations stay local.
+3. `docs/_agent-sandbox/` — agent-editable area (`agent_editable_paths` glob restricts writes here).
+
+Bootstrap a fresh checkout:
+
+```bash
+cp .engineering-docs-agent/state.example.json .engineering-docs-agent/state.json
+python3 scripts/orchestrator_runner.py --repo-root . --no-pr
+```
+
+The seed `last_successful_run.head_sha` points to the v0.1.0 tag commit, giving source-collector a real diff window over the project's PR history (CCE-1 through CCE-9). For per-subagent raw-stdout diagnostics, set `DOCS_AGENT_DEBUG_DIR=/tmp/cce-debug` before invoking.
+
 ## Architecture
 
 See the [design spec](docs/superpowers/specs/2026-05-19-engineering-docs-agent-design.md).

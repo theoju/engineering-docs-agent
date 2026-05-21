@@ -1,0 +1,21 @@
+```json
+{
+  "pr_number": 11,
+  "what_changed": "Three layered fixes address source-collector dispatch failures identified in CCE-14. First, `dispatch_subagent` now passes `--setting-sources project,local` to exclude user-level Claude settings (where a prose-injecting SessionStart hook resides) while preserving OAuth keychain access. Second, `agents/schemas/source_collector.schema.json` gains `additionalProperties: false` at the top level and inside `prs.items`, so phantom keys like prose-as-key entries now fail validation visibly rather than passing silently. Third, a new `_rescue_json_object` helper in `scripts/orchestrator_runner.py` performs brace-balanced JSON extraction when strict `json.loads` fails, recording `prose_contamination_rescued` in a threaded `out_reasons` list that surfaces in `partial_reasons`. A 5-run Mode B re-measurement baseline doc and full run artifacts are committed under `docs/superpowers/measurements/`. Result is PARTIAL PASS: contamination and phantom-silent goals met; Category-A structural bypass carry-forward to CCE-16.",
+  "why": "CCE-14 measured a consistent pattern of three distinct failure modes in source-collector dispatch: Category-A schema bypass (structural), prose preamble contamination of JSON output, and phantom field silent acceptance. This sweep addresses the two most tractable root causes (contamination and phantom acceptance) with composable, independently testable fixes, while deferring the structural bypass to CCE-16.",
+  "breaking": false,
+  "doc_targets": [
+    {
+      "lens": "core",
+      "action": "edit",
+      "page_hint": "agents/source-collector.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "create",
+      "page_hint": "docs/superpowers/measurements/2026-05-21-cce15-root-cause-baseline.md"
+    }
+  ],
+  "notes": "The `agents/schemas/source_collector.schema.json` and embedded schema block in `agents/source-collector.md` must stay in sync — enforced by `test_schema_md_sync`. Two pre-existing flakies in `tests/orchestrator/test_state_carry_forward.py` are unrelated to this branch and tracked separately. CCE-16 carries forward the Category-A structural bypass fix that this sweep did not resolve."
+}
+```

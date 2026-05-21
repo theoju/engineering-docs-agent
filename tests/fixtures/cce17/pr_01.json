@@ -1,0 +1,24 @@
+{
+  "pr_number": 1,
+  "what_changed": "Introduces the engineering-docs-agent Claude Code plugin in its entirety. The v0.1.0 baseline ships seven coordinated subagents \u2014 source-collector, pr-summarizer, page-author, content-validator, gap-detector, publish-verifier, and notifier \u2014 that convert merged PRs, commits, and Jira issues into a single nightly docs-update PR with voice-matched authoring, tiered linting, gap detection, and post-merge publish verification. The v0.1.1 hardening release folds in all 40 reviewer findings: typed contracts backed by JSON schemas, contract wiring (Jira forwarding, voice samples, path filtering, archive indexes, pr_id alignment), error-handling hardening across GhClient and the orchestrator runner, regression test backfill, and final polish (exit-code normalization, schema tightening, multi-summary batching, CHANGELOG). The combined release ships with 160+ passing tests across a full red-green-verify TDD cycle.",
+  "why": "CCE-1 establishes the foundational plugin so engineering teams can automate documentation maintenance: merged PRs and Jira tickets are transformed into structured, voice-consistent doc updates without manual effort. The combined v0.1.0+v0.1.1 integration avoids a second merge onto main by shipping the baseline and its hardening pass together, closing all known reviewer findings before the first external announcement.",
+  "breaking": false,
+  "doc_targets": [
+    {
+      "lens": "core",
+      "action": "create",
+      "page_hint": "docs/setup-guide.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "create",
+      "page_hint": "docs/superpowers/specs/2026-05-20-v0.1.1-hardening-design.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "create",
+      "page_hint": "docs/superpowers/plans/2026-05-20-v0.1.1-hardening.md"
+    }
+  ],
+  "notes": "All doc targets are net-new files; this is the repository's initial commit. Two test-plan items remain open: smoke-testing the plugin against a real repo and wiring the post-merge GitHub Action in a downstream consumer. No breaking-change label, no BREAKING keyword, and no '!:' conventional-commit marker detected \u2014 breaking set to false."
+}

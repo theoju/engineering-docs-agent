@@ -47,6 +47,30 @@ The seed `last_successful_run.head_sha` points to the v0.1.0 tag commit, giving 
 
 > Publish-verification is configured against a `deploy.yml` GitHub Actions workflow that is not yet committed; the `--no-pr` flag above keeps the bootstrap dry-run only. Wiring up the workflow + end-to-end publish path is tracked separately.
 
+### Jira enrichment (optional)
+
+If your host config sets `sources.jira.enabled: true` and you want the
+source-collector subagent to fetch linked issue summaries, set two env
+vars in the shell that invokes the orchestrator:
+
+```bash
+export JIRA_EMAIL="your.email@example.com"
+export JIRA_API_TOKEN="…"  # token from https://id.atlassian.com/manage-profile/security/api-tokens
+```
+
+`JIRA_API_TOKEN` is an Atlassian Cloud API token (NOT your password). The
+token is sent over TLS via HTTP basic-auth to the Jira REST API.
+`dispatch_subagent` already passes the full parent environment into the
+subprocess, so any inherited `JIRA_*` vars reach the agent without
+additional plumbing.
+
+Without these env vars, the orchestrator continues to run; `jira_issues`
+in the source-collector output will be `[]` and the run is marked
+`partial: true` with `error: "jira_auth_missing"` so the operational gap
+is visible in `.engineering-docs-agent/state.json` partial_reasons and in
+Slack/email notifications. See `agents/source-collector.md` Step 5 +
+Forbidden outputs §6 for the agent-side contract.
+
 ## Architecture
 
 See the [design spec](docs/superpowers/specs/2026-05-19-engineering-docs-agent-design.md).

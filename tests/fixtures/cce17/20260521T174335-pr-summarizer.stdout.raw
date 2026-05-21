@@ -1,0 +1,26 @@
+```json
+{
+  "pr_number": 4,
+  "what_changed": "Introduces a `dispatch_validated()` wrapper at the LLM-to-typed-code boundary in `scripts/orchestrator_runner.py` and `scripts/verify_runner.py`, wired into 8 of the 9 subagent call sites. Off-contract LLM responses now surface as specific `schema_invalid: <name>: <field-detail>` reasons in `state.current_run.partial_reasons` instead of being silently swallowed by `dict.get()` fallbacks (the v0.1.1 Mode-B silent-no-op bug). All 7 agent `.md` files gain an authoritative `## Output schema (canonical)` section embedding the JSON Schema and a \"Return ONLY a JSON object\" instruction. Two new test suites are added: a parameterized drift-prevention lint (7 cases asserting `.md` schema blocks stay JSON-equivalent to `agents/schemas/*.schema.json`) and an end-to-end soft-fail integration test reproducing the observed wrong shape and asserting the specific reason surfaces. Test count grows from 146 to 158 with no new runtime dependencies.",
+  "why": "The v0.1.1 orchestrator silently accepted malformed subagent responses — any off-schema field was absorbed by `dict.get()` defaults, causing the pipeline to continue with phantom data and no diagnostic signal (Mode-B bug). CCE-4 hardens the LLM boundary so schema violations are explicit, attributable, and surfaced in the partial-run record rather than hidden. Embedding the schema directly in each agent's system prompt makes the contract self-documenting and reduces prompt/code drift.",
+  "breaking": false,
+  "doc_targets": [
+    {
+      "lens": "core",
+      "action": "edit",
+      "page_hint": "architecture/subagent-contracts.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "edit",
+      "page_hint": "specs/2026-05-20-cce4-schema-enforcement-design.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "edit",
+      "page_hint": "plans/2026-05-20-cce4-schema-enforcement.md"
+    }
+  ],
+  "notes": "The 9th call site (gh-failure-branch notifier in `verify_runner.py`) deliberately stays on raw `dispatch_subagent` as a fire-and-forget; docs should not describe it as validated. The smoke run against ADIS post-merge (manual step in the test plan) was still pending at merge time — docs may want to note that the `schema_invalid` diagnostic signal is expected but not yet confirmed in production."
+}
+```

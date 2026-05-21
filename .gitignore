@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# engineering-docs-agent runtime state (seed template: state.example.json)
+.engineering-docs-agent/state.json

@@ -1,0 +1,38 @@
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/_agent-sandbox/whats-new.md
+  agent_editable_paths:
+    - "docs/_agent-sandbox/**"
+  lens_paths:
+    core: docs/
+    superpowers: docs/superpowers/
+
+sources:
+  git:
+    host: github
+  jira:
+    enabled: true
+    base_url: https://designitright.atlassian.net
+    project_keys:
+      - CCE
+
+voice:
+  sample_paths:
+    - CLAUDE.md
+    - README.md
+
+lint:
+  tier1: default
+
+publishing:
+  base_url: https://theoju.github.io/engineering-docs-agent
+  build_workflow: deploy.yml
+  url_map_rule: standard
+  verify_timeout_seconds: 60
+
+notifications:
+  slack:
+    enabled: false
+  email:
+    enabled: false

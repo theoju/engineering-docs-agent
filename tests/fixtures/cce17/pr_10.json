@@ -1,0 +1,29 @@
+{
+  "pr_number": 10,
+  "what_changed": "Hardens the source-collector agent prompt by restructuring its Procedure into a mandatory ordered checklist with explicit 'MAY NOT proceed until step N completed AND evidence is visible in tool-call history' gates, adding a \u00a75 Forbidden-outputs entry for the Category-A failure mode (returning empty prs:[] without calling gh pr list), and numbering all five Forbidden-outputs entries \u00a71\u2013\u00a75 for unambiguous cross-reference from the Procedure. Fixes a latent bug in _extract_final_assistant_text in scripts/orchestrator_runner.py so that when the final assistant turn is pure tool_use, the last text-bearing turn is returned instead of an empty string. Adds two tests covering the new and the previously-uncovered all-tool-only path. Commits full 5-run Mode B measurement artifacts (meta, prompt, stdout, stderr, stream.jsonl) under docs/superpowers/measurements/ and a companion plan and spec doc for the CCE-14 work.",
+  "why": "CCE-12's 5-run baseline showed the source-collector returned empty prs:[] without ever invoking gh pr list in 4 of 5 runs (Category-A failure). The gated checklist and new Forbidden-outputs \u00a75 partially address this: Category-A failures dropped from 4/5 to 2/5 and gh pr list invocations rose from 0/5 to 3/5, though both miss their acceptance targets. Two residual failure modes were characterized \u2014 checklist bypass (single-turn empty JSON, zero tool calls) and prose contamination (correct data returned but prepended prose broke parsing). The orchestrator_runner fix eliminates a separate footgun where a correct prior-turn response was silently discarded when the model's final turn was tool-only. The PR ships as a partial fix with full evidence committed for CCE-15 follow-on work.",
+  "breaking": false,
+  "doc_targets": [
+    {
+      "lens": "core",
+      "action": "edit",
+      "page_hint": "agents/source-collector.md"
+    },
+    {
+      "lens": "core",
+      "action": "edit",
+      "page_hint": "agents/orchestrator.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "create",
+      "page_hint": "docs/superpowers/measurements/2026-05-20-cce14-prompt-hardening-baseline.md"
+    },
+    {
+      "lens": "superpowers",
+      "action": "create",
+      "page_hint": "docs/superpowers/specs/2026-05-20-cce14-source-collector-prompt-hardening-design.md"
+    }
+  ],
+  "notes": "Acceptance criteria were not met (Category-A: 2/5 vs target \u22641/5; gh pr list invocations: 3/5 vs target \u22654/5). CCE-15 is the designated follow-up for a structural prompt change to prevent single-turn bypass and a Forbidden-outputs entry for prose-before-JSON plus parse hardening. The _extract_final_assistant_text behavioral fix is independently correct and not contingent on the acceptance targets. No breaking-change label or BREAKING marker present."
+}

@@ -118,6 +118,11 @@ def dispatch_subagent(
     run_kwargs: dict = {"capture_output": True, "text": True, "check": False}
     if cwd is not None:
         run_kwargs["cwd"] = str(cwd)
+    # CCE-10: pass CLAUDE_STOP_VERIFY=0 so the global stop-verify hook does
+    # not contaminate subagent stdout with a "Verification statement:" prose
+    # preamble that breaks json.loads(). See agents/source-collector.md and
+    # ~/.claude/hooks/stop-verify.sh:22.
+    run_kwargs["env"] = {**os.environ, "CLAUDE_STOP_VERIFY": "0"}
     try:
         r = subprocess.run(argv, **run_kwargs)
     except FileNotFoundError:

@@ -72,6 +72,95 @@ _EXECUTION_FRAMING = (
 )
 
 
+def _extract_final_assistant_text(events: list[dict]) -> str:
+    """Concatenate all text blocks from the LAST assistant message in a
+    stream-json event list. Returns empty string if no assistant message
+    is present or the final assistant has no text blocks.
+
+    The orchestrator's downstream contract is that dispatch returns the
+    canonical JSON dict; in stream-json mode the canonical JSON is the text
+    content of the final assistant turn — possibly split across multiple
+    text blocks if the model interleaved tool_use blocks.
+    """
+    last_assistant: dict | None = None
+    for ev in events:
+        if ev.get("type") == "assistant":
+            last_assistant = ev
+    if last_assistant is None:
+        return ""
+    content = last_assistant.get("message", {}).get("content", [])
+    return "".join(
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
+def _summarize_tool_use(events: list[dict]) -> dict:
+    """Walk a stream-json event list and produce a tool-use summary.
+
+    Two-pass algorithm:
+      1. Collect `tool_result` outcomes keyed by `tool_use_id` from user events.
+      2. Collect `tool_use` blocks from assistant events; join with outcomes
+         from pass 1 so each call gets its `is_error` and `result_chars`.
+
+    The `calls` list is capped at 50 to keep meta.json compact on chatty runs;
+    `calls_truncated` flips True when the cap engages. Run-level fields
+    (turns, stop_reason, duration_ms) come from the terminal `result` event.
+    """
+    errors_by_id: dict[str, bool] = {}
+    result_chars_by_id: dict[str, int] = {}
+
+    for ev in events:
+        if ev.get("type") != "user":
+            continue
+        for block in ev.get("message", {}).get("content", []):
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            tuid = block.get("tool_use_id", "")
+            errors_by_id[tuid] = bool(block.get("is_error", False))
+            content = block.get("content", "")
+            if isinstance(content, list):
+                content = "".join(
+                    c.get("text", "") for c in content if isinstance(c, dict)
+                )
+            result_chars_by_id[tuid] = len(str(content))
+
+    calls: list[dict] = []
+    for ev in events:
+        if ev.get("type") != "assistant":
+            continue
+        for block in ev.get("message", {}).get("content", []):
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            tuid = block.get("id", "")
+            input_preview = json.dumps(block.get("input", {}), default=str)[:200]
+            calls.append(
+                {
+                    "name": block.get("name", ""),
+                    "input_preview": input_preview,
+                    "is_error": errors_by_id.get(tuid, False),
+                    "result_chars": result_chars_by_id.get(tuid, 0),
+                }
+            )
+
+    by_name: dict[str, int] = {}
+    for c in calls:
+        by_name[c["name"]] = by_name.get(c["name"], 0) + 1
+
+    result_ev: dict = next((e for e in events if e.get("type") == "result"), {})
+
+    return {
+        "total_calls": len(calls),
+        "by_name": by_name,
+        "calls": calls[:50],
+        "calls_truncated": len(calls) > 50,
+        "turns": result_ev.get("num_turns"),
+        "stop_reason": result_ev.get("stop_reason"),
+        "duration_ms": result_ev.get("duration_ms"),
+    }
+
+
 def dispatch_subagent(
     name: str,
     inputs: dict,
@@ -92,10 +181,18 @@ def dispatch_subagent(
     - passes `--plugin-dir` and `--allowedTools` so agents resolve and can
       run their declared tools non-interactively (CCE-3 C)
 
+    When DOCS_AGENT_DEBUG_DIR is set (CCE-9 + CCE-12):
+    - dispatch uses `--output-format stream-json --verbose` so we observe
+      ground-truth tool-call sequence
+    - raw NDJSON event stream is persisted to <agent>.stream.jsonl
+    - extended <agent>.meta.json carries a tool_use summary block
+    - the dict returned to callers is parsed from the FINAL assistant
+      message's concatenated text content (caller contract preserved)
+
     Returns None if:
     - the `claude` binary is not installed (FileNotFoundError)
     - the subagent process exits with a non-zero return code
-    - the subagent emits empty stdout
+    - the subagent emits empty stdout (or in stream-json mode, no assistant text)
     - the subagent emits unparseable JSON
     """
     if dry_run_dir is not None:
@@ -103,8 +200,9 @@ def dispatch_subagent(
         if not fixture.exists():
             return None
         return load_json(fixture)
+
     prompt = _EXECUTION_FRAMING.format(payload=json.dumps(inputs))
-    argv = [
+    base_argv = [
         "claude",
         "-p",
         prompt,
@@ -115,6 +213,13 @@ def dispatch_subagent(
         "--allowedTools",
         " ".join(_AGENT_ALLOWED_TOOLS),
     ]
+    debug_dir = os.environ.get("DOCS_AGENT_DEBUG_DIR")
+    argv = (
+        base_argv + ["--output-format", "stream-json", "--verbose"]
+        if debug_dir
+        else base_argv
+    )
+
     run_kwargs: dict = {"capture_output": True, "text": True, "check": False}
     if cwd is not None:
         run_kwargs["cwd"] = str(cwd)
@@ -127,28 +232,55 @@ def dispatch_subagent(
         r = subprocess.run(argv, **run_kwargs)
     except FileNotFoundError:
         return None
-    # CCE-9 diagnostic instrumentation: when DOCS_AGENT_DEBUG_DIR is set,
-    # capture raw subagent prompt/stdout/stderr/meta into that directory.
-    # No-op otherwise.
-    debug_dir = os.environ.get("DOCS_AGENT_DEBUG_DIR")
+
+    # Parse subagent output. In stream-json mode the canonical JSON is the
+    # final assistant message's text content; in simple-print mode it IS
+    # the raw stdout.
+    raw_stdout = r.stdout or ""
+    tool_use_summary: dict | None = None
+    if debug_dir:
+        events: list[dict] = []
+        for line in raw_stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                # Skip malformed lines; raw stream.jsonl preserves them for forensics.
+                continue
+        canonical_text = _extract_final_assistant_text(events)
+        tool_use_summary = _summarize_tool_use(events)
+    else:
+        canonical_text = raw_stdout
+
+    # CCE-9 + CCE-12: when DOCS_AGENT_DEBUG_DIR is set, write forensics
+    # artifacts. The extra stream.jsonl is stream-json-only; the tool_use
+    # block in meta.json is also stream-json-only.
     if debug_dir:
         debug_path = Path(debug_dir)
         debug_path.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         base = debug_path / f"{ts}-{name}"
         base.with_suffix(".prompt.txt").write_text(prompt)
-        base.with_suffix(".stdout.txt").write_text(r.stdout or "")
+        # stdout.txt holds the caller view (extracted canonical JSON), so
+        # readers can diff against the simple-print mode's stdout.txt
+        # without knowing which dispatch path produced it.
+        base.with_suffix(".stdout.txt").write_text(canonical_text)
         base.with_suffix(".stderr.txt").write_text(r.stderr or "")
-        base.with_suffix(".meta.json").write_text(
-            json.dumps({"returncode": r.returncode, "argv": argv}, indent=2)
-        )
+        base.with_suffix(".stream.jsonl").write_text(raw_stdout)
+        meta_payload: dict = {"returncode": r.returncode, "argv": argv}
+        if tool_use_summary is not None:
+            meta_payload["tool_use"] = tool_use_summary
+        base.with_suffix(".meta.json").write_text(json.dumps(meta_payload, indent=2))
+
     if r.returncode != 0:
         return None
-    stdout = (r.stdout or "").strip()
-    if not stdout:
+    canonical_text = canonical_text.strip()
+    if not canonical_text:
         return None
     try:
-        return json.loads(stdout)
+        return json.loads(canonical_text)
     except json.JSONDecodeError:
         return None
 

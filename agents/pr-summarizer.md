@@ -86,7 +86,40 @@ The canonical schema is in §Output schema above. The shape described here is th
 3. Compose `what_changed` (focus on behavior, not implementation detail).
 4. Compose `why` (root cause, motivation).
 5. Mark `breaking=true` if any of: title contains "BREAKING", `!:` suffix in conventional-commit subject, label contains "breaking-change".
-6. Propose `doc_targets`: for each meaningfully-touched lens (use file-path heuristics: `backend/api/**` → core, `docs/specs/**` → archive, etc., taking the lens list as the universe), emit `{lens, action, page_hint}`. Action is `create` if no matching page exists in that lens; `edit` otherwise.
+6. Propose `doc_targets`. Emit one entry per documentation page that should be
+   created or updated. Each entry MUST satisfy:
+   - `lens`: one of `core` or `superpowers` (the values from the orchestrator's
+     `lens_names` input — these are the only valid lenses).
+   - `action`: `create` if no matching page exists in that lens; `edit` if a
+     matching page does exist.
+   - `page_hint`: a **lens-relative** path with NO leading slash and NO
+     lens-path prefix (do NOT include `docs/` or `docs/superpowers/`). The
+     orchestrator builds the final write path as `<lens_path>/<page_hint>`.
+
+   Per-action rules for `page_hint`:
+   - **`action: create`** — `page_hint` MUST start with `_agent-sandbox/` and
+     end in `.md`. New pages may only be written under the agent sandbox; the
+     host's `agent_editable_paths` glob is `docs/_agent-sandbox/**`. Use
+     `lens: core` for new sandbox pages (its lens path is `docs/`, so the
+     final write is `docs/_agent-sandbox/<rel>.md`). Example:
+     `{"lens": "core", "action": "create", "page_hint": "_agent-sandbox/2026-05-21-foo.md"}`.
+   - **`action: edit`** — `page_hint` is the path of the existing page
+     within the lens, ending in `.md`. Example:
+     `{"lens": "superpowers", "action": "edit", "page_hint": "measurements/2026-05-20-cce12-tool-use-baseline.md"}`.
+
+   `page_hint` MUST NEVER be a source-tree path. You are mapping a PR's
+   changes onto a **documentation page**, not echoing back source file paths.
+   Specifically: never emit `scripts/...`, `agents/...`, `tests/...`,
+   `.claude-plugin/...`, `templates/...`, `src/...`, `CHANGELOG.md`, or any
+   path ending in `.py`, `.json`, `.yml`, `.yaml`, `.ts`, `.tsx`, `.js`,
+   `.sh`, or `.toml`.
+
+   Map source paths to lenses to _decide what to document_, not to choose
+   the doc page name. For example: a PR that touches `scripts/orchestrator_runner.py`
+   may belong in `core` lens with a `page_hint` like
+   `_agent-sandbox/2026-05-21-orchestrator-changes.md` (new) or
+   `architecture/orchestrator.md` (edit, if such a page exists).
+
 7. Emit JSON, no preface text.
 
 ## Failure handling

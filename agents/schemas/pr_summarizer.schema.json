@@ -2,7 +2,8 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "pr-summarizer output",
   "type": "object",
-  "required": ["pr_number"],
+  "required": ["pr_number", "doc_targets"],
+  "additionalProperties": false,
   "properties": {
     "pr_number": { "type": "integer" },
     "what_changed": { "type": ["string", "null"] },
@@ -13,14 +14,40 @@
       "items": {
         "type": "object",
         "required": ["lens", "action", "page_hint"],
+        "additionalProperties": false,
         "properties": {
-          "lens": { "type": "string" },
+          "lens": { "type": "string", "enum": ["core", "superpowers"] },
           "action": { "type": "string", "enum": ["create", "edit"] },
           "page_hint": { "type": "string" }
-        }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "action": { "const": "create" } } },
+            "then": {
+              "properties": {
+                "page_hint": {
+                  "type": "string",
+                  "pattern": "^_agent-sandbox/[^/].*\\.md$"
+                }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "action": { "const": "edit" } } },
+            "then": {
+              "properties": {
+                "page_hint": {
+                  "type": "string",
+                  "pattern": "^[^/].*\\.md$"
+                }
+              }
+            }
+          }
+        ]
       }
     },
     "notes": { "type": ["string", "null"] },
-    "error": { "type": ["string", "null"] }
+    "error": { "type": ["string", "null"] },
+    "partial": { "type": "boolean" }
   }
 }

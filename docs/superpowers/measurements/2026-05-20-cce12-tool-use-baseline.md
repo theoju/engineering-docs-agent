@@ -1,5 +1,9 @@
 # CCE-12: Source-Collector Tool-Use Baseline — 5-Run Mode B Ceremony
 
+> **⚠ PARTIAL SUPERSESSION — see [CCE-16 real baseline](2026-05-21-cce16-real-baseline.md).**
+>
+> The stream-json instrumentation infrastructure described in this baseline (forensic artifact capture, tool-use summary, DOCS_AGENT_DEBUG_DIR gate) is sound and remains in production. However, the conclusions classifying source-collector behavior into Category A / B / C are based on dispatches where the plugin manifest was rejected by the Claude CLI loader (the `author` field violated the schema), so every dispatch in this baseline ran as default Claude Code, not the source-collector agent. The classification distribution is real data about default Claude Code's response to the orchestrator's `<inputs>` framing, but should not be read as source-collector compliance behavior. See CCE-16.
+
 **Jira:** [CCE-12](https://designitright.atlassian.net/browse/CCE-12)
 **Branch:** `feat/CCE-12-source-collector-tool-use-diagnostics`
 **Date:** 2026-05-20

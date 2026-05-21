@@ -2,6 +2,6 @@
   "name": "engineering-docs-agent",
   "version": "0.1.1",
   "description": "Nightly docs-PR generator: summarizes engineering changes, updates host docs site, runs lint, opens a PR.",
-  "author": "Theo Jungeblut",
+  "author": { "name": "Theo Jungeblut" },
   "license": "MIT"
 }

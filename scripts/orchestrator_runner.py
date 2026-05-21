@@ -73,22 +73,31 @@ _EXECUTION_FRAMING = (
 
 
 def _extract_final_assistant_text(events: list[dict]) -> str:
-    """Concatenate all text blocks from the LAST assistant message in a
-    stream-json event list. Returns empty string if no assistant message
-    is present or the final assistant has no text blocks.
+    """Concatenate all text blocks from the LAST assistant message that
+    contains at least one text block. Returns empty string only if no
+    assistant message in the stream has any text content (CCE-14).
 
     The orchestrator's downstream contract is that dispatch returns the
-    canonical JSON dict; in stream-json mode the canonical JSON is the text
-    content of the final assistant turn — possibly split across multiple
-    text blocks if the model interleaved tool_use blocks.
+    canonical JSON dict; in stream-json mode the canonical JSON is the
+    text content of the final assistant turn — possibly split across
+    multiple text blocks if the model interleaved tool_use blocks.
+
+    Hardened in CCE-14 against the forward-compat footgun where the
+    LAST assistant turn is purely tool_use (no text). Prior implementation
+    would return "" in that case even though earlier assistant turns
+    contained the answer.
     """
-    last_assistant: dict | None = None
+    last_assistant_with_text: dict | None = None
     for ev in events:
-        if ev.get("type") == "assistant":
-            last_assistant = ev
-    if last_assistant is None:
+        if ev.get("type") != "assistant":
+            continue
+        content = ev.get("message", {}).get("content", [])
+        has_text = any(isinstance(b, dict) and b.get("type") == "text" for b in content)
+        if has_text:
+            last_assistant_with_text = ev
+    if last_assistant_with_text is None:
         return ""
-    content = last_assistant.get("message", {}).get("content", [])
+    content = last_assistant_with_text.get("message", {}).get("content", [])
     return "".join(
         block.get("text", "")
         for block in content
@@ -188,6 +197,14 @@ def dispatch_subagent(
     - extended <agent>.meta.json carries a tool_use summary block
     - the dict returned to callers is parsed from the FINAL assistant
       message's concatenated text content (caller contract preserved)
+
+    Stream-json mode's per-run latency is dominated by the agent's
+    tool-call decisions, NOT the NDJSON parse overhead (CCE-14). The
+    CCE-12 baseline measured 3-6s for Category-A runs (zero tool calls)
+    versus 74s for the Run-2 outlier that made 5 tool calls. This mode
+    is appropriate for diagnostic measurement; for steady-state
+    production, leave DOCS_AGENT_DEBUG_DIR unset so the simple --print
+    path runs at full speed.
 
     Returns None if:
     - the `claude` binary is not installed (FileNotFoundError)

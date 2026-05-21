@@ -17,7 +17,9 @@ class _FakeCompleted:
         self.returncode = returncode
 
 
-def test_debug_capture_writes_files_when_env_var_set(tmp_path, monkeypatch):
+def test_debug_capture_writes_files_on_non_ndjson_stdout_gracefully(
+    tmp_path, monkeypatch
+):
     import orchestrator_runner as runner
 
     fake_stdout = '{"prs": [], "jira_issues": []}'

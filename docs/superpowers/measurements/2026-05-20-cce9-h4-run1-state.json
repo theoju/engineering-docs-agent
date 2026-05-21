@@ -1,0 +1,12 @@
+{
+  "version": "1",
+  "current_run": {
+    "started_at": "2026-05-20T23:53:49.677855+00:00",
+    "head_sha": "c36f53b598780dd219bc83a6601488d8381e2e75",
+    "partial": true,
+    "partial_reasons": [
+      "source_collector_invalid: returned None"
+    ],
+    "pr_number": null
+  }
+}

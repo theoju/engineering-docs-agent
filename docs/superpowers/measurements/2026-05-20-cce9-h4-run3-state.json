@@ -1,0 +1,12 @@
+{
+  "version": "1",
+  "current_run": {
+    "started_at": "2026-05-20T23:54:26.413895+00:00",
+    "head_sha": "c36f53b598780dd219bc83a6601488d8381e2e75",
+    "partial": true,
+    "partial_reasons": [
+      "schema_invalid: source-collector: 'prs' is a required property"
+    ],
+    "pr_number": null
+  }
+}

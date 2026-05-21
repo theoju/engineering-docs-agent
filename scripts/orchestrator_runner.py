@@ -76,8 +76,9 @@ def _rescue_json_object(text: str) -> dict | None:
     """Extract the first balanced JSON object from prose-contaminated
     text. Returns the parsed dict on success, None otherwise.
 
-    Defense in depth for CCE-15. With --bare (Task 1) the SessionStart-
-    hook contamination pathway is closed, but other contamination
+    Defense in depth for CCE-15. With --setting-sources project,local
+    (Task 1) the SessionStart-hook contamination pathway is closed via
+    user-settings exclusion, but other contamination
     patterns may exist (CCE-14 Run 4 was an "★ Insight" preamble
     injected by the explanatory-output-style plugin). When strict
     json.loads on the dispatch output fails, callers can fall through

@@ -165,7 +165,7 @@ def test_same_page_targets_batched_into_single_dispatch(tmp_path, monkeypatch):
     def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
         if name == "page-author":
             captured.append(inputs)
-        return real(name, inputs, dry_run_dir=dry_run_dir)
+        return real(name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons)
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
@@ -231,7 +231,9 @@ def test_jira_input_forwarded_to_source_collector(tmp_path, monkeypatch):
 
     def spying_dispatch(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
         captured_inputs[name] = inputs
-        return real_dispatch(name, inputs, dry_run_dir=dry_run_dir)
+        return real_dispatch(
+            name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons
+        )
 
     monkeypatch.setattr(orchestrator_runner, "dispatch_subagent", spying_dispatch)
 
@@ -267,7 +269,9 @@ def test_jira_context_threaded_to_pr_summarizer(tmp_path, monkeypatch):
     def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
         if name == "pr-summarizer":
             captured["summarizer_inputs"].append(inputs)
-        return real_dispatch(name, inputs, dry_run_dir=dry_run_dir)
+        return real_dispatch(
+            name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons
+        )
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
@@ -294,7 +298,9 @@ def test_voice_samples_loaded_and_passed_to_authoring(tmp_path, monkeypatch):
             captured.append(
                 {"name": name, "voice_samples": inputs.get("voice_samples")}
             )
-        return real_dispatch(name, inputs, dry_run_dir=dry_run_dir)
+        return real_dispatch(
+            name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons
+        )
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
@@ -351,7 +357,7 @@ def test_gap_detector_receives_constructed_pr_id(tmp_path, monkeypatch):
     def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
         if name == "gap-detector":
             captured.append(inputs)
-        return real(name, inputs, dry_run_dir=dry_run_dir)
+        return real(name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons)
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
     monkeypatch.setenv("GITHUB_REPOSITORY", "myorg/myrepo")

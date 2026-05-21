@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","session_id":"sess-001","model":"claude-sonnet-4-6","cwd":"/repo","tools":["Bash","Read","Write","Edit","WebFetch"],"mcp_servers":[]}
+{"type":"assistant","message":{"id":"msg_01","role":"assistant","content":[{"type":"tool_use","id":"tu_001","name":"Bash","input":{"command":"gh pr list --state merged --search merged:>=2026-05-19","description":"List merged PRs"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_001","content":"42  Add foo  user1  abc123\n43  Fix bar  user2  def456","is_error":false}]}}
+{"type":"assistant","message":{"id":"msg_02","role":"assistant","content":[{"type":"tool_use","id":"tu_002","name":"Bash","input":{"command":"gh api repos/o/n/pulls/42","description":"Fetch PR 42 details"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_002","content":"{\"title\":\"Add foo\",\"body\":\"sample body\"}","is_error":false}]}}
+{"type":"assistant","message":{"id":"msg_03","role":"assistant","content":[{"type":"text","text":"{\"prs\":[{\"number\":42,\"url\":\"https://example.com/pr/42\",\"title\":\"Add foo\"}],\"jira_issues\":[]}"}]}}
+{"type":"result","subtype":"success","stop_reason":"end_turn","num_turns":3,"duration_ms":18742,"total_cost_usd":0.045}

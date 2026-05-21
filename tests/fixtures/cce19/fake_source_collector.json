@@ -1,0 +1,23 @@
+{
+  "prs": [
+    {
+      "number": 1,
+      "url": "https://example.com/pr/1",
+      "merge_sha": "aaaa1111",
+      "title": "in-window-1"
+    },
+    {
+      "number": 2,
+      "url": "https://example.com/pr/2",
+      "merge_sha": "bbbb2222",
+      "title": "in-window-2"
+    },
+    {
+      "number": 9,
+      "url": "https://example.com/pr/9",
+      "merge_sha": "ffffffff",
+      "title": "out-of-window"
+    }
+  ],
+  "jira_issues": []
+}

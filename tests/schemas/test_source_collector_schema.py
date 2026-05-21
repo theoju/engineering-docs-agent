@@ -80,3 +80,40 @@ def test_phantom_per_pr_item_field_rejected():
     with pytest.raises(ValidationError) as exc_info:
         validate(bad, SCHEMA)
     assert "extra" in str(exc_info.value)
+
+
+def test_partial_with_jira_auth_missing_validates():
+    """CCE-18: the canonical jira_auth_missing partial output validates clean.
+
+    Shape: populated prs + empty jira_issues + partial=true + error="jira_auth_missing".
+    """
+    doc = {
+        "prs": [{"number": 1, "url": "https://example.com/pr/1"}],
+        "jira_issues": [],
+        "partial": True,
+        "error": "jira_auth_missing",
+    }
+    validate(doc, SCHEMA)
+
+
+def test_partial_jira_auth_missing_with_populated_jira_issues_schema_accepts():
+    """CCE-18: design intent — when partial=true with error=jira_auth_missing,
+    jira_issues MUST be empty. The current schema is permissive (it cannot
+    express conditional cross-field constraints with draft-07 + allOf
+    without major refactor). Enforcement lives at the prompt level:
+    agents/source-collector.md Forbidden outputs §6 explicitly bans
+    fabricated jira_issues entries when auth fails.
+
+    This test documents the gap so a future tightening (e.g., moving to
+    draft-2020-12 with dependentSchemas) is easy to find via grep.
+    """
+    doc = {
+        "prs": [{"number": 1, "url": "https://example.com/pr/1"}],
+        "jira_issues": [{"key": "CCE-17", "summary": "fake-from-pr-title"}],
+        "partial": True,
+        "error": "jira_auth_missing",
+    }
+    # Schema-level: this validates (the schema doesn't enforce the cross-field rule).
+    validate(doc, SCHEMA)
+    # Behavioral expectation enforced at the prompt level — see
+    # agents/source-collector.md Forbidden outputs §6.

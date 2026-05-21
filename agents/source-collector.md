@@ -63,40 +63,43 @@ The orchestrator will pass you a JSON block named `inputs` containing:
 
 Return ONLY a JSON object that validates against this schema. No prose, no markdown fences around the response, no commentary.
 
-## Output contract
+## Forbidden outputs
 
-The canonical schema is in §Output schema above. The shape described here is the same; the schema is authoritative if they disagree.
+NEVER emit any of these shapes. The agent has been observed to invent them when "no work to do." They will fail schema validation and break the orchestrator pipeline.
 
-Return ONLY a JSON object matching:
+**Bad: status-report / telemetry shape** (the agent reflexively emits this when there are no PRs in the diff window — do not):
 
 ```json
 {
-  "prs": [
-    {
-      "number": 142,
-      "title": "...",
-      "body": "...",
-      "merge_sha": "abc123",
-      "merged_at": "2026-05-19T07:00:00Z",
-      "author": "user",
-      "files": [{ "path": "...", "additions": 0, "deletions": 0 }],
-      "labels": ["..."],
-      "jira_keys": ["ADIS-235"],
-      "url": "https://github.com/owner/repo/pull/142"
-    }
-  ],
-  "jira_issues": [
-    {
-      "key": "ADIS-235",
-      "summary": "...",
-      "description": "...",
-      "status": "Done",
-      "labels": ["architecture"],
-      "url": "https://acme.atlassian.net/browse/ADIS-235"
-    }
-  ]
+  "status": "idle",
+  "reason": "...",
+  "commits_analyzed": 0,
+  "branches_scanned": 0,
+  "files_modified": 0
 }
 ```
+
+If `last_sha..HEAD` contains no merged PRs, the correct response is `{"prs": [], "jira_issues": []}`, NOT a status report.
+
+**Bad: array renamed `issues` (or `jira` or `tickets`)**:
+
+```json
+{ "prs": [], "issues": [] }
+```
+
+The Jira array MUST be named exactly `jira_issues`. Never `issues`, `jira`, `tickets`, `jira_keys`, or any synonym. The schema's `required: ["prs", "jira_issues"]` is non-negotiable.
+
+**Bad: prose preamble before the JSON**:
+
+```
+Verification statement:
+- No files were changed in this turn.
+- ...
+
+{"prs": [], "jira_issues": []}
+```
+
+Return ONLY the JSON object. No prose before. No prose after. No markdown fences (` ```json ` etc.) around it. The orchestrator parses stdout with `json.loads()`; any non-JSON content breaks parsing and the entire run fails.
 
 ## Procedure
 

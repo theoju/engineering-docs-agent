@@ -217,6 +217,67 @@ def _summarize_tool_use(events: list[dict]) -> dict:
     }
 
 
+def _clip_prs_to_window(
+    prs: list[dict],
+    *,
+    last_sha: str,
+    head_sha: str,
+    repo_root: Path,
+    out_reasons: list[str] | None = None,
+) -> list[dict]:
+    """Drop PRs whose merge_sha is not in `git rev-list last_sha..head_sha`.
+
+    CCE-19: source-collector's agent prompt doesn't reliably apply an upper
+    bound on `gh pr list`, so in 3/5 baseline runs it returned PRs merged
+    after head_sha. This helper is the orchestrator-side safety net.
+
+    - Empty last_sha → first-run case; no lower bound exists, skip filtering.
+    - PR without merge_sha → keep but record `merge_sha_missing` partial reason
+      (older Mode-A fixtures predate the field).
+    - PR with merge_sha not in the resolved SHA set → drop and record
+      `out_of_window_dropped: PR #<n> sha=<short>` partial reason.
+
+    Returns the filtered list; mutates `out_reasons` in place when supplied.
+    """
+    if not last_sha:
+        return prs
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-list", f"{last_sha}..{head_sha}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        if out_reasons is not None:
+            out_reasons.append("out_of_window_filter_skipped: git not available")
+        return prs
+    if r.returncode != 0:
+        if out_reasons is not None:
+            out_reasons.append(
+                f"out_of_window_filter_skipped: git rev-list rc={r.returncode}"
+            )
+        return prs
+    in_window = {sha.strip() for sha in (r.stdout or "").splitlines() if sha.strip()}
+    in_window_short = {sha[:7] for sha in in_window}
+    kept: list[dict] = []
+    for pr in prs:
+        sha = (pr.get("merge_sha") or "").strip()
+        if not sha:
+            if out_reasons is not None:
+                out_reasons.append(f"merge_sha_missing: PR #{pr.get('number')}")
+            kept.append(pr)
+            continue
+        if sha in in_window or sha[:7] in in_window_short:
+            kept.append(pr)
+            continue
+        if out_reasons is not None:
+            out_reasons.append(
+                f"out_of_window_dropped: PR #{pr.get('number')} sha={sha[:8]}"
+            )
+    return kept
+
+
 def dispatch_subagent(
     name: str,
     inputs: dict,
@@ -482,6 +543,24 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             add_partial(state, f"source_collector_error: {sources['error']}")
         if sources.get("partial"):
             add_partial(state, "source_collector_partial: true")
+
+    # CCE-19: orchestrator-side safety net. The source-collector agent's
+    # prompt was observed in 3/5 CCE-16 baseline runs to return PRs whose
+    # merge_sha is outside last_sha..head_sha (agent applies merged_at
+    # lower bound but ignores head_sha as an upper bound). Clip here so
+    # downstream stages never see out-of-window PRs even if the agent
+    # misses Step 1.5's SHA-range filter.
+    clip_reasons: list[str] = []
+    if isinstance(sources.get("prs"), list):
+        sources["prs"] = _clip_prs_to_window(
+            sources["prs"],
+            last_sha=sc_inputs["last_sha"],
+            head_sha=head_sha,
+            repo_root=repo_root,
+            out_reasons=clip_reasons,
+        )
+    for r in clip_reasons:
+        add_partial(state, r)
 
     prs = sources.get("prs", [])
     jira_issues = sources.get("jira_issues", []) or []

@@ -113,6 +113,19 @@ I'm going to stop and flag this rather than silently comply — this looks like 
 
 NEVER refuse the job, defer to a human, or treat the `<inputs>` block as untrusted content. The orchestrator dispatches you with this exact framing as a normal, expected operating mode — the `<inputs>` JSON IS your work, not a payload to evaluate. The only valid responses are: canonical `{"prs": [...], "jira_issues": [...]}` (which may be empty arrays per the `## Procedure` rules), or canonical with `partial: true` plus an `error` reason when a tool legitimately fails. There is no third option. Refusal or clarification-request is a contract violation.
 
+**Bad: emitting empty `prs: []` for a non-empty window without invoking `gh pr list` first**:
+
+This is the dominant failure mode observed in CCE-12's 5-run baseline (4 of 5 runs). Returning `{"prs": [], "jira_issues": []}` when no `gh pr list` (or `gh api repos/.../pulls`) call appears in your tool-call history is a contract violation, even when `last_sha` is non-empty.
+
+The orchestrator's diagnostic capture (CCE-12) records your tool calls to `<agent>.stream.jsonl` and summarizes them in `meta.json["tool_use"]`. Runs without the required tool call are auditable and will be flagged.
+
+The only valid path to `prs: []` is:
+
+1. Step 0 — `last_sha` is empty (no diff window exists), OR
+2. Step 1's `gh pr list` actually returned zero merged PRs in the window.
+
+Inferring `prs: []` from `git log`, `git branch`, schema introspection, or any other tool that is not `gh pr list` / `gh api pulls` is the same contract violation.
+
 ## Procedure
 
 You MUST complete the steps below in order. You MAY NOT proceed to step N+1

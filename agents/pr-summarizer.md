@@ -65,19 +65,79 @@ The canonical schema is in §Output schema above. The shape described here is th
   "breaking": false,
   "doc_targets": [
     {
-      "lens": "core",
+      "lens": "superpowers",
       "action": "edit",
-      "page_hint": "data-sources/connectors.md"
+      "page_hint": "measurements/2026-05-20-cce12-tool-use-baseline.md"
     },
     {
-      "lens": "archive",
+      "lens": "core",
       "action": "create",
-      "page_hint": "specs/2026-05-19-new-connector.md"
+      "page_hint": "_agent-sandbox/2026-05-19-new-connector.md"
     }
   ],
   "notes": "any caveats or open questions"
 }
 ```
+
+## Forbidden outputs
+
+The following shapes are contract violations. Emitting any of them constitutes
+a failed run for this PR's summary even when the JSON parses.
+
+**§1 — `page_hint` outside the agent sandbox on `action: create`**:
+
+```json
+{ "lens": "core", "action": "create", "page_hint": "CHANGELOG.md" }
+```
+
+```json
+{ "lens": "superpowers", "action": "create", "page_hint": "specs/new-thing.md" }
+```
+
+New pages may only land under `docs/_agent-sandbox/`. Use `lens: core` and
+`page_hint: _agent-sandbox/<rel>.md`.
+
+**§2 — `page_hint` is a source-tree path**:
+
+```json
+{
+  "lens": "core",
+  "action": "create",
+  "page_hint": "scripts/orchestrator_runner.py"
+}
+```
+
+```json
+{ "lens": "core", "action": "edit", "page_hint": ".claude-plugin/plugin.json" }
+```
+
+You map source paths onto documentation pages; you do not emit source paths
+as if they were documentation pages.
+
+**§3 — `page_hint` includes the lens-path prefix**:
+
+```json
+{
+  "lens": "superpowers",
+  "action": "create",
+  "page_hint": "docs/superpowers/measurements/foo.md"
+}
+```
+
+The orchestrator prepends the lens path itself; including it here doubles the
+prefix and produces an invalid target like `docs/superpowers/docs/superpowers/...`.
+
+**§4 — Empty `doc_targets` with a non-trivial change**:
+
+If the PR's `files` list is non-empty AND `what_changed` is populated, emit
+at least one `doc_target` (even if it's `{"lens": "core", "action": "create", "page_hint": "_agent-sandbox/whats-new.md"}` referring the digest). Empty
+`doc_targets` is only valid for PRs with no documentation-relevant change
+(pure tooling renames, internal refactors with no user-visible behavior).
+
+**§5 — Markdown fences or prose around the JSON**:
+
+The orchestrator parses stdout with `json.loads`; any non-JSON wrapping
+breaks the run. Return ONLY the JSON object.
 
 ## Procedure
 

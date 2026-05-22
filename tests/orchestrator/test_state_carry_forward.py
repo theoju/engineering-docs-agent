@@ -83,7 +83,7 @@ def test_prior_run_partial_reasons_do_not_carry_forward(tmp_path):
     seeded = {
         "version": "1",
         "current_run": {
-            "started_at": "2026-05-20T12:00:00+00:00",
+            "started_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
             "head_sha": "priorrunsha",
             "partial": True,
             "partial_reasons": [
@@ -113,7 +113,7 @@ def test_fresh_run_after_failed_run_starts_with_empty_reasons(tmp_path):
     seeded = {
         "version": "1",
         "current_run": {
-            "started_at": "2026-05-20T12:00:00+00:00",
+            "started_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
             "head_sha": "priorrunsha",
             "partial": True,
             "partial_reasons": ["push_failed: simulated network error"],
@@ -166,4 +166,37 @@ def test_stale_clear_signal_still_emitted_against_fresh_reasons(tmp_path):
     ]
     assert leaked == [], (
         f"stale prior reasons must not leak into fresh current_run; got {reasons}"
+    )
+
+
+def test_stale_current_run_cleared_is_info_only(tmp_path):
+    """Stale current_run is cleared as info-only: partial stays False, signal is recorded, prior reasons do not leak."""
+    stale_iso = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    seeded = {
+        "version": "1",
+        "current_run": {
+            "started_at": stale_iso,
+            "head_sha": "stalesha",
+            "partial": True,
+            "partial_reasons": ["push_failed: simulated"],
+        },
+    }
+    state_path = _init_host(tmp_path, seeded)
+
+    r = _run_orchestrator(tmp_path)
+    assert r.returncode == 0, r.stderr
+
+    state = json.loads(state_path.read_text())
+    cr = state["current_run"]
+    assert cr.get("partial") is False, (
+        f"info-only stale_current_run_cleared must not flip partial=True; got {cr}"
+    )
+    assert "stale_current_run_cleared" in cr.get("partial_reasons", []), (
+        f"staleness annotation must still be visible; got {cr}"
+    )
+    leaked = [
+        reason for reason in cr.get("partial_reasons", []) if "push_failed" in reason
+    ]
+    assert leaked == [], (
+        f"prior run's partial_reasons must NOT carry forward; leaked={leaked}"
     )

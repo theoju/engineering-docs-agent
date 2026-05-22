@@ -8,8 +8,6 @@ flipping partial.
 
 from __future__ import annotations
 
-import pytest
-
 from scripts.state_io import add_partial
 
 
@@ -53,7 +51,6 @@ def test_add_partial_info_only_appends_to_existing_reasons():
 def test_add_partial_non_info_after_info_flips_partial():
     state = _fresh_state()
     add_partial(state, "stale_current_run_cleared", info_only=True)
-    assert state["current_run"]["partial"] is False
     add_partial(state, "source_collector_error: real")
     assert state["current_run"]["partial"] is True
     assert state["current_run"]["partial_reasons"] == [

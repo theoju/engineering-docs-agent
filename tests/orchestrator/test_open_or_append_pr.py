@@ -73,7 +73,8 @@ def test_push_succeeds_tracking_setup_fails_returns_info_only_reason(tmp_path: P
             partial_reasons=[],
         )
     assert pr_number == 42
-    assert ("push_tracking_setup_failed", True) in reasons, (
+    info_only_reasons = [r for r, info_only in reasons if info_only]
+    assert any("push_tracking_setup_failed" in r for r in info_only_reasons), (
         f"expected info-only push_tracking_setup_failed; got {reasons}"
     )
 

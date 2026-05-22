@@ -12,8 +12,6 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
@@ -55,11 +53,7 @@ def _make_gh_client_stub(pr_number: int | None = 99):
 
 
 def test_push_succeeds_tracking_setup_fails_returns_info_only_reason(tmp_path: Path):
-    """CCE-21 primary repro: push refs succeed (commit reaches remote at the
-    same SHA as local HEAD), but `git push -u` returns non-zero because
-    upstream-tracking-setup failed. The orchestrator should treat this as
-    success-with-info, proceed to PR creation, and return the PR number
-    plus an info-only `push_tracking_setup_failed` reason."""
+    """Push refs succeed but tracking setup fails: info-only, PR still created."""
     gh = _make_gh_client_stub(pr_number=42)
     with patch.object(
         orun.subprocess,

@@ -61,6 +61,7 @@ def load_json(p: Path) -> dict[str, Any] | None:
 
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 _AGENT_ALLOWED_TOOLS: tuple[str, ...] = ("Bash", "Read", "Write", "Edit", "WebFetch")
+_STDERR_TRUNCATE = 300
 _EXECUTION_FRAMING = (
     "You are running in production as part of the engineering-docs-agent "
     "orchestrator pipeline.\n\n"
@@ -883,14 +884,18 @@ def open_or_append_pr(
         text=True,
     )
     if checkout.returncode != 0:
-        reasons.append((f"checkout_failed: {checkout.stderr.strip()[:200]}", False))
+        reasons.append(
+            (f"checkout_failed: {checkout.stderr.strip()[:_STDERR_TRUNCATE]}", False)
+        )
         return None, reasons
 
     add = subprocess.run(
         ["git", "-C", str(repo_root), "add", "."], capture_output=True, text=True
     )
     if add.returncode != 0:
-        reasons.append((f"git_add_failed: {add.stderr.strip()[:200]}", False))
+        reasons.append(
+            (f"git_add_failed: {add.stderr.strip()[:_STDERR_TRUNCATE]}", False)
+        )
         return None, reasons
 
     commit_msg = f"docs(agent): run {now_iso}"
@@ -921,8 +926,17 @@ def open_or_append_pr(
             remote_sha = lsremote.stdout.split()[0]
         local_sha = local_head.stdout.strip()
 
-        stderr_summary = (push.stderr or "").strip()[:300]
-        if local_sha and remote_sha == local_sha:
+        stderr_summary = (push.stderr or "").strip()[:_STDERR_TRUNCATE]
+        if local_head.returncode != 0 or not local_sha:
+            reasons.append(
+                (
+                    f"push_unknown: rev-parse failed (rc={local_head.returncode}); "
+                    f"push stderr: {stderr_summary}",
+                    False,
+                )
+            )
+            return None, reasons
+        if remote_sha == local_sha:
             reasons.append(
                 (
                     f"push_tracking_setup_failed: {stderr_summary}",

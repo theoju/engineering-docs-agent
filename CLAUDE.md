@@ -34,3 +34,4 @@ This file is read by the docs-agent's `load_voice_samples` helper (per `scripts/
 - Tests: pytest. TDD for new behavior (failing test → implementation → green). All tests use the fixture-driven dry-run path; the production Claude CLI dispatch is monkeypatched in unit tests.
 - Subagent contracts: each agent's `.md` file in `agents/` defines the canonical input/output shape. JSON schemas in `agents/schemas/` codify the output shape. Dataclasses in `scripts/contracts.py` provide the typed view.
 - Linting: the host repo's `lint.tier1: default` setting enables all 7 Tier-1 rules. Tier-2 and Tier-3 are opt-in per rule.
+- Config invariant: every `docs.lens_paths` entry must be covered by at least one `docs.agent_editable_paths` glob (validated at load by `_validate_lens_paths_are_editable`). The editable glob may be narrower than the lens path (e.g., a sandbox sub-path of a top-level lens).

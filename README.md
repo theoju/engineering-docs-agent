@@ -47,6 +47,17 @@ The seed `last_successful_run.head_sha` points to the v0.1.0 tag commit, giving 
 
 > Publish-verification is configured against a `deploy.yml` GitHub Actions workflow that is not yet committed; the `--no-pr` flag above keeps the bootstrap dry-run only. Wiring up the workflow + end-to-end publish path is tracked separately.
 
+### Lens paths and editable paths
+
+The agent reads from **lens paths** and writes to **editable paths**. They overlap, but they are different:
+
+- `docs.lens_paths` defines _where docs live for each lens_ (e.g., `core: docs/`, `superpowers: docs/superpowers/`). The voice-load, gap-detection, and PR-summarization stages read from these paths.
+- `docs.agent_editable_paths` defines _where the agent may write_. The orchestrator's runtime filter rejects any proposed page outside these globs.
+
+**Invariant:** every `lens_paths` entry must be covered by at least one `agent_editable_paths` glob. The config loader enforces this at boot via `_validate_lens_paths_are_editable` in `scripts/state_io.py`. A lens with no matching editable glob means the agent reads docs it can never update — usually a mistake.
+
+The editable globs may be **narrower** than the lens path — e.g., `core: docs/` paired with editable `docs/_agent-sandbox/**` is valid: the agent reads everything under `docs/` but only writes to the sandbox. The validator accepts this because the editable glob's anchor (`docs/_agent-sandbox/`) starts with the lens path (`docs/`). The compatibility rule is bidirectional: glob anchor and lens path must share a path branch.
+
 ### Jira enrichment (optional)
 
 If your host config sets `sources.jira.enabled: true` and you want the

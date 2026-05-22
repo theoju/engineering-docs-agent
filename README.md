@@ -47,6 +47,17 @@ The seed `last_successful_run.head_sha` points to the v0.1.0 tag commit, giving 
 
 > Publish-verification is configured against a `deploy.yml` GitHub Actions workflow that is not yet committed; the `--no-pr` flag above keeps the bootstrap dry-run only. Wiring up the workflow + end-to-end publish path is tracked separately.
 
+### Install from local clone
+
+If you're working from a checkout of this repo (e.g., to test changes before publishing), register the local marketplace and install the plugin:
+
+```bash
+claude plugin marketplace add /path/to/engineering-docs-agent
+claude plugin install engineering-docs-agent@engineering-docs-agent-marketplace
+```
+
+That makes the seven agents resolvable without `--plugin-dir` workarounds. The marketplace registration reads `.claude-plugin/marketplace.json`; the plugin manifest is at `.claude-plugin/plugin.json`.
+
 ### Lens paths and editable paths
 
 The agent reads from **lens paths** and writes to **editable paths**. They overlap, but they are different:

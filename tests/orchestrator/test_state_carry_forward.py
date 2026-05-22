@@ -167,3 +167,38 @@ def test_stale_clear_signal_still_emitted_against_fresh_reasons(tmp_path):
     assert leaked == [], (
         f"stale prior reasons must not leak into fresh current_run; got {reasons}"
     )
+
+
+def test_stale_current_run_cleared_is_info_only(tmp_path):
+    """CCE-20: a stale prior run triggers stale_current_run_cleared as
+    an INFO-ONLY partial reason. The fresh run's current_run.partial
+    stays False (the run itself has not degraded; we just cleared stale
+    state). The annotation is still recorded so operators see what
+    happened, and the prior run's actual partial_reasons do not carry
+    forward."""
+    stale_iso = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    seeded = {
+        "version": "1",
+        "current_run": {
+            "started_at": stale_iso,
+            "head_sha": "stalesha",
+            "partial": True,
+            "partial_reasons": ["push_failed: simulated"],
+        },
+    }
+    state_path = _init_host(tmp_path, seeded)
+
+    r = _run_orchestrator(tmp_path)
+    assert r.returncode == 0, r.stderr
+
+    state = json.loads(state_path.read_text())
+    cr = state["current_run"]
+    assert cr.get("partial") is False, (
+        f"info-only stale_current_run_cleared must not flip partial=True; got {cr}"
+    )
+    assert "stale_current_run_cleared" in cr.get("partial_reasons", []), (
+        f"staleness annotation must still be visible; got {cr}"
+    )
+    assert "push_failed: simulated" not in cr.get("partial_reasons", []), (
+        f"prior run's partial_reasons must NOT carry forward; got {cr}"
+    )

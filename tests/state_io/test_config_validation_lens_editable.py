@@ -17,7 +17,7 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
-from state_io import load_config_validated  # noqa: E402
+from state_io import ConfigError, load_config_validated  # noqa: E402
 
 
 # Minimum schema-required top-level keys outside of `docs`. Pulled from
@@ -81,7 +81,7 @@ docs:
     superpowers: docs/superpowers/
 """,
     )
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ConfigError) as exc_info:
         load_config_validated(cfg_path)
     msg = str(exc_info.value)
     assert "lens_paths" in msg or "editable" in msg, (
@@ -108,7 +108,7 @@ docs:
     archive: docs/archive/
 """,
     )
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ConfigError) as exc_info:
         load_config_validated(cfg_path)
     msg = str(exc_info.value)
     assert "superpowers" in msg, msg

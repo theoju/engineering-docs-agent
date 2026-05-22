@@ -47,8 +47,7 @@ def add_partial(state: dict, reason: str, *, info_only: bool = False) -> None:
 
     When info_only is False (default), also flip current_run.partial to True.
     When info_only is True, leave current_run.partial unchanged — the reason
-    is informational, not a degradation signal. Examples of info-only reasons:
-    stale_current_run_cleared, push_tracking_setup_failed (CCE-21).
+    is informational, not a degradation of the run's data quality.
 
     Idempotent: a reason already present is not appended again.
     """

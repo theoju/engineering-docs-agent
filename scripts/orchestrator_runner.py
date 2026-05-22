@@ -809,7 +809,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         return 0
     branch = branch_name(now)
     gh = GhClient(repo_root)
-    pr_number = open_or_append_pr(
+    pr_number, pr_reasons = open_or_append_pr(
         repo_root,
         gh,
         branch=branch,
@@ -817,8 +817,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         partial=state["current_run"]["partial"],
         partial_reasons=state["current_run"]["partial_reasons"],
     )
+    for reason, info_only in pr_reasons:
+        add_partial(state, reason, info_only=info_only)
     if pr_number is None:
-        add_partial(state, "push_failed: see logs")
         state_path.write_text(json.dumps(state, indent=2))
         return 1
     state["current_run"]["pr_number"] = pr_number
@@ -930,7 +931,7 @@ def open_or_append_pr(
         if local_head.returncode != 0 or not local_sha:
             reasons.append(
                 (
-                    f"push_unknown: rev-parse failed (rc={local_head.returncode}); "
+                    f"push_failed_unknown: rev-parse failed (rc={local_head.returncode}); "
                     f"push stderr: {stderr_summary}",
                     False,
                 )
@@ -946,7 +947,7 @@ def open_or_append_pr(
         elif lsremote.returncode != 0:
             reasons.append(
                 (
-                    f"push_unknown: ls-remote rc={lsremote.returncode}; "
+                    f"push_failed_unknown: ls-remote rc={lsremote.returncode}; "
                     f"push stderr: {stderr_summary}",
                     False,
                 )

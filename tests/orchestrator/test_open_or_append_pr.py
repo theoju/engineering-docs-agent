@@ -1,7 +1,7 @@
 """CCE-21: open_or_append_pr must distinguish three push failure modes:
 - push_refs_failed: commit didn't reach remote (fatal)
 - push_tracking_setup_failed: commit on remote but `-u` tracking failed (info-only, continue)
-- push_unknown: couldn't verify remote state (fatal, conservative default)
+- push_failed_unknown: couldn't verify remote state (fatal, conservative default)
 
 It must also always log push.stderr and push.stdout when push.returncode != 0
 so 'see logs' in the partial reason is actually backed by logs.

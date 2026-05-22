@@ -4,6 +4,7 @@ docs:
   whats_new_file: docs/_agent-sandbox/whats-new.md
   agent_editable_paths:
     - "docs/_agent-sandbox/**"
+    - "docs/superpowers/**"
   lens_paths:
     core: docs/
     superpowers: docs/superpowers/

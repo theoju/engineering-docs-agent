@@ -1,0 +1,15 @@
+{
+  "name": "engineering-docs-agent-marketplace",
+  "description": "Self-hosted marketplace for engineering-docs-agent.",
+  "owner": {
+    "name": "Theo Jungeblut",
+    "url": "https://github.com/theoju"
+  },
+  "plugins": [
+    {
+      "name": "engineering-docs-agent",
+      "source": "./",
+      "version": "0.1.1"
+    }
+  ]
+}

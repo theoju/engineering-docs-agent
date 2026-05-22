@@ -42,15 +42,24 @@ def load_state_validated(path: Path) -> dict[str, Any]:
     return raw
 
 
-def add_partial(state: dict, reason: str) -> None:
-    """Mark current_run as partial and append the reason. Idempotent."""
+def add_partial(state: dict, reason: str, *, info_only: bool = False) -> None:
+    """Append a partial reason to current_run.partial_reasons.
+
+    When info_only is False (default), also flip current_run.partial to True.
+    When info_only is True, leave current_run.partial unchanged — the reason
+    is informational, not a degradation signal. Examples of info-only reasons:
+    stale_current_run_cleared, push_tracking_setup_failed (CCE-21).
+
+    Idempotent: a reason already present is not appended again.
+    """
     if "current_run" not in state:
-        state["current_run"] = {"partial": True, "partial_reasons": []}
+        state["current_run"] = {"partial": False, "partial_reasons": []}
     cr = state["current_run"]
-    cr["partial"] = True
     cr.setdefault("partial_reasons", [])
     if reason not in cr["partial_reasons"]:
         cr["partial_reasons"].append(reason)
+    if not info_only:
+        cr["partial"] = True
 
 
 def cleanup_empty_parents(path: Path, *, until: Path) -> None:

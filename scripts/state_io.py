@@ -18,6 +18,60 @@ class StateError(Exception):
     """Raised when state.json fails schema validation."""
 
 
+def _validate_lens_paths_are_editable(config: dict) -> None:
+    """Cross-key check: every lens_paths entry must be covered by at least
+    one agent_editable_paths glob.
+
+    Compatibility rule: a lens at path P is covered by an editable glob G
+    iff the glob's anchor (the portion before the first wildcard) and P
+    are on the same path branch — i.e., one starts with the other.
+
+    This lets a narrower editable scope satisfy a wider lens path
+    (e.g., editable 'docs/_agent-sandbox/**' covers lens 'core' at 'docs/':
+    the agent reads all of docs/ but writes only to the sandbox sub-path).
+    """
+    docs = config.get("docs", {}) or {}
+    lenses = docs.get("lens_paths", {}) or {}
+    globs = docs.get("agent_editable_paths", []) or []
+
+    if not lenses or not globs:
+        return
+
+    def _anchor(g: str) -> str:
+        """Strip a glob to its literal prefix (everything before * ? [)."""
+        for i, ch in enumerate(g):
+            if ch in "*?[":
+                return g[:i]
+        return g
+
+    anchors = [_anchor(g) for g in globs]
+
+    uncovered: list[str] = []
+    for lens_name, lens_path in lenses.items():
+        if isinstance(lens_path, dict):
+            p = str(lens_path.get("path", ""))
+        else:
+            p = str(lens_path)
+        if not p:
+            continue
+        if not p.endswith("/"):
+            p = p + "/"
+        if not any(a.startswith(p) or p.startswith(a) for a in anchors):
+            uncovered.append(f"{lens_name} ({p})")
+
+    if uncovered:
+        raise ConfigError(
+            "lens_paths entries are not related to any "
+            "agent_editable_paths glob: "
+            + ", ".join(uncovered)
+            + f". Configured editable globs: {globs}. "
+            "Add a glob whose anchor shares a path branch with the lens "
+            "(e.g., add '"
+            + uncovered[0].split(" (")[1].rstrip(")")
+            + "**' to docs.agent_editable_paths)."
+        )
+
+
 def load_config_validated(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ConfigError(f"config not found: {path}")
@@ -27,6 +81,7 @@ def load_config_validated(path: Path) -> dict[str, Any]:
         jsonschema.validate(raw, schema)
     except jsonschema.ValidationError as e:
         raise ConfigError(f"config invalid at {e.json_path}: {e.message}") from e
+    _validate_lens_paths_are_editable(raw)
     return raw
 
 

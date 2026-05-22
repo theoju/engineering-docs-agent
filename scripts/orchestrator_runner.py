@@ -515,8 +515,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             try:
                 prior_dt = datetime.fromisoformat(prior_started.replace("Z", "+00:00"))
                 if (datetime.now(timezone.utc) - prior_dt) > timedelta(hours=24):
-                    # add_partial writes into the already-initialised fresh current_run
-                    add_partial(state, "stale_current_run_cleared")
+                    # Staleness is an info-only annotation: visible in partial_reasons
+                    # but does not flip current_run.partial. See CCE-20.
+                    add_partial(state, "stale_current_run_cleared", info_only=True)
             except ValueError:
                 pass
 

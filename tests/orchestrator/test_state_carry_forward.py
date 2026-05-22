@@ -83,7 +83,7 @@ def test_prior_run_partial_reasons_do_not_carry_forward(tmp_path):
     seeded = {
         "version": "1",
         "current_run": {
-            "started_at": "2026-05-20T12:00:00+00:00",
+            "started_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
             "head_sha": "priorrunsha",
             "partial": True,
             "partial_reasons": [
@@ -113,7 +113,7 @@ def test_fresh_run_after_failed_run_starts_with_empty_reasons(tmp_path):
     seeded = {
         "version": "1",
         "current_run": {
-            "started_at": "2026-05-20T12:00:00+00:00",
+            "started_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
             "head_sha": "priorrunsha",
             "partial": True,
             "partial_reasons": ["push_failed: simulated network error"],

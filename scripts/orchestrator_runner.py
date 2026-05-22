@@ -61,6 +61,7 @@ def load_json(p: Path) -> dict[str, Any] | None:
 
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 _AGENT_ALLOWED_TOOLS: tuple[str, ...] = ("Bash", "Read", "Write", "Edit", "WebFetch")
+_STDERR_TRUNCATE = 300
 _EXECUTION_FRAMING = (
     "You are running in production as part of the engineering-docs-agent "
     "orchestrator pipeline.\n\n"
@@ -808,7 +809,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         return 0
     branch = branch_name(now)
     gh = GhClient(repo_root)
-    pr_number = open_or_append_pr(
+    pr_number, pr_reasons = open_or_append_pr(
         repo_root,
         gh,
         branch=branch,
@@ -816,8 +817,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         partial=state["current_run"]["partial"],
         partial_reasons=state["current_run"]["partial_reasons"],
     )
+    for reason, info_only in pr_reasons:
+        add_partial(state, reason, info_only=info_only)
     if pr_number is None:
-        add_partial(state, "push_failed: see logs")
         state_path.write_text(json.dumps(state, indent=2))
         return 1
     state["current_run"]["pr_number"] = pr_number
@@ -869,37 +871,103 @@ def open_or_append_pr(
     now_iso: str,
     partial: bool,
     partial_reasons: list[str],
-) -> int | None:
+) -> tuple[int | None, list[tuple[str, bool]]]:
+    """Open or append the docs-agent PR for `branch`.
+
+    Returns (pr_number_or_None, reasons) where reasons is a list of
+    (reason_string, info_only_bool) pairs the caller should pass to add_partial.
+    """
+    reasons: list[tuple[str, bool]] = []
+
     checkout = subprocess.run(
         ["git", "-C", str(repo_root), "checkout", "-B", branch],
         capture_output=True,
         text=True,
     )
     if checkout.returncode != 0:
-        return None
+        reasons.append(
+            (f"checkout_failed: {checkout.stderr.strip()[:_STDERR_TRUNCATE]}", False)
+        )
+        return None, reasons
+
     add = subprocess.run(
         ["git", "-C", str(repo_root), "add", "."], capture_output=True, text=True
     )
     if add.returncode != 0:
-        return None
+        reasons.append(
+            (f"git_add_failed: {add.stderr.strip()[:_STDERR_TRUNCATE]}", False)
+        )
+        return None, reasons
+
     commit_msg = f"docs(agent): run {now_iso}"
     if partial:
         commit_msg += " (partial)"
     subprocess.run(
         ["git", "-C", str(repo_root), "commit", "-m", commit_msg], check=False
     )
+
     push = subprocess.run(
         ["git", "-C", str(repo_root), "push", "-u", "origin", branch],
         capture_output=True,
         text=True,
     )
     if push.returncode != 0:
-        return None
+        local_head = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        lsremote = subprocess.run(
+            ["git", "-C", str(repo_root), "ls-remote", "origin", branch],
+            capture_output=True,
+            text=True,
+        )
+        remote_sha = ""
+        if lsremote.returncode == 0 and lsremote.stdout.strip():
+            remote_sha = lsremote.stdout.split()[0]
+        local_sha = local_head.stdout.strip()
+
+        stderr_summary = (push.stderr or "").strip()[:_STDERR_TRUNCATE]
+        if local_head.returncode != 0 or not local_sha:
+            reasons.append(
+                (
+                    f"push_failed_unknown: rev-parse failed (rc={local_head.returncode}); "
+                    f"push stderr: {stderr_summary}",
+                    False,
+                )
+            )
+            return None, reasons
+        if remote_sha == local_sha:
+            reasons.append(
+                (
+                    f"push_tracking_setup_failed: {stderr_summary}",
+                    True,
+                )
+            )
+        elif lsremote.returncode != 0:
+            reasons.append(
+                (
+                    f"push_failed_unknown: ls-remote rc={lsremote.returncode}; "
+                    f"push stderr: {stderr_summary}",
+                    False,
+                )
+            )
+            return None, reasons
+        else:
+            reasons.append(
+                (
+                    f"push_refs_failed: {stderr_summary}",
+                    False,
+                )
+            )
+            return None, reasons
+
     existing = gh.pr_list_for_branch(branch)
     if not existing.ok:
-        return None
+        reasons.append((f"gh_pr_list_failed: {existing.error}", False))
+        return None, reasons
     if existing.value is not None:
-        return existing.value
+        return existing.value, reasons
     body = (
         "WARNING — Partial run — " + "; ".join(partial_reasons)
         if partial
@@ -907,8 +975,9 @@ def open_or_append_pr(
     )
     created = gh.pr_create(branch, commit_msg, body)
     if not created.ok:
-        return None
-    return created.value
+        reasons.append((f"gh_pr_create_failed: {created.error}", False))
+        return None, reasons
+    return created.value, reasons
 
 
 def main() -> int:

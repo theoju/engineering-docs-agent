@@ -23,6 +23,15 @@ sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 import orchestrator_runner  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _clear_agent_tools_cache():
+    """Each test starts and ends with a clean frontmatter cache, so tests
+    that swap _AGENTS_DIR aren't contaminated by cached real-agent entries."""
+    orchestrator_runner._AGENT_TOOLS_CACHE.clear()
+    yield
+    orchestrator_runner._AGENT_TOOLS_CACHE.clear()
+
+
 def _fake_run_capture(
     captured: dict, *, stdout: str = '{"ok": true}', returncode: int = 0
 ):
@@ -90,9 +99,6 @@ def test_agent_without_tools_frontmatter_omits_allowed_tools_flag(
 
     # Point the agents-dir helper at the synthetic dir for this test
     monkeypatch.setattr(orchestrator_runner, "_AGENTS_DIR", fake_agents_dir)
-    # Also clear any cached frontmatter so the synthetic file is read fresh
-    if hasattr(orchestrator_runner, "_AGENT_TOOLS_CACHE"):
-        orchestrator_runner._AGENT_TOOLS_CACHE.clear()
 
     captured: dict = {}
     monkeypatch.setattr(subprocess, "run", _fake_run_capture(captured))
@@ -117,10 +123,35 @@ def test_malformed_tools_frontmatter_raises_clear_error(monkeypatch, tmp_path: P
     )
 
     monkeypatch.setattr(orchestrator_runner, "_AGENTS_DIR", fake_agents_dir)
-    if hasattr(orchestrator_runner, "_AGENT_TOOLS_CACHE"):
-        orchestrator_runner._AGENT_TOOLS_CACHE.clear()
 
     with pytest.raises(ValueError) as exc_info:
         orchestrator_runner._load_agent_allowed_tools("broken-agent")
     assert "broken-agent" in str(exc_info.value)
     assert "list" in str(exc_info.value).lower()
+
+
+def test_agent_with_empty_tools_list_passes_empty_allowed_tools(
+    monkeypatch, tmp_path: Path
+):
+    """`tools: []` means 'declared, but no tools' — distinct from no frontmatter.
+    The flag must still be passed (as an empty allowlist), not omitted, so an
+    intentional lockdown isn't silently downgraded to default permissioning."""
+    fake_agents_dir = tmp_path / "agents"
+    fake_agents_dir.mkdir()
+    (fake_agents_dir / "empty-tools-agent.md").write_text(
+        "---\nname: empty-tools-agent\ndescription: locked down.\nmodel: sonnet\ntools: []\n---\n\n# empty-tools-agent\n"
+    )
+    monkeypatch.setattr(orchestrator_runner, "_AGENTS_DIR", fake_agents_dir)
+
+    captured: dict = {}
+    monkeypatch.setattr(subprocess, "run", _fake_run_capture(captured))
+
+    orchestrator_runner.dispatch_subagent(
+        "empty-tools-agent", {"foo": "bar"}, dry_run_dir=None
+    )
+
+    assert "--allowedTools" in captured["cmd"], captured["cmd"]
+    assert _allowed_tools_arg(captured["cmd"]) == "", (
+        f"empty tools list must yield an empty allowlist, got "
+        f"{_allowed_tools_arg(captured['cmd'])!r}"
+    )

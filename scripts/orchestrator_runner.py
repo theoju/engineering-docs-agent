@@ -61,7 +61,7 @@ def load_json(p: Path) -> dict[str, Any] | None:
 
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 _AGENT_ALLOWED_TOOLS: tuple[str, ...] = ("Bash", "Read", "Write", "Edit", "WebFetch")
-_AGENTS_DIR: Path = Path(__file__).parent.parent / "agents"
+_AGENTS_DIR: Path = Path(__file__).resolve().parent.parent / "agents"
 _AGENT_TOOLS_CACHE: dict[str, tuple[str, ...] | None] = {}
 
 
@@ -400,7 +400,7 @@ def dispatch_subagent(
         str(_PLUGIN_ROOT),
     ]
     agent_tools = _load_agent_allowed_tools(name)
-    if agent_tools:
+    if agent_tools is not None:
         base_argv.extend(["--allowedTools", " ".join(agent_tools)])
     debug_dir = os.environ.get("DOCS_AGENT_DEBUG_DIR")
     argv = (

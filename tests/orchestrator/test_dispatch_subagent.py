@@ -125,8 +125,12 @@ def test_dispatch_auto_passes_plugin_dir(monkeypatch):
     assert (plugin_dir / "agents").is_dir()
 
 
-def test_dispatch_passes_allowed_tools_union(monkeypatch):
-    """CCE-3 C2: --allowedTools lists the union of tools the agents need."""
+def test_dispatch_passes_per_agent_allowed_tools(monkeypatch):
+    """CCE-7: --allowedTools reflects only the agent's declared tools, not the union.
+
+    notifier declares only Bash in its frontmatter, so the argv must contain
+    exactly --allowedTools "Bash" — not the former union of all agents' tools.
+    """
     captured: dict = {}
     monkeypatch.setattr(subprocess, "run", _fake_run_capture(captured, stdout="{}"))
 
@@ -135,11 +139,9 @@ def test_dispatch_passes_allowed_tools_union(monkeypatch):
     cmd = captured["cmd"]
     assert "--allowedTools" in cmd
     tools_arg = cmd[cmd.index("--allowedTools") + 1]
-    # The union across the seven agent .md files.
-    for required in ("Bash", "Read", "Write", "Edit", "WebFetch"):
-        assert required in tools_arg, (
-            f"{required} missing from --allowedTools={tools_arg}"
-        )
+    assert tools_arg == "Bash", (
+        f"expected notifier to get only Bash; got --allowedTools={tools_arg}"
+    )
 
 
 def test_dispatch_returns_none_on_missing_binary(monkeypatch):

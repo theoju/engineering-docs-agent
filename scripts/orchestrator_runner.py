@@ -398,9 +398,10 @@ def dispatch_subagent(
         name,
         "--plugin-dir",
         str(_PLUGIN_ROOT),
-        "--allowedTools",
-        " ".join(_AGENT_ALLOWED_TOOLS),
     ]
+    agent_tools = _load_agent_allowed_tools(name)
+    if agent_tools:
+        base_argv.extend(["--allowedTools", " ".join(agent_tools)])
     debug_dir = os.environ.get("DOCS_AGENT_DEBUG_DIR")
     argv = (
         base_argv + ["--output-format", "stream-json", "--verbose"]

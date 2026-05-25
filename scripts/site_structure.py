@@ -90,3 +90,57 @@ def plan_scaffold(site: dict) -> list[ScaffoldFile]:
         )
 
     return files
+
+
+_MKDOCS_TEMPLATE = """\
+site_name: {site_name}
+docs_dir: {docs_dir}
+site_dir: site
+
+theme:
+  name: {theme}
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+  - awesome-pages
+{mkdocstrings_plugin}
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.details
+"""
+
+_MKDOCSTRINGS_BLOCK = """\
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+"""
+
+
+def render_mkdocs_yaml(site: dict, *, site_name: str, python_detected: bool) -> str:
+    return _MKDOCS_TEMPLATE.format(
+        site_name=site_name,
+        docs_dir=site["docs_dir"].rstrip("/"),
+        theme=site.get("theme", "material"),
+        mkdocstrings_plugin=_MKDOCSTRINGS_BLOCK if python_detected else "",
+    )

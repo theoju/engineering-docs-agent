@@ -90,9 +90,11 @@ def _find_contracts_section(site: dict) -> dict | None:
 
 def generate_contracts(repo_root: Path, site_config: dict) -> dict:
     """Render every *.json under the json-schema section's `sources` to a
-    contracts page. Returns {"written": [...], "skipped": [...]} of repo-relative
-    POSIX paths. Skips (records) missing/empty sources and malformed schemas;
-    never emits an empty page set.
+    contracts page. Returns {"written": [...], "skipped": [...]}: written
+    entries are repo-relative page paths; skipped entries are the source name
+    (source-level skip) or "source/file.json" (file-level skip). Skips
+    missing/empty sources, malformed or non-object schemas, and duplicate
+    stems (first source wins); never emits an empty page set.
     """
     repo_root = Path(repo_root)
     written: list[str] = []
@@ -110,6 +112,7 @@ def generate_contracts(repo_root: Path, site_config: dict) -> dict:
     out_dir = repo_root / docs_dir / section_path / "contracts"
 
     names: list[str] = []
+    written_stems: set[str] = set()
     for source in sources:
         src_dir = repo_root / source
         if not src_dir.is_dir():
@@ -123,8 +126,20 @@ def generate_contracts(repo_root: Path, site_config: dict) -> dict:
             continue
         for path in schema_files:
             rel = f"{docs_dir}/{section_path}/contracts/{path.stem}.md"
+            if path.stem in written_stems:
+                print(
+                    f"warning: duplicate contract stem {path.stem!r} "
+                    f"(source {source}); skipping to keep the first",
+                    file=sys.stderr,
+                )
+                skipped.append(str(Path(source) / path.name))
+                continue
             try:
                 schema = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(schema, dict):
+                    raise ValueError(
+                        f"expected a JSON object, got {type(schema).__name__}"
+                    )
             except (OSError, ValueError) as exc:
                 print(
                     f"warning: skipping malformed schema {path.name}: {exc}",
@@ -138,6 +153,7 @@ def generate_contracts(repo_root: Path, site_config: dict) -> dict:
             )
             written.append(rel)
             names.append(path.stem)
+            written_stems.add(path.stem)
 
     if names:
         (out_dir / "index.md").write_text(render_index(names), encoding="utf-8")

@@ -103,3 +103,41 @@ def test_generate_overwrites_stale_page(tmp_path):
     (base / "page_author.md").write_text("STALE\n")
     contracts_doc.generate_contracts(tmp_path, SITE)
     assert "STALE" not in (base / "page_author.md").read_text()
+
+
+def test_generate_skips_non_dict_schema(tmp_path):
+    d = tmp_path / "schemas"
+    d.mkdir()
+    (d / "arr.json").write_text("[1, 2, 3]")  # valid JSON, not an object
+    (d / "ok.json").write_text(json.dumps({"title": "OK", "type": "object"}))
+    result = contracts_doc.generate_contracts(tmp_path, SITE)
+    base = tmp_path / "docs/site-src/api/contracts"
+    assert (base / "ok.md").exists()
+    assert not (base / "arr.md").exists()
+    assert any("arr.json" in s for s in result["skipped"])
+
+
+def test_generate_dedupes_stem_across_sources(tmp_path):
+    for name in ("schemas", "more"):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "dup.json").write_text(json.dumps({"title": name, "type": "object"}))
+    site = {
+        "docs_dir": "docs/site-src",
+        "sections": [
+            {
+                "key": "api",
+                "path": "api/",
+                "title": "API",
+                "generator": "api-extract",
+                "extractors": ["json-schema"],
+                "sources": ["schemas", "more"],
+            }
+        ],
+    }
+    result = contracts_doc.generate_contracts(tmp_path, site)
+    page = (tmp_path / "docs/site-src/api/contracts/dup.md").read_text()
+    assert "schemas" in page  # first source wins
+    idx = (tmp_path / "docs/site-src/api/contracts/index.md").read_text()
+    assert idx.count("[dup](dup.md)") == 1
+    assert any("more/dup.json" in s for s in result["skipped"])

@@ -77,3 +77,70 @@ def render_index(names: list[str]) -> str:
         lines.append(f"- [{n}]({n}.md)")
     lines.append("")
     return "\n".join(lines)
+
+
+def _find_contracts_section(site: dict) -> dict | None:
+    for s in site.get("sections", []) or []:
+        if s.get("generator") == "api-extract" and "json-schema" in (
+            s.get("extractors") or []
+        ):
+            return s
+    return None
+
+
+def generate_contracts(repo_root: Path, site_config: dict) -> dict:
+    """Render every *.json under the json-schema section's `sources` to a
+    contracts page. Returns {"written": [...], "skipped": [...]} of repo-relative
+    POSIX paths. Skips (records) missing/empty sources and malformed schemas;
+    never emits an empty page set.
+    """
+    repo_root = Path(repo_root)
+    written: list[str] = []
+    skipped: list[str] = []
+
+    section = _find_contracts_section(site_config)
+    if section is None:
+        return {"written": written, "skipped": skipped}
+    sources = section.get("sources") or []
+    if not sources:
+        return {"written": written, "skipped": skipped}
+
+    docs_dir = (site_config.get("docs_dir") or "").rstrip("/")
+    section_path = (section.get("path") or "").rstrip("/")
+    out_dir = repo_root / docs_dir / section_path / "contracts"
+
+    names: list[str] = []
+    for source in sources:
+        src_dir = repo_root / source
+        if not src_dir.is_dir():
+            print(f"warning: contracts source not found: {source}", file=sys.stderr)
+            skipped.append(source)
+            continue
+        schema_files = sorted(src_dir.glob("*.json"))
+        if not schema_files:
+            print(f"warning: no *.json in contracts source: {source}", file=sys.stderr)
+            skipped.append(source)
+            continue
+        for path in schema_files:
+            rel = f"{docs_dir}/{section_path}/contracts/{path.stem}.md"
+            try:
+                schema = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                print(
+                    f"warning: skipping malformed schema {path.name}: {exc}",
+                    file=sys.stderr,
+                )
+                skipped.append(str(Path(source) / path.name))
+                continue
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / f"{path.stem}.md").write_text(
+                render_contract_page(path.stem, schema), encoding="utf-8"
+            )
+            written.append(rel)
+            names.append(path.stem)
+
+    if names:
+        (out_dir / "index.md").write_text(render_index(names), encoding="utf-8")
+        written.append(f"{docs_dir}/{section_path}/contracts/index.md")
+
+    return {"written": written, "skipped": skipped}

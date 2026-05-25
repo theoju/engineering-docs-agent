@@ -160,3 +160,31 @@ def generate_contracts(repo_root: Path, site_config: dict) -> dict:
         written.append(f"{docs_dir}/{section_path}/contracts/index.md")
 
     return {"written": written, "skipped": skipped}
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--repo-root", type=Path, required=True)
+    ap.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="config.yml with a site: block",
+    )
+    args = ap.parse_args(argv)
+    try:
+        config = load_config_validated(args.config)
+    except (ConfigError, yaml.YAMLError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    site = config.get("site")
+    if not site:
+        print("error: config has no site: block", file=sys.stderr)
+        return 1
+    result = generate_contracts(args.repo_root, site)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

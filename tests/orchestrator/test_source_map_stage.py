@@ -45,3 +45,18 @@ def test_drift_whats_new_lines():
     )
     assert lines[0] == "### Pages to review (source drift)"
     assert "- a.md — changed: x.py, y.py" in lines
+
+
+def test_compute_source_drift_skips_malformed_file_entries(tmp_path):
+    page = tmp_path / "docs/site-src/a.md"
+    page.parent.mkdir(parents=True)
+    page.write_text("---\nsource_files:\n  - src/*.py\n---\n# A\n")
+    config = {"site": {"docs_dir": "docs/site-src"}}
+    # files[] mixes a valid dict, a valid string, and malformed entries
+    # (int, None, nested list) that must be skipped without raising.
+    prs = [
+        {"number": 9, "files": [{"path": "src/x.py"}, "src/y.py", 5, None, ["nope"]]}
+    ]
+    assert orun.compute_source_drift(tmp_path, config, prs) == [
+        {"page": "a.md", "changed_sources": ["src/x.py", "src/y.py"]}
+    ]

@@ -613,11 +613,6 @@ def test_run_surfaces_source_drift_in_whats_new_and_state(tmp_path):
     Closes spec-strategy gap (spec line 104): prior tests only exercised
     helper functions; this pins the orchestrator run() wiring end-to-end.
     """
-    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
-    import orchestrator_runner as runner
-
-    importlib.reload(runner)
-
     # Seed a page whose source_files glob matches the fake PR's changed file.
     # The fake source collector (FAKES) returns PR #1 with
     # files: [{"path": "backend/connectors/foo.py", ...}].

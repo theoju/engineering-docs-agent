@@ -527,6 +527,7 @@ def compute_source_drift(repo_root: Path, config: dict, prs: list[dict]) -> list
     docs_dir = (config.get("site") or {}).get("docs_dir")
     if not docs_dir:
         return []
+    # Deferred: both modules self-configure sys.path at load time.
     import source_map
     import source_drift
 
@@ -536,7 +537,8 @@ def compute_source_drift(repo_root: Path, config: dict, prs: list[dict]) -> list
             (f["path"] if isinstance(f, dict) else f)
             for pr in prs
             for f in (pr.get("files") or [])
-            if (f.get("path") if isinstance(f, dict) else f)
+            if isinstance(f, (dict, str))
+            and (f.get("path") if isinstance(f, dict) else f)
         }
     )
     return source_drift.detect_drift(repo_root / docs_dir, changed)["drifted"]

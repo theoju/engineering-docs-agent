@@ -71,3 +71,17 @@ def test_cli_missing_config_errors(tmp_path):
     )
     assert proc.returncode == 1
     assert "error" in proc.stderr.lower()
+
+
+def test_cli_invalid_yaml_errors(tmp_path):
+    # malformed config.yml surfaces a clean error, not a raw traceback
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(": bad: yaml: {{{\n")
+    proc = subprocess.run(
+        [sys.executable, str(_CLI), "--repo-root", str(tmp_path), "--config", str(cfg)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 1
+    assert "error" in proc.stderr.lower()
+    assert "Traceback" not in proc.stderr

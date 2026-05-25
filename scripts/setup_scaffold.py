@@ -24,7 +24,12 @@ _TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 
 
 def _python_detected(repo_root: Path) -> bool:
-    # cheap heuristic: any .py outside common vendor dirs, or a pyproject.toml
+    # cheap heuristic: a pyproject.toml, or any .py outside common vendor dirs.
+    # The pyproject short-circuit covers virtually all real Python projects, so
+    # the rglob (and its necessarily-incomplete exclusion set) is only a
+    # fallback. "site" is excluded because it is the mkdocs build-output dir
+    # (site_dir: site); that also skips a source dir literally named "site",
+    # which is acceptable given the short-circuit above.
     if (repo_root / "pyproject.toml").exists():
         return True
     for p in repo_root.rglob("*.py"):
@@ -36,7 +41,7 @@ def _python_detected(repo_root: Path) -> bool:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--repo-root", type=Path, required=True)
     ap.add_argument("--site-name", default="Documentation")
     ap.add_argument(
@@ -48,7 +53,14 @@ def main() -> int:
     args = ap.parse_args()
 
     site_path = args.config or (_TEMPLATES / "site.default.yaml")
-    site = yaml.safe_load(site_path.read_text())
+    try:
+        site = yaml.safe_load(site_path.read_text())
+    except FileNotFoundError:
+        print(f"error: config file not found: {site_path}", file=sys.stderr)
+        return 1
+    except yaml.YAMLError as exc:
+        print(f"error: invalid YAML in {site_path}: {exc}", file=sys.stderr)
+        return 1
 
     result = site_structure.apply_scaffold(
         args.repo_root,

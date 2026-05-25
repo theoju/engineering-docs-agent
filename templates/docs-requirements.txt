@@ -2,6 +2,7 @@
 # Installed in the host repo's docs tooling / CI to build the site.
 mkdocs-material>=9.5
 mkdocs-awesome-pages-plugin>=2.9
+# mkdocstrings is only wired into mkdocs.yml for Python repos; harmless otherwise.
 mkdocstrings[python]>=0.25
 mkdocs-gen-files>=0.5
 mkdocs-literate-nav>=0.6

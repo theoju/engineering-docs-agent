@@ -43,3 +43,38 @@ def test_cli_rerun_is_idempotent(tmp_path: Path):
     (tmp_path / "docs/site-src/index.md").write_text("authored\n")
     subprocess.run(cmd, capture_output=True, text=True, check=True)
     assert (tmp_path / "docs/site-src/index.md").read_text() == "authored\n"
+
+
+def test_cli_non_python_repo_omits_mkdocstrings(tmp_path: Path):
+    # no .py and no pyproject.toml → python_detected False → no mkdocstrings.
+    subprocess.run(
+        [
+            sys.executable,
+            str(_CLI),
+            "--repo-root",
+            str(tmp_path),
+            "--site-name",
+            "Demo",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "mkdocstrings" not in (tmp_path / "mkdocs.yml").read_text()
+
+
+def test_cli_missing_config_exits_nonzero_with_message(tmp_path: Path):
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(_CLI),
+            "--repo-root",
+            str(tmp_path),
+            "--config",
+            str(tmp_path / "nope.yml"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 1
+    assert "not found" in proc.stderr

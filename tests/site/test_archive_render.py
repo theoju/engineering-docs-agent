@@ -54,3 +54,18 @@ def test_render_truncates_and_escapes():
     assert "x" * 200 not in page  # not the full 200 chars
     assert "A\\|B" in page  # title pipe escaped
     assert "d\\|e" in page  # status pipe escaped
+
+
+def test_render_escapes_pipe_within_summary():
+    # a pipe inside the kept (non-truncated) summary must be escaped
+    entries = [_entry("2026-05-24-a.md", summary="left | right")]
+    page = archive_indexes.render_archive_page("Specs", entries, link_base=None)
+    assert "left \\| right" in page
+
+
+def test_render_normalizes_base_without_trailing_slash():
+    entries = [_entry("2026-05-24-a.md", title="Alpha", rel="specs/a.md")]
+    page = archive_indexes.render_archive_page(
+        "Specs", entries, link_base="https://h/blob/main"
+    )
+    assert "[Alpha](https://h/blob/main/specs/a.md)" in page

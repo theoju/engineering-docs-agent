@@ -104,6 +104,10 @@ def render_archive_page(
         lines.append("")
         return "\n".join(lines)
 
+    # Normalize the base so a caller that omits the trailing slash still
+    # produces a well-formed URL (source_rel_path has no leading slash).
+    base = link_base.rstrip("/") + "/" if link_base else None
+
     grouped: dict[str, list[Entry]] = {}
     for e in entries:
         grouped.setdefault(e.month, []).append(e)
@@ -115,9 +119,7 @@ def render_archive_page(
         lines.append("|---|---|---|")
         for e in grouped[month]:
             title = e.title.replace("|", "\\|")
-            title_cell = (
-                f"[{title}]({link_base}{e.source_rel_path})" if link_base else title
-            )
+            title_cell = f"[{title}]({base}{e.source_rel_path})" if base else title
             summary = e.summary
             if len(summary) > _SUMMARY_MAX:
                 summary = summary[:_SUMMARY_MAX] + "…"

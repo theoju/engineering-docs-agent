@@ -94,7 +94,7 @@
       "type": "object",
       "required": ["docs_dir", "sections"],
       "properties": {
-        "docs_dir": { "type": "string" },
+        "docs_dir": { "type": "string", "minLength": 1 },
         "theme": {
           "type": "string",
           "enum": ["material", "mkdocs"],

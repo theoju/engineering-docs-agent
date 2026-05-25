@@ -88,6 +88,23 @@ site:
     assert "docs_dir" in str(exc.value) or "outside" in str(exc.value)
 
 
+def test_section_absolute_path_raises(tmp_path: Path):
+    # An absolute path joins to escape docs_dir; the startswith guard rejects it.
+    with pytest.raises(ConfigError) as exc:
+        load_config_validated(
+            _write(
+                tmp_path,
+                """
+site:
+  docs_dir: docs/site-src
+  sections:
+    - { key: home, path: /etc/passwd, title: Home }
+""",
+            )
+        )
+    assert "docs_dir" in str(exc.value) or "outside" in str(exc.value)
+
+
 def test_no_site_block_is_fine(tmp_path: Path):
     cfg = load_config_validated(_write(tmp_path, ""))
     assert "site" not in cfg

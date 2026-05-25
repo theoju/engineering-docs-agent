@@ -135,6 +135,29 @@ site:
         validate(cfg, SCHEMA)
 
 
+def test_site_empty_docs_dir_rejected():
+    # An empty docs_dir would make the path-containment guard pass everything;
+    # the schema's minLength closes that at load time.
+    cfg = yaml.safe_load("""
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: {}
+sources: { git: { host: github } }
+lint: {}
+publishing: { base_url: https://x, build_workflow: deploy.yml, url_map_rule: standard }
+notifications: {}
+site:
+  docs_dir: ""
+  sections:
+    - { key: home, path: index.md, title: Home }
+""")
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)
+
+
 def test_config_without_site_block_still_valid():
     # Backward compatibility: site is optional.
     cfg = yaml.safe_load("""

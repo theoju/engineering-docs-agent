@@ -32,6 +32,22 @@ def parse_frontmatter(text: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def parse_title_and_summary(text: str) -> tuple[str, str]:
+    """Title from the first '# ' heading; summary from the first non-blank,
+    non-heading line after it."""
+    title = ""
+    summary = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not title and stripped.startswith("# "):
+            title = stripped[2:].strip()
+            continue
+        if title and stripped and not stripped.startswith("#"):
+            summary = stripped
+            break
+    return title, summary
+
+
 # --- Legacy lens-based archive (orchestrator-driven) -------------------------
 # orchestrator_runner.py calls regenerate() for lens_paths entries flagged
 # `archive_index: true`. This is the pre-S model; the site-based generator

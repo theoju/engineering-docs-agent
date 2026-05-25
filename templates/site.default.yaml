@@ -1,0 +1,36 @@
+docs_dir: docs/site-src
+theme: material
+sections:
+  - { key: home, path: index.md, title: Home }
+  - {
+      key: architecture,
+      path: architecture/,
+      title: Architecture,
+      generator: agent-authored,
+    }
+  - {
+      key: api,
+      path: api/,
+      title: API reference,
+      generator: api-extract,
+      extractors: [python-mkdocstrings],
+    }
+  - { key: operations, path: operations/, title: Operations }
+  - {
+      key: archive,
+      path: archive/,
+      title: Decision Archive,
+      generator: archive-index,
+      sources:
+        [
+          docs/superpowers/specs,
+          docs/superpowers/plans,
+          docs/superpowers/measurements,
+        ],
+    }
+  - {
+      key: whats-new,
+      path: whats-new.md,
+      title: What's New,
+      generator: changelog,
+    }

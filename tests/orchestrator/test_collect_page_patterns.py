@@ -42,6 +42,24 @@ def test_page_globs_reports_skip_reasons(tmp_path):
     assert _page_globs(opted_out) == ([], None)
 
 
+def test_non_dict_frontmatter_page_skipped_not_aborted(tmp_path):
+    """_collect_page_patterns must return only the valid page and not raise
+    when a sibling page has a truthy non-dict frontmatter body (bare scalar)."""
+    docs = tmp_path / "site-src"
+    # valid page
+    _page(
+        docs / "good.md",
+        "---\nsource_files:\n  - src/*.py\n---\n# Good\n",
+    )
+    # frontmatter body is a bare scalar — truthy non-dict
+    _page(docs / "scalar.md", "---\njust a string\n---\n# Scalar\n")
+
+    patterns = _collect_page_patterns(docs)
+
+    assert "good.md" in patterns
+    assert "scalar.md" not in patterns
+
+
 def test_non_string_glob_entries_are_dropped(tmp_path):
     p = _page(
         tmp_path / "d.md",

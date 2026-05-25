@@ -30,6 +30,8 @@ def _page_globs(md: Path) -> tuple[list[str], str | None]:
         fm = parse_frontmatter(md)
     except (yaml.YAMLError, OSError):
         return [], "malformed frontmatter"
+    if not isinstance(fm, dict):
+        return [], "malformed frontmatter"
     sf = fm.get("source_files")
     if sf is None:
         return [], None

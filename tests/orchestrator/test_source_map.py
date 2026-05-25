@@ -135,6 +135,35 @@ def test_artifact_overwritten_each_run(tmp_path):
     assert artifact["map"] == {"scripts/auth/session.py": ["architecture/auth.md"]}
 
 
+def test_non_dict_frontmatter_recorded_not_aborted(tmp_path):
+    """Pages with truthy non-dict frontmatter (scalar or list body) must be
+    recorded as skipped, never crash generate_source_map."""
+    docs = tmp_path / "docs/site-src"
+    docs.mkdir(parents=True)
+    # (a) valid page declaring source_files
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/app.py").write_text("x = 1\n")
+    (docs / "valid.md").write_text("---\nsource_files:\n  - src/*.py\n---\n# Valid\n")
+    # (b) frontmatter body is a bare scalar
+    (docs / "scalar.md").write_text("---\njust a string\n---\n# B\n")
+    # (c) frontmatter body is a YAML list
+    (docs / "listfm.md").write_text("---\n- a\n- b\n---\n# C\n")
+
+    ledger = source_map.generate_source_map(tmp_path, "docs/site-src")
+
+    # Must not raise; valid page is mapped
+    artifact = json.loads((docs / ".doc-source-map.json").read_text())
+    assert "valid.md" in artifact["patterns"]
+
+    # Both malformed pages appear in skipped
+    skipped_pages = {s["page"] for s in ledger["skipped"]}
+    assert "scalar.md" in skipped_pages
+    assert "listfm.md" in skipped_pages
+    for entry in ledger["skipped"]:
+        if entry["page"] in ("scalar.md", "listfm.md"):
+            assert entry["reason"] == "malformed frontmatter"
+
+
 def test_cli_no_site_block_exits_0_empty_ledger(tmp_path):
     # a schema-valid config with NO site: block → empty ledger, exit 0
     config_no_site = """\

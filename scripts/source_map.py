@@ -96,6 +96,7 @@ def _resolve_tracked_files(repo_root: Path) -> list[str]:
             check=True,
         )
         files = [ln for ln in out.stdout.splitlines() if ln]
+        # empty → unborn repo or staging-only; fall through to rglob below
         if files:
             return files
     except (OSError, subprocess.CalledProcessError):

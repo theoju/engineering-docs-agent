@@ -122,3 +122,50 @@ def test_cli_invalid_config_exits_1_no_traceback(tmp_path):
     assert proc.returncode == 1
     assert "error" in proc.stderr.lower()
     assert "Traceback" not in proc.stderr
+
+
+def test_artifact_overwritten_each_run(tmp_path):
+    host = _make_host(tmp_path)
+    source_map.generate_source_map(host, "docs/site-src")
+    # remove a tracked source file, re-run: the stale entry must be gone
+    (host / "scripts/auth/token.py").unlink()
+    subprocess.run(["git", "-C", str(host), "add", "-A"], check=True)
+    source_map.generate_source_map(host, "docs/site-src")
+    artifact = json.loads((host / "docs/site-src/.doc-source-map.json").read_text())
+    assert artifact["map"] == {"scripts/auth/session.py": ["architecture/auth.md"]}
+
+
+def test_cli_no_site_block_exits_0_empty_ledger(tmp_path):
+    # a schema-valid config with NO site: block → empty ledger, exit 0
+    config_no_site = """\
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/site-src/whats-new.md
+  agent_editable_paths: ["docs/site-src/**"]
+  lens_paths: {}
+sources: { git: { host: github } }
+lint: {}
+publishing: { base_url: "https://x", build_workflow: "ci.yml", url_map_rule: "strip-ext" }
+notifications: {}
+"""
+    (tmp_path / "config.yml").write_text(config_no_site)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo-root",
+            str(tmp_path),
+            "--config",
+            str(tmp_path / "config.yml"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == {
+        "written": [],
+        "pages_scanned": 0,
+        "mapped_sources": 0,
+        "skipped": [],
+    }

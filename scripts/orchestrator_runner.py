@@ -61,6 +61,58 @@ def load_json(p: Path) -> dict[str, Any] | None:
 
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 _AGENT_ALLOWED_TOOLS: tuple[str, ...] = ("Bash", "Read", "Write", "Edit", "WebFetch")
+_AGENTS_DIR: Path = Path(__file__).resolve().parent.parent / "agents"
+_AGENT_TOOLS_CACHE: dict[str, tuple[str, ...] | None] = {}
+
+
+def _load_agent_allowed_tools(name: str) -> tuple[str, ...] | None:
+    """Parse `tools:` YAML frontmatter from agents/<name>.md.
+
+    Returns a tuple of tool names if the agent declares them, or None
+    if the agent has no `tools:` frontmatter (caller should omit
+    --allowedTools entirely for that case).
+
+    Result is cached per agent name; clear _AGENT_TOOLS_CACHE in tests
+    that swap _AGENTS_DIR.
+    """
+    if name in _AGENT_TOOLS_CACHE:
+        return _AGENT_TOOLS_CACHE[name]
+
+    agent_path = _AGENTS_DIR / f"{name}.md"
+    if not agent_path.exists():
+        _AGENT_TOOLS_CACHE[name] = None
+        return None
+
+    text = agent_path.read_text()
+    # Frontmatter is delimited by lines that are exactly "---".
+    if text.startswith("---\n"):
+        # split on the first "\n---\n" after the opening "---\n"
+        body_split = text[4:].split("\n---\n", 1)
+        if len(body_split) == 2:
+            fm_text = body_split[0]
+        else:
+            _AGENT_TOOLS_CACHE[name] = None
+            return None
+    else:
+        _AGENT_TOOLS_CACHE[name] = None
+        return None
+
+    fm = yaml.safe_load(fm_text) or {}
+    tools = fm.get("tools")
+    if tools is None:
+        _AGENT_TOOLS_CACHE[name] = None
+        return None
+    if not isinstance(tools, list):
+        # Malformed: surface clearly rather than fall back to the union.
+        raise ValueError(
+            f"agent {name}: 'tools' frontmatter must be a YAML list; got {type(tools).__name__}"
+        )
+
+    result = tuple(str(t) for t in tools)
+    _AGENT_TOOLS_CACHE[name] = result
+    return result
+
+
 _STDERR_TRUNCATE = 300
 _EXECUTION_FRAMING = (
     "You are running in production as part of the engineering-docs-agent "
@@ -346,9 +398,10 @@ def dispatch_subagent(
         name,
         "--plugin-dir",
         str(_PLUGIN_ROOT),
-        "--allowedTools",
-        " ".join(_AGENT_ALLOWED_TOOLS),
     ]
+    agent_tools = _load_agent_allowed_tools(name)
+    if agent_tools is not None:
+        base_argv.extend(["--allowedTools", " ".join(agent_tools)])
     debug_dir = os.environ.get("DOCS_AGENT_DEBUG_DIR")
     argv = (
         base_argv + ["--output-format", "stream-json", "--verbose"]

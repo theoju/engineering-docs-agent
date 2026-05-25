@@ -43,7 +43,9 @@
 
 ### Task 1: Housekeeping — new fixtures, remove seed, reset module
 
-The seed `archive_indexes.py` and its test model the wrong shape (source files already inside `archive_root/<subdir>/`, per-subdir `index.md`). Clear them so the rewrite starts clean. The seed is not wired into any orchestrator stage, so removing it is safe.
+The seed `archive_indexes.py` and its direct CLI test model the wrong shape for D (source files already inside `archive_root/<subdir>/`, per-subdir `index.md`). Replace the direct CLI test and lay down new fixtures.
+
+> **Correction (applied during execution):** the seed's `regenerate()` / `build_index()` are **not** unwired — `orchestrator_runner.py:805` calls `regenerate()` for `lens_paths` entries flagged `archive_index: true` (the pre-S lens-based archive, covered by `test_pipeline_integration.py`). D is therefore **additive**: keep the legacy `regenerate`/`build_index` working (refactored to share the new text-based `parse_frontmatter`), and add D's site-based functions alongside. Removing the legacy path is deferred to the later orchestrator-integration step (out of scope here). Consequence: `parse_frontmatter(text)` lands in Task 1, so **Task 2 only adds `parse_title_and_summary`**.
 
 **Files:**
 
@@ -203,33 +205,13 @@ def test_parse_title_and_summary_skips_subheadings():
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pytest tests/site/test_archive_parse.py -q`
-Expected: FAIL with `AttributeError: module 'archive_indexes' has no attribute 'parse_frontmatter'`.
+Expected: the `parse_frontmatter` tests PASS already (it landed in Task 1); the `parse_title_and_summary` tests FAIL with `AttributeError: module 'archive_indexes' has no attribute 'parse_title_and_summary'`.
 
 - [ ] **Step 3: Implement**
 
-Add to the top imports of `scripts/archive_indexes.py` (after `from __future__ import annotations`):
+`parse_frontmatter` and `import yaml` already exist from Task 1 (the additive correction). Append only `parse_title_and_summary`:
 
 ```python
-import yaml
-```
-
-Append:
-
-```python
-def parse_frontmatter(text: str) -> dict:
-    """Return the YAML frontmatter block as a dict ({} if absent/malformed)."""
-    if not text.startswith("---"):
-        return {}
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return {}
-    try:
-        data = yaml.safe_load(parts[1])
-    except yaml.YAMLError:
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def parse_title_and_summary(text: str) -> tuple[str, str]:
     """Title from the first '# ' heading; summary from the first non-blank,
     non-heading line after it."""

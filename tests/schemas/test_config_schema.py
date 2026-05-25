@@ -66,3 +66,87 @@ notifications: {}
 """)
     with pytest.raises(ValidationError):
         validate(cfg, SCHEMA)
+
+
+def test_site_block_valid():
+    cfg = yaml.safe_load("""
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: { core: docs/core }
+sources: { git: { host: github } }
+lint: { tier1: default, tier2: {}, tier3: {} }
+publishing:
+  base_url: https://x
+  build_workflow: deploy.yml
+  url_map_rule: standard
+notifications: {}
+site:
+  docs_dir: docs/site-src
+  theme: material
+  sections:
+    - { key: home, path: index.md, title: Home }
+    - { key: api, path: api/, title: API reference, generator: api-extract }
+""")
+    validate(cfg, SCHEMA)
+
+
+def test_site_section_requires_key_path_title():
+    cfg = yaml.safe_load("""
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: {}
+sources: { git: { host: github } }
+lint: {}
+publishing: { base_url: https://x, build_workflow: deploy.yml, url_map_rule: standard }
+notifications: {}
+site:
+  docs_dir: docs/site-src
+  sections:
+    - { key: home }
+""")
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)
+
+
+def test_site_unknown_generator_rejected():
+    cfg = yaml.safe_load("""
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: {}
+sources: { git: { host: github } }
+lint: {}
+publishing: { base_url: https://x, build_workflow: deploy.yml, url_map_rule: standard }
+notifications: {}
+site:
+  docs_dir: docs/site-src
+  sections:
+    - { key: api, path: api/, title: API, generator: not-a-generator }
+""")
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)
+
+
+def test_config_without_site_block_still_valid():
+    # Backward compatibility: site is optional.
+    cfg = yaml.safe_load("""
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: { core: docs/core }
+sources: { git: { host: github } }
+lint: {}
+publishing: { base_url: https://x, build_workflow: deploy.yml, url_map_rule: standard }
+notifications: {}
+""")
+    validate(cfg, SCHEMA)

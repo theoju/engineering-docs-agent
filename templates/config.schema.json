@@ -89,6 +89,48 @@
         "verify_timeout_seconds": { "type": "integer" }
       }
     },
-    "notifications": { "type": "object" }
+    "notifications": { "type": "object" },
+    "site": {
+      "type": "object",
+      "required": ["docs_dir", "sections"],
+      "properties": {
+        "docs_dir": { "type": "string" },
+        "theme": {
+          "type": "string",
+          "enum": ["material", "mkdocs"],
+          "default": "material"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "path", "title"],
+            "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+              "path": { "type": "string" },
+              "title": { "type": "string" },
+              "generator": {
+                "type": "string",
+                "enum": [
+                  "archive-index",
+                  "api-extract",
+                  "changelog",
+                  "agent-authored"
+                ]
+              },
+              "extractors": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["python-mkdocstrings", "openapi", "json-schema"]
+                }
+              },
+              "sources": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
   }
 }

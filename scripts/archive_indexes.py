@@ -21,6 +21,7 @@ import yaml
 
 
 DATE_PREFIX = re.compile(r"^(\d{4})-(\d{2})-\d{2}-")
+_SUMMARY_MAX = 120
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,45 @@ def collect_entries(source_dir: Path, repo_root: Path) -> list[Entry]:
         )
     entries.sort(key=lambda e: e.filename, reverse=True)
     return entries
+
+
+def render_archive_page(
+    label: str, entries: list[Entry], *, link_base: str | None
+) -> str:
+    """Render one archive index page: banner + month-grouped tables."""
+    lines = [f"# {label} archive", ""]
+    lines.append(
+        f"_Auto-generated; {len(entries)} entries. "
+        "Do not edit by hand — see `scripts/archive_indexes.py`._"
+    )
+    lines.append("")
+    if not entries:
+        lines.append("_No entries yet._")
+        lines.append("")
+        return "\n".join(lines)
+
+    grouped: dict[str, list[Entry]] = {}
+    for e in entries:
+        grouped.setdefault(e.month, []).append(e)
+
+    for month in sorted(grouped, reverse=True):
+        lines.append(f"## {month}")
+        lines.append("")
+        lines.append("| Title | Status | Summary |")
+        lines.append("|---|---|---|")
+        for e in grouped[month]:
+            title = e.title.replace("|", "\\|")
+            title_cell = (
+                f"[{title}]({link_base}{e.source_rel_path})" if link_base else title
+            )
+            summary = e.summary
+            if len(summary) > _SUMMARY_MAX:
+                summary = summary[:_SUMMARY_MAX] + "…"
+            summary = summary.replace("|", "\\|")
+            status = e.status.replace("|", "\\|")
+            lines.append(f"| {title_cell} | {status} | {summary} |")
+        lines.append("")
+    return "\n".join(lines)
 
 
 # --- Legacy lens-based archive (orchestrator-driven) -------------------------

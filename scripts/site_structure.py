@@ -1,8 +1,9 @@
-"""Pure helpers that turn a site: config block into a scaffold plan.
+"""Turn a site: config block into a scaffold plan and apply it.
 
-No filesystem I/O lives here — `plan_scaffold` returns the intended files
-and `apply_scaffold` (added later) does the writing. Keeping the planning
-pure makes the structure trivially testable.
+`plan_scaffold` and `render_mkdocs_yaml` are pure (no I/O) — keeping them
+pure makes the structure trivially testable. `apply_scaffold` is the only
+function that touches the filesystem; it writes missing files and never
+clobbers existing (authored) content.
 """
 
 from __future__ import annotations
@@ -197,7 +198,7 @@ def apply_scaffold(
             skipped.append(f.path)
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(f.content)
+        target.write_text(f.content, encoding="utf-8")
         created.append(f.path)
 
     return {"created": created, "skipped": skipped}

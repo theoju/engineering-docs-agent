@@ -57,3 +57,28 @@ def test_apply_adds_new_section_on_resync(tmp_path: Path):
     )
     assert (tmp_path / "docs/site-src/operations/index.md").exists()
     assert "docs/site-src/operations/index.md" in result["created"]
+
+
+def test_apply_writes_utf8(tmp_path: Path):
+    # The home grid uses a "→" (U+2192); writing must be UTF-8 on every
+    # platform, and read-back as UTF-8 must round-trip the glyph.
+    site_structure.apply_scaffold(
+        tmp_path, SITE, site_name="Demo", python_detected=False
+    )
+    home = (tmp_path / "docs/site-src/index.md").read_text(encoding="utf-8")
+    assert "→" in home
+
+
+def test_apply_never_clobbers_hand_tuned_mkdocs_yml(tmp_path: Path):
+    # mkdocs.yml is the highest-value never-clobber target: a hand-tuned
+    # config must survive a resync untouched.
+    site_structure.apply_scaffold(
+        tmp_path, SITE, site_name="Demo", python_detected=False
+    )
+    mkdocs = tmp_path / "mkdocs.yml"
+    mkdocs.write_text("site_name: Hand Tuned\n", encoding="utf-8")
+    result = site_structure.apply_scaffold(
+        tmp_path, SITE, site_name="Demo", python_detected=False
+    )
+    assert mkdocs.read_text(encoding="utf-8") == "site_name: Hand Tuned\n"
+    assert "mkdocs.yml" in result["skipped"]

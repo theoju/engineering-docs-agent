@@ -13,6 +13,8 @@ every run (they carry an auto-generated banner).
 
 from __future__ import annotations
 
+import argparse
+import json
 import re
 import subprocess
 import sys
@@ -23,6 +25,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from orchestrator_runner import detect_repo  # noqa: E402
+from state_io import ConfigError, load_config_validated  # noqa: E402
 
 
 DATE_PREFIX = re.compile(r"^(\d{4})-(\d{2})-\d{2}-")
@@ -267,3 +270,39 @@ def resolve_repo_url_base(
     if proc.returncode != 0 or ref in ("", "HEAD"):
         ref = "main"
     return f"https://github.com/{repo['owner']}/{repo['name']}/blob/{ref}/"
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--repo-root", type=Path, required=True)
+    ap.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="config.yml with a site: block (locates archive sources)",
+    )
+    ap.add_argument(
+        "--repo-url-base",
+        default=None,
+        help="override base URL for source links (else derived from git)",
+    )
+    args = ap.parse_args(argv)
+
+    try:
+        config = load_config_validated(args.config)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    site = config.get("site")
+    if not site:
+        print("error: config has no site: block", file=sys.stderr)
+        return 1
+
+    result = generate_archive(args.repo_root, site, repo_url_base=args.repo_url_base)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

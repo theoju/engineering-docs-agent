@@ -75,3 +75,13 @@ def test_collect_entries_fields():
     assert a.summary.startswith("Turn the agent")
     # no frontmatter status -> "—"
     assert by_name["2026-05-20-schema-enforcement.md"].status == "—"
+
+
+def test_collect_entries_blank_status_falls_back(tmp_path):
+    # whitespace-only status normalises to the "—" placeholder
+    src = tmp_path / "specs"
+    src.mkdir()
+    (src / "2026-05-01-x.md").write_text('---\nstatus: "   "\n---\n\n# X\n\nBody.\n')
+    entries = archive_indexes.collect_entries(src, tmp_path)
+    assert entries[0].status == "—"
+    assert entries[0].source_rel_path == "specs/2026-05-01-x.md"

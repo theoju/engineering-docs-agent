@@ -65,8 +65,9 @@ def parse_title_and_summary(text: str) -> tuple[str, str]:
 
 def collect_entries(source_dir: Path, repo_root: Path) -> list[Entry]:
     """Date-prefixed *.md in source_dir -> Entry list, newest filename first."""
+    repo_root = Path(repo_root).resolve()
     entries: list[Entry] = []
-    for path in sorted(source_dir.glob("*.md")):
+    for path in source_dir.glob("*.md"):
         m = DATE_PREFIX.match(path.name)
         if not m:
             continue
@@ -80,7 +81,7 @@ def collect_entries(source_dir: Path, repo_root: Path) -> list[Entry]:
                 status=status or "—",
                 summary=summary,
                 month=f"{m.group(1)}-{m.group(2)}",
-                source_rel_path=path.relative_to(repo_root).as_posix(),
+                source_rel_path=path.resolve().relative_to(repo_root).as_posix(),
             )
         )
     entries.sort(key=lambda e: e.filename, reverse=True)

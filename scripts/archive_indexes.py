@@ -196,6 +196,11 @@ def generate_archive(
     out_dir = repo_root / docs_dir / section_path
     link_base = resolve_repo_url_base(repo_root, section, override=repo_url_base)
 
+    # Categories already written, so a second source with the same leaf name
+    # (e.g. team-a/specs and team-b/specs) is skipped rather than silently
+    # overwriting an earlier page.
+    written_categories: set[str] = set()
+
     for source in sources:
         category = Path(source).name
         out_rel = f"{docs_dir}/{section_path}/{category}.md"
@@ -209,11 +214,30 @@ def generate_archive(
             print(f"warning: no dated .md in source: {source}", file=sys.stderr)
             skipped.append(out_rel)
             continue
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / f"{category}.md").write_text(
-            render_archive_page(category.capitalize(), entries, link_base=link_base),
-            encoding="utf-8",
-        )
+        if category in written_categories:
+            print(
+                f"warning: duplicate archive category {category!r} (source {source}); "
+                "skipping to avoid overwriting an earlier page",
+                file=sys.stderr,
+            )
+            skipped.append(out_rel)
+            continue
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / f"{category}.md").write_text(
+                render_archive_page(
+                    category.capitalize(), entries, link_base=link_base
+                ),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            # A bad path component (e.g. a file where a dir is expected) or a
+            # write error skips this source instead of aborting mid-run and
+            # returning a misleading partial ledger.
+            print(f"warning: failed to write {out_rel}: {exc}", file=sys.stderr)
+            skipped.append(out_rel)
+            continue
+        written_categories.add(category)
         written.append(out_rel)
 
     return {"written": written, "skipped": skipped}

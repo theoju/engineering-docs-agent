@@ -47,7 +47,57 @@ def test_generate_writes_present_skips_absent(tmp_path):
     assert "docs/site-src/archive/measurements.md" in result["skipped"]
     assert not (tmp_path / "docs/site-src/archive/measurements.md").exists()
     page = (tmp_path / "docs/site-src/archive/specs.md").read_text()
-    assert "Structured Docs Site" in page and "## 2026-05" in page
+    assert "Structured Docs Site" in page
+    assert "## 2026-05" in page
+
+
+def test_generate_skips_present_but_undated_source(tmp_path):
+    # A source dir that exists but holds no date-prefixed .md is skipped
+    # (the `not entries` branch); no empty page is written.
+    src = tmp_path / "docs/superpowers/specs"
+    src.mkdir(parents=True)
+    (src / "notes.md").write_text("# Notes\n\nNot dated.\n")  # excluded by DATE_PREFIX
+    site = {
+        "docs_dir": "docs/site-src",
+        "sections": [
+            {
+                "key": "archive",
+                "path": "archive/",
+                "title": "Decision Archive",
+                "generator": "archive-index",
+                "sources": ["docs/superpowers/specs"],
+            }
+        ],
+    }
+    result = archive_indexes.generate_archive(tmp_path, site)
+    assert result == {"written": [], "skipped": ["docs/site-src/archive/specs.md"]}
+    assert not (tmp_path / "docs/site-src/archive/specs.md").exists()
+
+
+def test_generate_skips_duplicate_category(tmp_path):
+    # Two sources with the same leaf name -> first wins, second is skipped
+    # (recorded), never silently overwriting the first page.
+    for team in ("team-a", "team-b"):
+        d = tmp_path / "docs" / team / "specs"
+        d.mkdir(parents=True)
+        (d / "2026-05-01-x.md").write_text(f"# {team}\n\nFrom {team}.\n")
+    site = {
+        "docs_dir": "docs/site-src",
+        "sections": [
+            {
+                "key": "archive",
+                "path": "archive/",
+                "title": "Decision Archive",
+                "generator": "archive-index",
+                "sources": ["docs/team-a/specs", "docs/team-b/specs"],
+            }
+        ],
+    }
+    result = archive_indexes.generate_archive(tmp_path, site)
+    assert result["written"] == ["docs/site-src/archive/specs.md"]
+    assert result["skipped"] == ["docs/site-src/archive/specs.md"]
+    # the surviving page is team-a's (first source), not overwritten by team-b
+    assert "team-a" in (tmp_path / "docs/site-src/archive/specs.md").read_text()
 
 
 def test_generate_overwrites_stale_but_leaves_section_index(tmp_path):

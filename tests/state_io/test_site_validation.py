@@ -48,7 +48,8 @@ site:
   docs_dir: docs/site-src
   sections:
     - { key: home, path: index.md, title: Home }
-    - { key: api, path: api/, title: API reference, generator: api-extract }
+    - { key: api, path: api/, title: API reference, generator: api-extract,
+        extractors: [python-mkdocstrings] }
 """,
         )
     )

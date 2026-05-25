@@ -126,7 +126,8 @@
                   "enum": ["python-mkdocstrings", "openapi", "json-schema"]
                 }
               },
-              "sources": { "type": "array", "items": { "type": "string" } }
+              "sources": { "type": "array", "items": { "type": "string" } },
+              "openapi": { "type": "string" }
             }
           }
         }

@@ -164,6 +164,61 @@ def regenerate(archive_root: Path) -> None:
             (sub / "index.md").write_text(build_index(sub), encoding="utf-8")
 
 
+def _find_archive_section(site: dict) -> dict | None:
+    for s in site.get("sections", []) or []:
+        if s.get("generator") == "archive-index":
+            return s
+    return None
+
+
+def generate_archive(
+    repo_root: Path, site_config: dict, *, repo_url_base: str | None = None
+) -> dict:
+    """Generate one archive index page per configured source.
+
+    Skips (records) a source whose dir is missing or has no dated .md; never
+    emits an empty page. Generated pages are overwritten every run. Returns
+    {"written": [...], "skipped": [...]} of repo-relative POSIX page paths.
+    """
+    repo_root = Path(repo_root)
+    written: list[str] = []
+    skipped: list[str] = []
+
+    section = _find_archive_section(site_config)
+    if section is None:
+        return {"written": written, "skipped": skipped}
+    sources = section.get("sources") or []
+    if not sources:
+        return {"written": written, "skipped": skipped}
+
+    docs_dir = (site_config.get("docs_dir") or "").rstrip("/")
+    section_path = (section.get("path") or "").rstrip("/")
+    out_dir = repo_root / docs_dir / section_path
+    link_base = resolve_repo_url_base(repo_root, section, override=repo_url_base)
+
+    for source in sources:
+        category = Path(source).name
+        out_rel = f"{docs_dir}/{section_path}/{category}.md"
+        src_dir = repo_root / source
+        if not src_dir.is_dir():
+            print(f"warning: archive source not found: {source}", file=sys.stderr)
+            skipped.append(out_rel)
+            continue
+        entries = collect_entries(src_dir, repo_root)
+        if not entries:
+            print(f"warning: no dated .md in source: {source}", file=sys.stderr)
+            skipped.append(out_rel)
+            continue
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / f"{category}.md").write_text(
+            render_archive_page(category.capitalize(), entries, link_base=link_base),
+            encoding="utf-8",
+        )
+        written.append(out_rel)
+
+    return {"written": written, "skipped": skipped}
+
+
 def resolve_repo_url_base(
     repo_root: Path, section: dict, *, override: str | None = None
 ) -> str | None:

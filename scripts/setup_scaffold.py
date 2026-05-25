@@ -1,8 +1,11 @@
 """CLI: scaffold the site: structure into a host repo (idempotent).
 
 Used by the engineering-docs-agent-setup skill. With no --config, uses the
-shipped default template (templates/site.default.yaml). Detects Python in the
-repo to decide whether to wire mkdocstrings into mkdocs.yml.
+shipped default template (templates/site.default.yaml). Detects Python via
+setup_discover.detect_python — scoping the gen-files recipe to the discovered
+package/module dir — derives the OpenAPI path from the api-extract section's
+openapi field, and runs the contracts generator, surfacing its ledger in the
+JSON output.
 """
 
 from __future__ import annotations
@@ -18,26 +21,11 @@ import yaml
 # CLI is launched as a script or imported. (Running it as a script already puts
 # its own dir on sys.path[0]; this makes that explicit and import-safe too.)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import contracts_doc  # noqa: E402
+import setup_discover  # noqa: E402
 import site_structure  # noqa: E402
 
 _TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
-
-
-def _python_detected(repo_root: Path) -> bool:
-    # cheap heuristic: a pyproject.toml, or any .py outside common vendor dirs.
-    # The pyproject short-circuit covers virtually all real Python projects, so
-    # the rglob (and its necessarily-incomplete exclusion set) is only a
-    # fallback. "site" is excluded because it is the mkdocs build-output dir
-    # (site_dir: site); that also skips a source dir literally named "site",
-    # which is acceptable given the short-circuit above.
-    if (repo_root / "pyproject.toml").exists():
-        return True
-    for p in repo_root.rglob("*.py"):
-        if not any(
-            part in {".venv", "node_modules", "site", "__pycache__"} for part in p.parts
-        ):
-            return True
-    return False
 
 
 def main() -> int:
@@ -62,12 +50,28 @@ def main() -> int:
         print(f"error: invalid YAML in {site_path}: {exc}", file=sys.stderr)
         return 1
 
+    py = setup_discover.detect_python(args.repo_root)
+
+    openapi_path = next(
+        (
+            s.get("openapi")
+            for s in (site.get("sections") or [])
+            if s.get("generator") == "api-extract" and s.get("openapi")
+        ),
+        None,
+    )
+
     result = site_structure.apply_scaffold(
         args.repo_root,
         site,
         site_name=args.site_name,
-        python_detected=_python_detected(args.repo_root),
+        python_detected=py["detected"],
+        python_scan_dir=py["scan_dir"],
+        python_path_root=py["path_root"],
+        openapi_path=openapi_path,
     )
+
+    result["contracts"] = contracts_doc.generate_contracts(args.repo_root, site)
     print(json.dumps(result, indent=2))
     return 0
 

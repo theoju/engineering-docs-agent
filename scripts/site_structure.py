@@ -172,7 +172,9 @@ def _python_plugins_block(path_root: str) -> str:
         "  - mkdocstrings:\n"
         "      handlers:\n"
         "        python:\n"
-        f'          paths: ["{root}"]\n'
+        # json.dumps keeps the path a valid (always-quoted) YAML scalar even if
+        # it contains a backslash or quote; valid JSON is valid YAML.
+        f"          paths: [{json.dumps(root)}]\n"
         "          options:\n"
         "            show_source: false\n"
     )

@@ -2,6 +2,17 @@
 
 A Claude Code plugin: seven specialized subagents turn merged PRs, commits, and Jira issues into a single nightly docs-update PR — voice-matched authoring, tiered linting, gap detection, and post-merge publish verification.
 
+## Generic plugin — runs on ANY host repo (critical)
+
+This repo ships a Claude Code **plugin**, not a one-off tool. Its skills — `/engineering-docs-agent:engineering-docs-agent` (the nightly docs-PR runner) and `/engineering-docs-agent:engineering-docs-agent-setup` (scaffolds the docs site) — run against **arbitrary host repositories**. This repo is simultaneously the plugin's source _and_ one dogfood host; never conflate the two.
+
+Design every capability (S/D/API/M/C and the orchestrator) **generic-first, convention-optimized**:
+
+- **Behavior is driven by detection and config, never by hardcoded paths.** `scripts/`, `agents/schemas/`, `docs/superpowers/{specs,plans}` are _this host's_ layout — they are examples in fixtures and defaults, never assumptions baked into capability code. Read inputs from the `site:` config block (`sources`, `extractors`, `docs_dir`) and from `setup_discover.py` detection.
+- **Degrade gracefully.** When a host lacks a convention (no specs/plans, no Python package, no OpenAPI schema, no decision sources), the affected capability **skips or falls back cleanly** — it never errors and never emits an empty artifact. Detection drives the path taken.
+- **Markedly better on Claude Code / superpowers repos** that carry `docs/superpowers/{specs,plans}`, but **nothing hard-requires that convention.**
+- **Tests use fixtures that represent arbitrary hosts**, not this repo's tree. A capability that only works because it found this repo's own directories is a bug.
+
 ## Jira context
 
 All Jira work for this project lives in:

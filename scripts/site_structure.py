@@ -17,7 +17,7 @@ from pathlib import Path
 class ScaffoldFile:
     path: str  # repo-relative POSIX path
     content: str
-    # "section-index" | "pages" | "root-pages"  (+ "home" reserved for Task 6)
+    # "home" | "section-index" | "pages" | "root-pages" | "mkdocs"
     kind: str
 
 
@@ -81,8 +81,11 @@ def plan_scaffold(site: dict) -> list[ScaffoldFile]:
     files: list[ScaffoldFile] = []
 
     # Root .pages: orders the top-level nav by section title, in config order.
+    # Both title and path go through _yaml_scalar so any YAML-significant char
+    # in a configured value cannot break the generated .pages.
     nav_lines = "\n".join(
-        f"  - {_yaml_scalar(s['title'])}: {s['path'].rstrip('/')}" for s in sections
+        f"  - {_yaml_scalar(s['title'])}: {_yaml_scalar(s['path'].rstrip('/'))}"
+        for s in sections
     )
     files.append(
         ScaffoldFile(f"{docs_dir}/.pages", f"nav:\n{nav_lines}\n", "root-pages")

@@ -127,7 +127,7 @@
                 }
               },
               "sources": { "type": "array", "items": { "type": "string" } },
-              "openapi": { "type": "string" }
+              "openapi": { "type": "string", "minLength": 1 }
             }
           }
         }

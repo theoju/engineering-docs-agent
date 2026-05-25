@@ -114,3 +114,20 @@ site:
         )
     )
     assert cfg["site"]["sections"][0]["openapi"] == "openapi.json"
+
+
+def test_openapi_path_rejects_traversal(tmp_path):
+    with pytest.raises(ConfigError) as exc:
+        load_config_validated(
+            _write(
+                tmp_path,
+                """
+site:
+  docs_dir: docs/site-src
+  sections:
+    - { key: api, path: api/, title: API, generator: api-extract,
+        extractors: [openapi], openapi: "sub/../../etc/passwd" }
+""",
+            )
+        )
+    assert "relative" in str(exc.value).lower() or "absolute" in str(exc.value).lower()

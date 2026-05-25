@@ -25,7 +25,7 @@ def _page_globs(md: Path) -> tuple[list[str], str | None]:
     """
     try:
         fm = parse_frontmatter(md)
-    except yaml.YAMLError:
+    except (yaml.YAMLError, OSError):
         return [], "malformed frontmatter"
     sf = fm.get("source_files")
     if sf is None:
@@ -37,7 +37,7 @@ def _page_globs(md: Path) -> tuple[list[str], str | None]:
 
 def _collect_page_patterns(docs_dir: Path) -> dict[str, list[str]]:
     """Map each opted-in page (POSIX path relative to docs_dir) to its
-    source_files globs. Pages that opt out or are malformed are omitted.
+    source_files globs. Pages that opt out (no/empty source_files) or are malformed are omitted.
     """
     out: dict[str, list[str]] = {}
     if not docs_dir.is_dir():

@@ -7,6 +7,7 @@ pure makes the structure trivially testable.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 
@@ -14,7 +15,24 @@ from dataclasses import dataclass
 class ScaffoldFile:
     path: str  # repo-relative POSIX path
     content: str
-    kind: str  # "home" | "section-index" | "pages" | "root-pages"
+    # "section-index" | "pages" | "root-pages"  (+ "home" reserved for Task 6)
+    kind: str
+
+
+def _yaml_scalar(value: str) -> str:
+    """Render a string as a YAML-safe scalar.
+
+    Simple values pass through unquoted; anything containing YAML-significant
+    characters is emitted as a JSON string (valid JSON is always valid YAML),
+    which handles colons, quotes, leading indicators, etc.
+    """
+    risky = (
+        ":" in value
+        or "#" in value
+        or value != value.strip()
+        or (value and value[0] in "-?:,[]{}#&*!|>'\"%@`")
+    )
+    return json.dumps(value) if risky else value
 
 
 def _is_page(section: dict) -> bool:
@@ -25,7 +43,7 @@ def _is_page(section: dict) -> bool:
 def _section_index_stub(section: dict) -> str:
     return (
         "---\n"
-        f"title: {section['title']}\n"
+        f"title: {_yaml_scalar(section['title'])}\n"
         "status: draft\n"
         "---\n\n"
         f"# {section['title']}\n\n"
@@ -34,9 +52,7 @@ def _section_index_stub(section: dict) -> str:
 
 
 def _page_stub(section: dict) -> str:
-    return (
-        f"---\ntitle: {section['title']}\nstatus: draft\n---\n\n# {section['title']}\n"
-    )
+    return f"---\ntitle: {_yaml_scalar(section['title'])}\nstatus: draft\n---\n\n# {section['title']}\n"
 
 
 def plan_scaffold(site: dict) -> list[ScaffoldFile]:
@@ -45,7 +61,9 @@ def plan_scaffold(site: dict) -> list[ScaffoldFile]:
     files: list[ScaffoldFile] = []
 
     # Root .pages: orders the top-level nav by section title, in config order.
-    nav_lines = "\n".join(f"  - {s['title']}: {s['path']}" for s in sections)
+    nav_lines = "\n".join(
+        f"  - {_yaml_scalar(s['title'])}: {s['path'].rstrip('/')}" for s in sections
+    )
     files.append(
         ScaffoldFile(f"{docs_dir}/.pages", f"nav:\n{nav_lines}\n", "root-pages")
     )
@@ -64,7 +82,11 @@ def plan_scaffold(site: dict) -> list[ScaffoldFile]:
             )
         )
         files.append(
-            ScaffoldFile(f"{docs_dir}/{path}/.pages", f"title: {s['title']}\n", "pages")
+            ScaffoldFile(
+                f"{docs_dir}/{path}/.pages",
+                f"title: {_yaml_scalar(s['title'])}\n",
+                "pages",
+            )
         )
 
     return files

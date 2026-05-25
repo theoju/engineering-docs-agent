@@ -175,7 +175,10 @@ root = Path(PATH_ROOT)
 for py in sorted(Path(SCAN_DIR).rglob("*.py")):
     if py.name.startswith("_") or any(p in ("tests", "test") for p in py.parts):
         continue
-    ident_parts = py.relative_to(root).with_suffix("").parts
+    try:
+        ident_parts = py.relative_to(root).with_suffix("").parts
+    except ValueError:
+        continue  # a .py outside PATH_ROOT (when SCAN_DIR is broader); skip it
     if not ident_parts:
         continue
     doc = Path(*ident_parts).with_suffix(".md")
@@ -190,10 +193,10 @@ with mkdocs_gen_files.open(Path("api", "reference", "SUMMARY.md"), "w") as f:
 '''
 
 
-def _openapi_stub(openapi_path: str) -> str:
-    return (
-        f"---\ntitle: HTTP API\n---\n\n# HTTP API\n\n!!swagger-http {openapi_path}!!\n"
-    )
+def _openapi_stub(spec_filename: str) -> str:
+    # !!swagger FILENAME!! resolves relative to this page's own directory;
+    # apply_scaffold copies the spec file into that same directory.
+    return f"---\ntitle: HTTP API\n---\n\n# HTTP API\n\n!!swagger {spec_filename}!!\n"
 
 
 def _python_plugins_block(path_root: str) -> str:
@@ -290,13 +293,26 @@ def apply_scaffold(
             ),
             "api",
         )
+        spec_name = Path(openapi_path).name
         planned.append(
             ScaffoldFile(
                 f"{docs_dir}/{api_path}/http.md",
-                _openapi_stub(openapi_path),
+                _openapi_stub(spec_name),
                 "section-index",
             )
         )
+        # Copy the committed spec (repo-root-relative) into the API docs dir so
+        # the !!swagger <basename>!! token resolves under --strict. Skipped if
+        # the source file is absent (the page still scaffolds).
+        src_spec = repo_root / openapi_path
+        if src_spec.is_file():
+            planned.append(
+                ScaffoldFile(
+                    f"{docs_dir}/{api_path}/{spec_name}",
+                    src_spec.read_text(encoding="utf-8"),
+                    "openapi-spec",
+                )
+            )
 
     for f in planned:
         target = repo_root / f.path

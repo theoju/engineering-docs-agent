@@ -55,7 +55,7 @@ def test_apply_scaffold_writes_openapi_stub(tmp_path):
     )
     http = tmp_path / "docs/site-src/api/http.md"
     assert http.exists()
-    assert "openapi.json" in http.read_text()
+    assert "!!swagger openapi.json!!" in http.read_text()
 
 
 def test_no_gen_script_without_python(tmp_path):
@@ -66,3 +66,19 @@ def test_no_gen_script_without_python(tmp_path):
     }
     site_structure.apply_scaffold(tmp_path, site, site_name="X", python_detected=False)
     assert not (tmp_path / "gen_ref_pages.py").exists()
+
+
+def test_apply_scaffold_copies_openapi_spec_into_docs(tmp_path):
+    (tmp_path / "openapi.json").write_text('{"openapi": "3.0.0", "paths": {}}')
+    site_structure.apply_scaffold(
+        tmp_path,
+        API_SITE,
+        site_name="X",
+        python_detected=True,
+        python_scan_dir="scripts",
+        python_path_root="scripts",
+        openapi_path="openapi.json",
+    )
+    copied = tmp_path / "docs/site-src/api/openapi.json"
+    assert copied.exists()
+    assert "3.0.0" in copied.read_text()

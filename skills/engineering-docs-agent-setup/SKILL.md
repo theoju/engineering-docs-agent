@@ -31,4 +31,11 @@ Run in the host repo's working directory. Accepts `--dry-run` flag to emit propo
 4. Compose final config dict.
 5. If `--dry-run`, dump YAML to stdout and exit.
 6. Write `.engineering-docs-agent/config.yml`, `.engineering-docs-agent/state.json` (initial), `.github/workflows/docs-agent-run.yml`, `.github/workflows/docs-agent-verify.yml`, optionally `docs-agent-glossary.yml`.
-7. Print a final "next steps" summary.
+7. Scaffold the documentation site structure:
+   `python <plugin_root>/scripts/setup_scaffold.py --repo-root . --site-name "<repo title>"`
+   This writes `docs/site-src/` (sections + grid-card home + .pages) and a
+   Material `mkdocs.yml` from `templates/site.default.yaml`. It is idempotent —
+   re-running adds newly-configured sections and never overwrites authored
+   pages. Tell the user to `pip install -r <plugin_root>/templates/docs-requirements.txt`
+   to build the site locally (`mkdocs serve`).
+8. Print a final "next steps" summary.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -166,3 +167,37 @@ def render_mkdocs_yaml(site: dict, *, site_name: str, python_detected: bool) -> 
         theme=site.get("theme", "material"),
         mkdocstrings_plugin=_MKDOCSTRINGS_BLOCK if python_detected else "",
     )
+
+
+def apply_scaffold(
+    repo_root: Path, site: dict, *, site_name: str, python_detected: bool
+) -> dict:
+    """Write the scaffold under repo_root. Idempotent: existing files are
+    left untouched (never clobber authored content); only missing files are
+    created. Returns {"created": [...], "skipped": [...]}.
+    """
+    repo_root = Path(repo_root)
+    created: list[str] = []
+    skipped: list[str] = []
+
+    planned = list(plan_scaffold(site))
+    planned.append(
+        ScaffoldFile(
+            "mkdocs.yml",
+            render_mkdocs_yaml(
+                site, site_name=site_name, python_detected=python_detected
+            ),
+            "mkdocs",
+        )
+    )
+
+    for f in planned:
+        target = repo_root / f.path
+        if target.exists():
+            skipped.append(f.path)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f.content)
+        created.append(f.path)
+
+    return {"created": created, "skipped": skipped}

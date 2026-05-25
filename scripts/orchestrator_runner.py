@@ -519,6 +519,39 @@ def dispatch_validated(
     return raw, dispatch_reasons
 
 
+def compute_source_drift(repo_root: Path, config: dict, prs: list[dict]) -> list[dict]:
+    """Run the source-map generator and return drifted pages for this batch.
+    Changed files = union of every PR's files[] (dict-with-path or plain string).
+    Returns [] when no site/docs_dir is configured.
+    """
+    docs_dir = (config.get("site") or {}).get("docs_dir")
+    if not docs_dir:
+        return []
+    import source_map
+    import source_drift
+
+    source_map.generate_source_map(repo_root, docs_dir)
+    changed = sorted(
+        {
+            (f["path"] if isinstance(f, dict) else f)
+            for pr in prs
+            for f in (pr.get("files") or [])
+            if (f.get("path") if isinstance(f, dict) else f)
+        }
+    )
+    return source_drift.detect_drift(repo_root / docs_dir, changed)["drifted"]
+
+
+def _drift_whats_new_lines(drifted_pages: list[dict]) -> list[str]:
+    """What's-New block for drifted pages (empty list -> no block)."""
+    if not drifted_pages:
+        return []
+    lines = ["### Pages to review (source drift)"]
+    for d in drifted_pages:
+        lines.append(f"- {d['page']} — changed: {', '.join(d['changed_sources'])}")
+    return lines
+
+
 def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     state_path = repo_root / ".engineering-docs-agent" / "state.json"
@@ -805,6 +838,14 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         if opts.get("archive_index"):
             archive_indexes.regenerate(repo_root / lens_path)
 
+    # Source map + drift (M) — best-effort, read-only
+    try:
+        drifted_pages = compute_source_drift(repo_root, config, prs)
+    except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
+        drifted_pages = []
+        add_partial(state, f"source_map_failed: {exc}", info_only=True)
+    state["current_run"]["source_drift"] = drifted_pages
+
     # Gap detection
     dismissed = set(state.get("dismissed_gap_flags", {}).keys())
     gap_verdicts = []
@@ -852,6 +893,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             entry_lines.append("### Gaps flagged")
             for g in gaps_flagged:
                 entry_lines.append(f"- {g['pr_id']}: {g['reasoning']}")
+        entry_lines.extend(_drift_whats_new_lines(drifted_pages))
         entry = "\n".join(entry_lines) + "\n\n"
         existing = whats_new.read_text() if whats_new.exists() else ""
         whats_new.write_text(entry + existing)
@@ -891,6 +933,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         ],
         "lint_failures": state["current_run"]["partial_reasons"],
         "partial_reasons": state["current_run"]["partial_reasons"],
+        "source_drift": drifted_pages,
     }
     notifier_result, reasons = dispatch_validated(
         "notifier",

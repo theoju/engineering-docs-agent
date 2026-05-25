@@ -13,9 +13,24 @@ every run (they carry an auto-generated banner).
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+
+DATE_PREFIX = re.compile(r"^(\d{4})-(\d{2})-\d{2}-")
+
+
+@dataclass(frozen=True)
+class Entry:
+    filename: str
+    title: str
+    status: str
+    summary: str
+    month: str  # "YYYY-MM"
+    source_rel_path: str  # POSIX, relative to repo_root
 
 
 def parse_frontmatter(text: str) -> dict:
@@ -46,6 +61,30 @@ def parse_title_and_summary(text: str) -> tuple[str, str]:
             summary = stripped
             break
     return title, summary
+
+
+def collect_entries(source_dir: Path, repo_root: Path) -> list[Entry]:
+    """Date-prefixed *.md in source_dir -> Entry list, newest filename first."""
+    entries: list[Entry] = []
+    for path in sorted(source_dir.glob("*.md")):
+        m = DATE_PREFIX.match(path.name)
+        if not m:
+            continue
+        text = path.read_text(encoding="utf-8")
+        title, summary = parse_title_and_summary(text)
+        status = str(parse_frontmatter(text).get("status", "") or "").strip()
+        entries.append(
+            Entry(
+                filename=path.name,
+                title=title or path.name,
+                status=status or "—",
+                summary=summary,
+                month=f"{m.group(1)}-{m.group(2)}",
+                source_rel_path=path.relative_to(repo_root).as_posix(),
+            )
+        )
+    entries.sort(key=lambda e: e.filename, reverse=True)
+    return entries
 
 
 # --- Legacy lens-based archive (orchestrator-driven) -------------------------

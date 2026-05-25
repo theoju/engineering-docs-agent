@@ -49,3 +49,29 @@ def test_parse_title_and_summary_title_without_body():
     title, summary = archive_indexes.parse_title_and_summary("# Only a title\n")
     assert title == "Only a title"
     assert summary == ""
+
+
+_FIXTURES = _REPO_ROOT / "tests" / "fixtures" / "archive_indexes"
+
+
+def test_collect_entries_filters_and_sorts():
+    entries = archive_indexes.collect_entries(_FIXTURES / "specs", _FIXTURES)
+    names = [e.filename for e in entries]
+    # only date-prefixed .md, newest first; notes.md and the .txt are excluded
+    assert names == [
+        "2026-05-24-structured-docs-site.md",
+        "2026-05-20-schema-enforcement.md",
+    ]
+
+
+def test_collect_entries_fields():
+    entries = archive_indexes.collect_entries(_FIXTURES / "specs", _FIXTURES)
+    by_name = {e.filename: e for e in entries}
+    a = by_name["2026-05-24-structured-docs-site.md"]
+    assert a.title == "Structured Docs Site"
+    assert a.status == "draft"
+    assert a.month == "2026-05"
+    assert a.source_rel_path == "specs/2026-05-24-structured-docs-site.md"
+    assert a.summary.startswith("Turn the agent")
+    # no frontmatter status -> "—"
+    assert by_name["2026-05-20-schema-enforcement.md"].status == "—"

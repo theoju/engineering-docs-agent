@@ -55,6 +55,21 @@ def _page_stub(section: dict) -> str:
     return f"---\ntitle: {_yaml_scalar(section['title'])}\nstatus: draft\n---\n\n# {section['title']}\n"
 
 
+def render_home(site: dict) -> str:
+    cards = []
+    for s in site.get("sections", []):
+        if s["key"] == "home":
+            continue
+        cards.append(f"-   __{s['title']}__\n\n    [Open →]({s['path']})")
+    grid = '<div class="grid cards" markdown>\n\n' + "\n\n".join(cards) + "\n\n</div>"
+    return (
+        "---\ntitle: Home\nhide:\n  - toc\n---\n\n"
+        "# Documentation\n\n"
+        "Pick a section to get started.\n\n"
+        f"{grid}\n"
+    )
+
+
 def plan_scaffold(site: dict) -> list[ScaffoldFile]:
     docs_dir = site["docs_dir"].rstrip("/")
     sections = site.get("sections", [])
@@ -69,6 +84,13 @@ def plan_scaffold(site: dict) -> list[ScaffoldFile]:
     )
 
     for s in sections:
+        if s["key"] == "home":
+            files.append(
+                ScaffoldFile(
+                    f"{docs_dir}/{s['path'].rstrip('/')}", render_home(site), "home"
+                )
+            )
+            continue
         path = s["path"].rstrip("/")
         if _is_page(s):
             files.append(

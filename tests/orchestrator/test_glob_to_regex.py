@@ -20,6 +20,7 @@ def test_double_star_slash_spans_segments():
     assert _m("scripts/**/*.py", "scripts/sub/deep/a.py")
     assert _m("**/test_*.py", "test_x.py")
     assert _m("**/test_*.py", "a/b/test_x.py")
+    assert not _m("**/test_*.py", "a/b/test_x.py.bak")
 
 
 def test_trailing_double_star_matches_subtree():
@@ -37,6 +38,7 @@ def test_literals_are_escaped():
     assert not _m("a.b", "axb")
     assert _m("scripts/orchestrator_runner.py", "scripts/orchestrator_runner.py")
     assert not _m("scripts/orchestrator_runner.py", "scripts/orchestrator_runnerXpy")
+    assert not _m("a+b", "aab")
 
 
 def test_no_partial_match():

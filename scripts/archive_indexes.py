@@ -212,11 +212,6 @@ def generate_archive(
             print(f"warning: archive source not found: {source}", file=sys.stderr)
             skipped.append(out_rel)
             continue
-        entries = collect_entries(src_dir, repo_root)
-        if not entries:
-            print(f"warning: no dated .md in source: {source}", file=sys.stderr)
-            skipped.append(out_rel)
-            continue
         if category in written_categories:
             print(
                 f"warning: duplicate archive category {category!r} (source {source}); "
@@ -226,6 +221,11 @@ def generate_archive(
             skipped.append(out_rel)
             continue
         try:
+            entries = collect_entries(src_dir, repo_root)
+            if not entries:
+                print(f"warning: no dated .md in source: {source}", file=sys.stderr)
+                skipped.append(out_rel)
+                continue
             out_dir.mkdir(parents=True, exist_ok=True)
             (out_dir / f"{category}.md").write_text(
                 render_archive_page(
@@ -233,11 +233,11 @@ def generate_archive(
                 ),
                 encoding="utf-8",
             )
-        except OSError as exc:
-            # A bad path component (e.g. a file where a dir is expected) or a
-            # write error skips this source instead of aborting mid-run and
-            # returning a misleading partial ledger.
-            print(f"warning: failed to write {out_rel}: {exc}", file=sys.stderr)
+        except (OSError, ValueError) as exc:
+            # A read/path error — a bad component, or a symlinked source that
+            # resolves outside repo_root (ValueError from relative_to) — skips
+            # this source instead of aborting mid-run with a partial ledger.
+            print(f"warning: failed to process source {source}: {exc}", file=sys.stderr)
             skipped.append(out_rel)
             continue
         written_categories.add(category)

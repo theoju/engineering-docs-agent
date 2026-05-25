@@ -100,6 +100,33 @@ def test_generate_skips_duplicate_category(tmp_path):
     assert "team-a" in (tmp_path / "docs/site-src/archive/specs.md").read_text()
 
 
+def test_generate_skips_symlinked_source_escaping_repo(tmp_path):
+    # An in-repo source that is a symlink resolving OUTSIDE repo_root must be
+    # skipped (recorded), not abort the run with an uncaught ValueError.
+    outside = tmp_path / "outside" / "specs"
+    outside.mkdir(parents=True)
+    (outside / "2026-05-01-x.md").write_text("# X\n\nBody.\n")
+    repo = tmp_path / "repo"
+    (repo / "docs/superpowers").mkdir(parents=True)
+    (repo / "docs/superpowers/specs").symlink_to(outside, target_is_directory=True)
+    site = {
+        "docs_dir": "docs/site-src",
+        "sections": [
+            {
+                "key": "archive",
+                "path": "archive/",
+                "title": "Decision Archive",
+                "generator": "archive-index",
+                "sources": ["docs/superpowers/specs"],
+            }
+        ],
+    }
+    result = archive_indexes.generate_archive(repo, site)
+    assert result["written"] == []
+    assert "docs/site-src/archive/specs.md" in result["skipped"]
+    assert not (repo / "docs/site-src/archive/specs.md").exists()
+
+
 def test_generate_overwrites_stale_but_leaves_section_index(tmp_path):
     _seed_sources(tmp_path)
     archive_dir = tmp_path / "docs/site-src/archive"

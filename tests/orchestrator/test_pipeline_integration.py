@@ -604,3 +604,59 @@ def test_source_collector_error_propagates_partial(tmp_path):
     assert any("source_collector_error" in r for r in reasons)
     assert any("source_collector_partial" in r for r in reasons)
     assert state["current_run"]["partial"] is True
+
+
+def test_run_surfaces_source_drift_in_whats_new_and_state(tmp_path):
+    """Source-map stage wiring: run() must record drift in run state AND emit
+    the 'Pages to review (source drift)' block in the What's-New entry.
+
+    Closes spec-strategy gap (spec line 104): prior tests only exercised
+    helper functions; this pins the orchestrator run() wiring end-to-end.
+    """
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    # Seed a page whose source_files glob matches the fake PR's changed file.
+    # The fake source collector (FAKES) returns PR #1 with
+    # files: [{"path": "backend/connectors/foo.py", ...}].
+    connectors_page = "docs/site-src/core/connectors.md"
+    connectors_content = (
+        "---\nsource_files:\n  - backend/connectors/*.py\n---\n# Connectors\n"
+    )
+    state_path = _init_host(tmp_path, seed_files={connectors_page: connectors_content})
+
+    # Overwrite the config with a site: block so compute_source_drift is active.
+    site_block = (
+        "site:\n"
+        "  docs_dir: docs/site-src\n"
+        "  sections:\n"
+        "    - {key: core, path: core, title: Core}\n"
+    )
+    cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
+    cfg.write_text(CONFIG_YAML + site_block)
+
+    rc = _run_inproc(tmp_path, FAKES)
+    assert rc == 0, "run() must exit 0"
+
+    # --- What's-New assertions ---
+    whats_new = tmp_path / "docs" / "site-src" / "whats-new.md"
+    assert whats_new.exists(), "whats-new.md must be written"
+    content = whats_new.read_text()
+    assert "### Pages to review (source drift)" in content, (
+        "What's-New must contain the drift heading"
+    )
+    assert "core/connectors.md" in content, "What's-New must name the drifted page"
+    assert "backend/connectors/foo.py" in content, (
+        "What's-New must name the changed source file"
+    )
+
+    # --- Run-state assertion ---
+    state = json.loads(state_path.read_text())
+    expected_drift = [
+        {"page": "core/connectors.md", "changed_sources": ["backend/connectors/foo.py"]}
+    ]
+    assert state["current_run"]["source_drift"] == expected_drift, (
+        f"source_drift run state mismatch: {state['current_run'].get('source_drift')}"
+    )

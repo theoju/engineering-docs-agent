@@ -42,7 +42,7 @@ def _read_changed_from_stdin() -> list[str]:
         return []
     if not isinstance(data, list):
         return []
-    return [str(x) for x in data if isinstance(x, str)]
+    return [x for x in data if isinstance(x, str)]
 
 
 def main(argv: list[str] | None = None) -> int:

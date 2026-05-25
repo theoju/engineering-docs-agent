@@ -116,3 +116,50 @@ def test_cli_empty_stdin_is_no_op(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     assert json.loads(proc.stdout) == {"drifted": [], "changed_files_seen": 0}
+
+
+def test_multiple_files_matching_one_page_are_sorted(tmp_path):
+    host = _host(tmp_path)  # page maps scripts/auth/**/*.py
+    result = source_drift.detect_drift(
+        host / "docs/site-src", ["scripts/auth/z.py", "scripts/auth/a.py"]
+    )
+    assert result["drifted"] == [
+        {
+            "page": "architecture/auth.md",
+            "changed_sources": ["scripts/auth/a.py", "scripts/auth/z.py"],
+        }
+    ]
+
+
+def test_one_file_matching_two_pages_drifts_both(tmp_path):
+    docs = tmp_path / "docs/site-src"
+    (docs / "architecture").mkdir(parents=True)
+    (docs / "architecture/auth.md").write_text(
+        "---\nsource_files:\n  - scripts/shared.py\n---\n# Auth\n"
+    )
+    (docs / "ops.md").write_text(
+        "---\nsource_files:\n  - scripts/**/*.py\n---\n# Ops\n"
+    )
+    result = source_drift.detect_drift(docs, ["scripts/shared.py"])
+    pages = sorted(d["page"] for d in result["drifted"])
+    assert pages == ["architecture/auth.md", "ops.md"]
+
+
+def test_cli_invalid_json_stdin_is_no_op(tmp_path):
+    host = _host(tmp_path)
+    (host / "config.yml").write_text(_CONFIG)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo-root",
+            str(host),
+            "--config",
+            str(host / "config.yml"),
+        ],
+        input="{not valid json",
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == {"drifted": [], "changed_files_seen": 0}

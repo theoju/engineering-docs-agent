@@ -14,8 +14,7 @@ _SCHEMA = json.loads((_REPO_ROOT / "templates" / "config.schema.json").read_text
 
 def test_default_template_matches_schema_and_candidate_a():
     site = yaml.safe_load((_REPO_ROOT / "templates" / "site.default.yaml").read_text())
-    # validate just the site fragment against the schema's site subschema
-    validate({"site": site}, {"type": "object", "properties": _SCHEMA["properties"]})
+    validate(site, _SCHEMA["properties"]["site"])
     keys = [s["key"] for s in site["sections"]]
     assert keys == ["home", "architecture", "api", "operations", "archive", "whats-new"]
     assert site["docs_dir"] == "docs/site-src"

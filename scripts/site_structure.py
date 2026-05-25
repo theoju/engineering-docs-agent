@@ -62,7 +62,10 @@ def render_home(site: dict) -> str:
     for s in site.get("sections", []):
         if s["key"] == "home":
             continue
-        cards.append(f"-   __{s['title']}__\n\n    [Open →]({s['path']})")
+        # Link to a resolvable .md target so mkdocs validates the link under
+        # --strict; a bare "api/" is left as an unrecognized relative link.
+        target = s["path"] if _is_page(s) else f"{s['path'].rstrip('/')}/index.md"
+        cards.append(f"-   __{s['title']}__\n\n    [Open →]({target})")
     grid = '<div class="grid cards" markdown>\n\n' + "\n\n".join(cards) + "\n\n</div>"
     return (
         "---\ntitle: Home\nhide:\n  - toc\n---\n\n"

@@ -51,3 +51,12 @@ def test_discover_includes_python_and_openapi_hint(tmp_path):
     out = setup_discover.discover(tmp_path)
     assert out["python"]["detected"] is True
     assert out["openapi_hint"] == "openapi.json"
+
+
+def test_openapi_hint_none_when_absent(tmp_path):
+    assert setup_discover.detect_openapi_hint(tmp_path) is None
+
+
+def test_openapi_hint_detects_yaml_variant(tmp_path):
+    (tmp_path / "openapi.yaml").write_text("openapi: 3.0.0\n")
+    assert setup_discover.detect_openapi_hint(tmp_path) == "openapi.yaml"

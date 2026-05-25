@@ -76,7 +76,10 @@ def detect_python(cwd: Path) -> dict:
 
 
 def detect_openapi_hint(cwd: Path) -> str | None:
-    """Return a repo-relative committed OpenAPI schema path, or None."""
+    """Return an OpenAPI schema filename at the repo root, or None.
+
+    Checks repo-root openapi.json/.yaml/.yml only — a hint, not a deep search.
+    """
     for name in ("openapi.json", "openapi.yaml", "openapi.yml"):
         if (cwd / name).exists():
             return name

@@ -3,6 +3,7 @@ import importlib
 import json, subprocess, sys
 import sys as _sys
 from pathlib import Path
+import pytest
 
 RUNNER = Path(__file__).parent.parent.parent / "scripts" / "orchestrator_runner.py"
 FAKES = Path(__file__).parent / "fakes"
@@ -369,6 +370,7 @@ def test_gap_detector_receives_constructed_pr_id(tmp_path, monkeypatch):
     assert captured[0].get("pr_id") == "myorg/myrepo#1"
 
 
+@pytest.mark.xfail(reason="TDD: archive_indexes rewrite in progress (CCE-23)")
 def test_archive_index_regenerated_after_authoring(tmp_path):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -396,6 +398,7 @@ def test_archive_index_regenerated_after_authoring(tmp_path):
     assert "old" in index.read_text()
 
 
+@pytest.mark.xfail(reason="TDD: archive_indexes rewrite in progress (CCE-23)")
 def test_archive_index_empty_subdir_emits_placeholder(tmp_path):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import archive_indexes

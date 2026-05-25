@@ -25,6 +25,11 @@ def _type_str(prop: dict) -> str:
         return str(prop["$ref"]).rsplit("/", 1)[-1]
     if "enum" in prop:
         return "enum"
+    for key in ("oneOf", "anyOf"):
+        if prop.get(key):
+            return " | ".join(_type_str(s or {}) for s in prop[key])
+    if prop.get("allOf"):
+        return " & ".join(_type_str(s or {}) for s in prop["allOf"])
     t = prop.get("type")
     if t == "array":
         items = prop.get("items") or {}
@@ -56,7 +61,11 @@ def render_contract_page(name: str, schema: dict) -> str:
         pschema = pschema or {}
         ptype = _type_str(pschema).replace("|", "\\|")
         req = "yes" if pname in required else "no"
-        pdesc = str(pschema.get("description", "") or "").replace("|", "\\|")
+        pdesc = (
+            str(pschema.get("description", "") or "")
+            .replace("\n", " ")
+            .replace("|", "\\|")
+        )
         lines.append(f"| `{pname}` | {ptype} | {req} | {pdesc} |")
     lines.append("")
     return "\n".join(lines)

@@ -54,3 +54,32 @@ def test_render_escapes_pipe_in_description():
     }
     page = contracts_doc.render_contract_page("x", schema)
     assert "a \\| b" in page
+
+
+def test_type_str_handles_oneof_and_allof():
+    assert (
+        contracts_doc._type_str({"oneOf": [{"type": "string"}, {"type": "null"}]})
+        == "string | null"
+    )
+    assert (
+        contracts_doc._type_str(
+            {"allOf": [{"$ref": "#/$defs/A"}, {"$ref": "#/$defs/B"}]}
+        )
+        == "A & B"
+    )
+
+
+def test_type_str_strips_newline_in_description():
+    schema = {
+        "type": "object",
+        "properties": {"x": {"type": "string", "description": "line1\nline2"}},
+    }
+    page = contracts_doc.render_contract_page("x", schema)
+    assert "line1 line2" in page
+    assert "line1\nline2" not in page
+
+
+def test_render_index_sorted_and_linked():
+    out = contracts_doc.render_index(["b", "a"])
+    assert "- [a](a.md)" in out and "- [b](b.md)" in out
+    assert out.index("[a](a.md)") < out.index("[b](b.md)")

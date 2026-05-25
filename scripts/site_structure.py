@@ -158,21 +158,44 @@ markdown_extensions:
   - pymdownx.details
 """
 
-_MKDOCSTRINGS_BLOCK = """\
-  - mkdocstrings:
-      handlers:
-        python:
-          options:
-            show_source: false
-"""
+_RENDER_SWAGGER_PLUGIN = "  - render_swagger\n"
 
 
-def render_mkdocs_yaml(site: dict, *, site_name: str, python_detected: bool) -> str:
+def _python_plugins_block(path_root: str) -> str:
+    root = path_root or "."
+    return (
+        "  - gen-files:\n"
+        "      scripts:\n"
+        "        - gen_ref_pages.py\n"
+        "  - literate-nav:\n"
+        "      nav_file: SUMMARY.md\n"
+        "  - mkdocstrings:\n"
+        "      handlers:\n"
+        "        python:\n"
+        f'          paths: ["{root}"]\n'
+        "          options:\n"
+        "            show_source: false\n"
+    )
+
+
+def render_mkdocs_yaml(
+    site: dict,
+    *,
+    site_name: str,
+    python_detected: bool,
+    python_path_root: str | None = None,
+    openapi_enabled: bool = False,
+) -> str:
+    plugins = ""
+    if python_detected:
+        plugins += _python_plugins_block(python_path_root or ".")
+    if openapi_enabled:
+        plugins += _RENDER_SWAGGER_PLUGIN
     return _MKDOCS_TEMPLATE.format(
         site_name=_yaml_scalar(site_name),
         docs_dir=site["docs_dir"].rstrip("/"),
         theme=site.get("theme", "material"),
-        mkdocstrings_plugin=_MKDOCSTRINGS_BLOCK if python_detected else "",
+        mkdocstrings_plugin=plugins,
     )
 
 

@@ -34,7 +34,7 @@ def test_mkdocs_yaml_adds_mkdocstrings_when_python():
     assert "mkdocstrings" in out
 
 
-def test_mkdocs_yaml_is_parseable_yaml():
+def _safe_loader():
     # The !!python/name: tag can't be safe_load'd, and unsafe_load would try to
     # *import* pymdownx (a doc-build dep we don't install in the unit venv). Use
     # a SafeLoader with a no-op constructor for that tag so this test is
@@ -45,9 +45,30 @@ def test_mkdocs_yaml_is_parseable_yaml():
     _Loader.add_multi_constructor(
         "tag:yaml.org,2002:python/name:", lambda loader, suffix, node: None
     )
+    return _Loader
+
+
+def test_mkdocs_yaml_is_parseable_yaml():
+    # Parse BOTH branches: an empty {mkdocstrings_plugin} (False) and the slotted
+    # block (True) must each produce a well-formed plugins list.
+    for python_detected in (False, True):
+        out = site_structure.render_mkdocs_yaml(
+            SITE, site_name="Demo", python_detected=python_detected
+        )
+        loaded = yaml.load(out, Loader=_safe_loader())
+        assert loaded["theme"]["name"] == "material"
+        assert loaded["docs_dir"] == "docs/site-src"
+        plugins = [
+            list(p.keys())[0] if isinstance(p, dict) else p for p in loaded["plugins"]
+        ]
+        assert "search" in plugins and "awesome-pages" in plugins
+        assert ("mkdocstrings" in plugins) is python_detected
+
+
+def test_mkdocs_site_name_with_colon_is_quoted_and_parses():
+    # site_name comes from user config; a colon must not break the YAML.
     out = site_structure.render_mkdocs_yaml(
-        SITE, site_name="Demo", python_detected=False
+        SITE, site_name="My Docs: v2", python_detected=False
     )
-    loaded = yaml.load(out, Loader=_Loader)
-    assert loaded["theme"]["name"] == "material"
-    assert loaded["docs_dir"] == "docs/site-src"
+    loaded = yaml.load(out, Loader=_safe_loader())
+    assert loaded["site_name"] == "My Docs: v2"

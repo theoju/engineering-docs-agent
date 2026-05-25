@@ -139,7 +139,7 @@ _MKDOCSTRINGS_BLOCK = """\
 
 def render_mkdocs_yaml(site: dict, *, site_name: str, python_detected: bool) -> str:
     return _MKDOCS_TEMPLATE.format(
-        site_name=site_name,
+        site_name=_yaml_scalar(site_name),
         docs_dir=site["docs_dir"].rstrip("/"),
         theme=site.get("theme", "material"),
         mkdocstrings_plugin=_MKDOCSTRINGS_BLOCK if python_detected else "",

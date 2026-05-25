@@ -107,6 +107,15 @@ def _validate_site_sections(config: dict) -> None:
                 f"docs_dir {docs_dir!r}"
             )
 
+    for s in sections:
+        for src in s.get("sources", []) or []:
+            sp = str(src)
+            if sp.startswith("/") or ".." in PurePosixPath(sp).parts:
+                raise ConfigError(
+                    f"site.section '{s.get('key')}' source {sp!r} must be a "
+                    "relative path inside the repo (no absolute or '..' paths)"
+                )
+
 
 def load_config_validated(path: Path) -> dict[str, Any]:
     if not path.exists():

@@ -59,3 +59,18 @@ def test_detached_head_defaults_to_main(monkeypatch, tmp_path):
     assert archive_indexes.resolve_repo_url_base(tmp_path, {}) == (
         "https://github.com/o/n/blob/main/"
     )
+
+
+def test_git_failure_defaults_to_main(monkeypatch, tmp_path):
+    # git unavailable / not a repo (returncode != 0) -> ref falls back to main
+    monkeypatch.setattr(
+        archive_indexes, "detect_repo", lambda r: {"owner": "o", "name": "n"}
+    )
+    monkeypatch.setattr(
+        archive_indexes.subprocess,
+        "run",
+        lambda *a, **k: types.SimpleNamespace(stdout="", returncode=1),
+    )
+    assert archive_indexes.resolve_repo_url_base(tmp_path, {}) == (
+        "https://github.com/o/n/blob/main/"
+    )

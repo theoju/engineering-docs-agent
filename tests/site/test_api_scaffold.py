@@ -82,3 +82,47 @@ def test_apply_scaffold_copies_openapi_spec_into_docs(tmp_path):
     copied = tmp_path / "docs/site-src/api/openapi.json"
     assert copied.exists()
     assert "3.0.0" in copied.read_text()
+
+
+def test_gen_script_output_root_tracks_section_path(tmp_path):
+    site = {
+        "docs_dir": "docs/site-src",
+        "theme": "material",
+        "sections": [
+            {"key": "home", "path": "index.md", "title": "Home"},
+            {
+                "key": "ref",
+                "path": "developer/",
+                "title": "Developer API",
+                "generator": "api-extract",
+                "extractors": ["python-mkdocstrings"],
+            },
+        ],
+    }
+    site_structure.apply_scaffold(
+        tmp_path,
+        site,
+        site_name="X",
+        python_detected=True,
+        python_scan_dir="scripts",
+        python_path_root="scripts",
+    )
+    body = (tmp_path / "gen_ref_pages.py").read_text()
+    assert 'OUT_ROOT = "developer"' in body
+    # default-path invariant: an api/ section still yields OUT_ROOT="api"
+    site_structure.apply_scaffold(
+        tmp_path / "default_api",
+        API_SITE,
+        site_name="X",
+        python_detected=True,
+        python_scan_dir="scripts",
+        python_path_root="scripts",
+    )
+    body_default = (tmp_path / "default_api" / "gen_ref_pages.py").read_text()
+    assert 'OUT_ROOT = "api"' in body_default
+
+
+def test_yaml_scalar_quotes_embedded_newline():
+    import json
+
+    assert site_structure._yaml_scalar("a\nb") == json.dumps("a\nb")

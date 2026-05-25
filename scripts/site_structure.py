@@ -31,6 +31,8 @@ def _yaml_scalar(value: str) -> str:
     risky = (
         ":" in value
         or "#" in value
+        or "\n" in value
+        or "\r" in value
         or value != value.strip()
         or (value and value[0] in "-?:,[]{}#&*!|>'\"%@`")
     )
@@ -169,6 +171,7 @@ import mkdocs_gen_files
 
 SCAN_DIR = "{scan_dir}"
 PATH_ROOT = "{path_root}"
+OUT_ROOT = "{out_root}"
 
 nav = mkdocs_gen_files.Nav()
 root = Path(PATH_ROOT)
@@ -183,12 +186,12 @@ for py in sorted(Path(SCAN_DIR).rglob("*.py")):
         continue
     doc = Path(*ident_parts).with_suffix(".md")
     nav[ident_parts] = doc.as_posix()
-    with mkdocs_gen_files.open(Path("api", "reference") / doc, "w") as fd:
+    with mkdocs_gen_files.open(Path(OUT_ROOT, "reference") / doc, "w") as fd:
         ident = ".".join(ident_parts)
         fd.write(f"# `{{ident}}`\\n\\n::: {{ident}}\\n")
-    mkdocs_gen_files.set_edit_path(Path("api", "reference") / doc, py)
+    mkdocs_gen_files.set_edit_path(Path(OUT_ROOT, "reference") / doc, py)
 
-with mkdocs_gen_files.open(Path("api", "reference", "SUMMARY.md"), "w") as f:
+with mkdocs_gen_files.open(Path(OUT_ROOT, "reference", "SUMMARY.md"), "w") as f:
     f.writelines(nav.build_literate_nav())
 '''
 
@@ -272,6 +275,15 @@ def apply_scaffold(
         )
     )
 
+    api_path = next(
+        (
+            s["path"].rstrip("/")
+            for s in site.get("sections", [])
+            if s.get("generator") == "api-extract"
+        ),
+        "api",
+    )
+
     if python_detected:
         planned.append(
             ScaffoldFile(
@@ -279,20 +291,13 @@ def apply_scaffold(
                 _GEN_REF_TEMPLATE.format(
                     scan_dir=python_scan_dir or ".",
                     path_root=python_path_root or ".",
+                    out_root=api_path,
                 ),
                 "gen-script",
             )
         )
     if openapi_path:
         docs_dir = site["docs_dir"].rstrip("/")
-        api_path = next(
-            (
-                s["path"].rstrip("/")
-                for s in site.get("sections", [])
-                if s.get("generator") == "api-extract"
-            ),
-            "api",
-        )
         spec_name = Path(openapi_path).name
         planned.append(
             ScaffoldFile(

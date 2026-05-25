@@ -39,6 +39,7 @@ def test_cli_generates_and_reports_json(tmp_path):
         text=True,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "error" not in proc.stderr.lower()  # no silent config-validation failure
     result = json.loads(proc.stdout)
     assert "docs/site-src/api/contracts/thing.md" in result["written"]
 

@@ -14,10 +14,15 @@ every run (they carry an auto-generated banner).
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from orchestrator_runner import detect_repo  # noqa: E402
 
 
 DATE_PREFIX = re.compile(r"^(\d{4})-(\d{2})-\d{2}-")
@@ -157,3 +162,29 @@ def regenerate(archive_root: Path) -> None:
     for sub in archive_root.iterdir():
         if sub.is_dir():
             (sub / "index.md").write_text(build_index(sub), encoding="utf-8")
+
+
+def resolve_repo_url_base(
+    repo_root: Path, section: dict, *, override: str | None = None
+) -> str | None:
+    """Base URL that source links hang off, or None for plain text.
+
+    Order: explicit override / section['repo_url_base'] -> derived GitHub blob
+    URL (detect_repo + current branch, default 'main') -> None.
+    """
+    explicit = override or section.get("repo_url_base")
+    if explicit:
+        base = str(explicit)
+        return base if base.endswith("/") else base + "/"
+    repo = detect_repo(repo_root)
+    if repo.get("owner") == "unknown" or repo.get("name") == "unknown":
+        return None
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    ref = proc.stdout.strip()
+    if proc.returncode != 0 or ref in ("", "HEAD"):
+        ref = "main"
+    return f"https://github.com/{repo['owner']}/{repo['name']}/blob/{ref}/"

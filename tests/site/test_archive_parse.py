@@ -36,3 +36,16 @@ def test_parse_title_and_summary_skips_subheadings():
     title, summary = archive_indexes.parse_title_and_summary(text)
     assert title == "Title"
     assert summary == "Real summary line."
+
+
+def test_parse_title_and_summary_no_h1_returns_empty():
+    # No H1 -> ("", ""); collect_entries falls back to the filename for title.
+    title, summary = archive_indexes.parse_title_and_summary("Prose.\nNo heading.\n")
+    assert title == ""
+    assert summary == ""
+
+
+def test_parse_title_and_summary_title_without_body():
+    title, summary = archive_indexes.parse_title_and_summary("# Only a title\n")
+    assert title == "Only a title"
+    assert summary == ""

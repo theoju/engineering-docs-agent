@@ -577,6 +577,24 @@ def _synthesize_core_page(target_path: Path, page: dict, today: str) -> None:
     target_path.write_text(fm + _core_page_skeleton(page))
 
 
+def _resolve_docs_dir(config: dict) -> str | None:
+    """The docs root for core pages: prefer ``site.docs_dir`` (what the manifest
+    code and the source-map stage use), fall back to ``docs.source_dir`` for
+    hosts that set no ``site:`` block. None when neither is a non-empty string.
+    """
+    site = config.get("site") if isinstance(config, dict) else None
+    if isinstance(site, dict):
+        d = site.get("docs_dir")
+        if isinstance(d, str) and d.strip("/"):
+            return d
+    docs = config.get("docs") if isinstance(config, dict) else None
+    if isinstance(docs, dict):
+        d = docs.get("source_dir")
+        if isinstance(d, str) and d.strip("/"):
+            return d
+    return None
+
+
 def compute_source_drift(repo_root: Path, config: dict, prs: list[dict]) -> list[dict]:
     """Run the source-map generator and return drifted pages for this batch.
     Changed files = union of every PR's files[] (dict-with-path or plain string).
@@ -1086,6 +1104,109 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         if not reasons:
             add_partial(state, "notifier_invalid: returned None")
         state_path.write_text(json.dumps(state, indent=2))
+    return 0
+
+
+def run_bootstrap_core(
+    repo_root: Path,
+    *,
+    dry_run_dir: Path | None,
+    today: str | None = None,
+) -> int:
+    """C2 bootstrap authoring entry. Reads <docs_dir>/.doc-core-manifest.json and
+    authors each declared core page that has no file yet, via the unchanged
+    page-author agent. Idempotent (create-missing only), diagram-free, best-effort
+    per page (a dispatch failure records a reason and continues). No-op when there
+    is no config docs_dir, no manifest, or an empty manifest. Returns 0 on
+    success/no-op, 2 on unreadable config. Prints a JSON ledger to stdout.
+    """
+    import frontmatter_contract as fmc
+
+    cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
+    if not cfg_path.exists():
+        print("no config", file=sys.stderr)
+        return 2
+    try:
+        config = load_config_validated(cfg_path)
+    except ConfigError as e:
+        print(f"config invalid: {e}", file=sys.stderr)
+        return 2
+
+    docs_dir = _resolve_docs_dir(config)
+    if docs_dir is None:
+        print("no docs_dir; nothing to bootstrap", file=sys.stderr)
+        return 0
+
+    manifest_path = repo_root / docs_dir / ".doc-core-manifest.json"
+    if not manifest_path.exists():
+        print("no core manifest; run setup first", file=sys.stderr)
+        return 0
+    manifest = load_json(manifest_path)
+    pages = manifest.get("pages") if isinstance(manifest, dict) else None
+    if not isinstance(pages, list) or not pages:
+        return 0
+
+    today = today or datetime.now(timezone.utc).date().isoformat()
+    voice_samples = load_voice_samples(repo_root, config)
+    editable_globs = config.get("docs", {}).get("agent_editable_paths", [])
+    section = next(
+        (
+            s
+            for s in ((config.get("site") or {}).get("sections") or [])
+            if isinstance(s, dict) and s.get("generator") == "agent-authored"
+        ),
+        None,
+    )
+    lens = (section or {}).get("key") or "core"
+
+    ledger: dict = {"authored": [], "skipped_existing": [], "reasons": []}
+    for page in pages:
+        if not isinstance(page, dict) or "page" not in page:
+            ledger["reasons"].append("manifest_page_invalid")
+            continue
+        target_path = repo_root / docs_dir / page["page"]
+        try:
+            rel = target_path.resolve().relative_to(repo_root.resolve())
+        except ValueError:
+            ledger["reasons"].append(f"unsafe_page_path: {page['page']}")
+            continue
+        if not _page_target_is_editable(str(rel), editable_globs):
+            ledger["reasons"].append(f"unsafe_page_path: {rel}")
+            continue
+        if target_path.exists():
+            ledger["skipped_existing"].append(str(rel))
+            continue
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        out, reasons = dispatch_validated(
+            "page-author",
+            {
+                "target_path": str(target_path),
+                "action": "create",
+                "lens": lens,
+                "summaries": [],
+                "voice_samples": voice_samples,
+                "frontmatter_template": fmc.agent_authored_frontmatter_dict(
+                    description=page.get("title") or page.get("key") or "",
+                    source_files=page.get("source_files") or [],
+                    last_reviewed=today,
+                    status="draft",
+                ),
+                "manifest_page": page,
+            },
+            dry_run_dir=dry_run_dir,
+            cwd=repo_root,
+        )
+        ledger["reasons"].extend(reasons)
+        if out is None:
+            if not reasons:
+                ledger["reasons"].append(f"page_author_invalid: {rel}")
+            continue
+        if out.get("ok"):
+            if dry_run_dir and not target_path.exists():
+                _synthesize_core_page(target_path, page, today)
+            ledger["authored"].append(str(rel))
+
+    print(json.dumps(ledger, indent=2))
     return 0
 
 

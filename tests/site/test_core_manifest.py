@@ -113,3 +113,38 @@ def test_detect_specs_present_one_page_per_spec(tmp_path):
     assert payments["source_files"] == ["pkg/payments.py"]
     # storage had no extractable refs -> falls back to the detected source root
     assert pages[1]["source_files"] == ["pkg/**/*.py"]
+
+
+def test_detect_code_only_single_system_overview(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    manifest = cm.detect_core_manifest(tmp_path, _site(), specs_dir=None)
+    assert [p["key"] for p in manifest["pages"]] == ["system-overview"]
+    p = manifest["pages"][0]
+    assert p["page"] == "architecture/system-overview.md"
+    assert p["source_files"] == ["pkg/**/*.py"]
+
+
+def test_detect_empty_specs_dir_falls_back_to_overview(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "specs").mkdir()  # exists but contains no *.md
+    manifest = cm.detect_core_manifest(tmp_path, _site(), specs_dir="specs")
+    assert [p["key"] for p in manifest["pages"]] == ["system-overview"]
+
+
+def test_detect_nothing_when_no_agent_authored_section(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    assert cm.detect_core_manifest(tmp_path, _site(generator="changelog")) is None
+
+
+def test_detect_nothing_when_no_source_root_and_no_specs(tmp_path):
+    # agent-authored section exists, but no Python source and no specs
+    assert cm.detect_core_manifest(tmp_path, _site()) is None
+
+
+def test_detect_none_when_section_path_blank(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    assert cm.detect_core_manifest(tmp_path, _site(path="/")) is None

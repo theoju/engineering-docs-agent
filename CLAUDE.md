@@ -41,6 +41,8 @@ This file is read by the docs-agent's `load_voice_samples` helper (per `scripts/
 ## Plugin conventions
 
 - All work happens on a feature branch off `main`. Direct commits to `main` are not allowed.
+- Merge on a green _integrated_ suite, never on GitHub's "mergeable" flag (that only means no textual conflict). Before merging, merge the target branch into yours locally and run the full `python3 -m pytest` against the combined tree. With stacked branches, land the base first, then siblings one at a time, re-testing between each (`git fetch` before verifying — `origin/main` goes stale after an API-side merge).
+- Shared helpers are contracts. Before changing the signature or behavior of a cross-capability helper (`archive_indexes.parse_frontmatter`, anything in `state_io.py`, `contracts.py`), `grep -rn` its callers repo-wide and update them in the same change; never let two branches refactor the same helper in different directions.
 - Python: stdlib-first. New runtime deps require explicit justification in the spec.
 - Tests: pytest. TDD for new behavior (failing test → implementation → green). All tests use the fixture-driven dry-run path; the production Claude CLI dispatch is monkeypatched in unit tests.
 - Subagent contracts: each agent's `.md` file in `agents/` defines the canonical input/output shape. JSON schemas in `agents/schemas/` codify the output shape. Dataclasses in `scripts/contracts.py` provide the typed view.

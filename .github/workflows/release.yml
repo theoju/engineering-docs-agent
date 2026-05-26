@@ -1,0 +1,36 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  live-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        # Flat multi-dir layout isn't pip-installable; tests put scripts/ on
+        # sys.path themselves. Install runtime + test deps directly (matches test.yml).
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml jsonschema pytest
+      - name: Install claude CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code || true
+          which claude || (echo "claude CLI not installed" && exit 1)
+      - name: Assert API key is configured
+        # In CI, env-var auth is the only auth path (no keychain OAuth). Fail
+        # with an actionable message if the secret is missing, rather than
+        # letting the live tests fail opaquely on a None dispatch response.
+        run: '[ -n "$ANTHROPIC_API_KEY" ] || (echo "ANTHROPIC_API_KEY secret not configured" && exit 1)'
+      - name: Run live tests
+        run: pytest -m live -v

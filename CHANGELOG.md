@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Live integration test gate (CCE-6)
+
+- Added `@pytest.mark.live` marker and a `conftest.py` default-skip hook: live real-LLM tests run only via `pytest -m live`. Two `dispatch_subagent` smoke tests (notifier, pr-summarizer) exercise the real dispatch path with different payload shapes. New `.github/workflows/release.yml` runs them on tag pushes only. Cost ~$1-3 per full pass; the default mocked suite stays free.
+
 ## [0.1.4] — 2026-05-20
 
 ### Source-collector reliability investigation (CCE-9 — partial fix + diagnostic infrastructure)

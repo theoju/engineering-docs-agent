@@ -1,0 +1,6 @@
+{
+  "purpose": "Pinned SHAs for a future live-orchestrator-smoke test. NOT used by the initial dispatch_subagent live tests in tests/live/. See README.md in this dir.",
+  "repo": { "owner": "theoju", "name": "engineering-docs-agent" },
+  "last_sha": "1f4563c20f4dc4a74ca7e353a1a3edf385cd61c5",
+  "head_sha": "5e143e20a1a1698343bb4a187c21b059bf2f3d7d"
+}

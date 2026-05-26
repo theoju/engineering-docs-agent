@@ -1,0 +1,45 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "scripts/verify_diagrams.py"
+      - "tests/diagrams/**"
+      - "tests/fixtures/diagrams/render/**"
+      - "requirements-docs.txt"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "scripts/verify_diagrams.py"
+      - "tests/diagrams/**"
+      - "tests/fixtures/diagrams/render/**"
+      - "requirements-docs.txt"
+      - ".github/workflows/docs.yml"
+
+jobs:
+  diagram-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install docs tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-docs.txt pytest pyyaml
+      - name: Install Chromium for Playwright
+        run: python -m playwright install --with-deps chromium
+      - name: Run diagram render tests (Playwright now present)
+        run: python -m pytest tests/diagrams -q
+      - name: Build the docs site
+        run: mkdocs build --strict
+      - name: Diagram render gate (required)
+        # --require => a missing Playwright here is a HARD failure, never a skip.
+        run: python scripts/verify_diagrams.py --site-dir site --source-dir docs/site-src --require --json

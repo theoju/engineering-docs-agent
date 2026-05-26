@@ -23,3 +23,20 @@ def test_makefile_has_docs_verify_target():
     mk = (ROOT / "Makefile").read_text()
     assert "docs-verify:" in mk
     assert "verify_diagrams.py" in mk
+
+
+def test_docs_workflow_runs_the_gate():
+    import yaml  # already a runtime dep
+
+    wf = ROOT / ".github" / "workflows" / "docs.yml"
+    data = yaml.safe_load(wf.read_text())
+    # `on:` may parse as the boolean True key in YAML 1.1 — accept either.
+    triggers = data.get("on") or data.get(True)
+    assert triggers, "workflow must declare triggers"
+    body = wf.read_text()
+    assert "playwright install" in body
+    assert "verify_diagrams.py" in body
+    assert "--require" in body  # CI must hard-fail when Playwright is missing
+    assert "mkdocs build" in body
+    # Scoped to docs / gate files, not every push.
+    assert "paths:" in body

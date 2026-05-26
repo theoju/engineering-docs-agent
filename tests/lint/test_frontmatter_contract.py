@@ -100,3 +100,56 @@ def test_section_generator_for_prefix_is_segment_bounded():
         fc.section_generator_for(Path("/r/docs/site-src/core-extra/a.md"), cfg)
         == "changelog"
     )
+
+
+def test_section_generator_for_malformed_config_never_raises():
+    # Each malformed shape must return None, not raise.
+    assert (
+        fc.section_generator_for(Path("/r/docs/site-src/core/a.md"), {"site": "nope"})
+        is None
+    )
+    assert (
+        fc.section_generator_for(
+            Path("/r/docs/site-src/core/a.md"),
+            {"site": {"docs_dir": "docs/site-src", "sections": "notalist"}},
+        )
+        is None
+    )
+    assert (
+        fc.section_generator_for(
+            Path("/r/docs/site-src/core/a.md"),
+            {
+                "site": {
+                    "docs_dir": "docs/site-src",
+                    "sections": [
+                        "core/",
+                        {"path": "core/", "generator": "agent-authored"},
+                    ],
+                }
+            },
+        )
+        == "agent-authored"
+    )  # a junk string element is skipped, the valid dict still matches
+    assert (
+        fc.section_generator_for(
+            Path("/r/docs/site-src/core/a.md"),
+            {
+                "site": {
+                    "docs_dir": 123,
+                    "sections": [{"path": "core/", "generator": "agent-authored"}],
+                }
+            },
+        )
+        is None
+    )  # non-str docs_dir -> no match
+
+
+def test_section_generator_for_page_none_returns_none():
+    assert fc.section_generator_for(None, _CONFIG) is None
+
+
+def test_section_generator_for_accepts_str_page():
+    assert (
+        fc.section_generator_for("/r/docs/site-src/core/a.md", _CONFIG)
+        == "agent-authored"
+    )

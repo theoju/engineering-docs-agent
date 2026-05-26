@@ -27,24 +27,32 @@ def section_generator_for(page: Path | str, config: dict) -> str | None:
     Matches the section whose ``docs_dir/path`` is a path-segment prefix of the
     page (longest match wins, so a nested section beats its parent). Returns
     None when there is no ``site:`` block, no ``docs_dir``, or no match — which
-    yields the default field set. Never raises.
+    yields the default field set. Never raises (malformed config -> None).
     """
-    site = (config or {}).get("site") or {}
-    docs_dir = str(site.get("docs_dir") or "").strip("/")
-    sections = site.get("sections") or []
-    if not docs_dir or not sections:
+    site = config.get("site") if isinstance(config, dict) else None
+    if not isinstance(site, dict):
         return None
-    page_posix = Path(page).as_posix()
+    docs_dir = site.get("docs_dir")
+    docs_dir = docs_dir.strip("/") if isinstance(docs_dir, str) else ""
+    sections = site.get("sections")
+    if not docs_dir or not isinstance(sections, list):
+        return None
+    try:
+        page_posix = Path(page).as_posix()
+    except TypeError:
+        return None
     bounded = f"/{page_posix}/"  # segment-bounded haystack
     best_len = -1
     best_gen: str | None = None
     for s in sections:
-        rel = str((s or {}).get("path") or "").strip("/")
+        if not isinstance(s, dict):
+            continue
+        rel = s.get("path")
+        rel = rel.strip("/") if isinstance(rel, str) else ""
         if not rel:
             continue
-        full = str(PurePosixPath(docs_dir) / rel)  # e.g. docs/site-src/core
-        if f"/{full}/" in bounded:
-            if len(full) > best_len:
-                best_len = len(full)
-                best_gen = s.get("generator")
+        full = str(PurePosixPath(docs_dir) / rel)
+        if f"/{full}/" in bounded and len(full) > best_len:
+            best_len = len(full)
+            best_gen = s.get("generator")
     return best_gen

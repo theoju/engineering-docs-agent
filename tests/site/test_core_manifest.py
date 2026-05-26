@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json as _json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -234,9 +235,6 @@ def test_write_no_manifest_when_all_entries_dropped(tmp_path):
     assert not (tmp_path / "docs" / "site-src" / ".doc-core-manifest.json").exists()
 
 
-import subprocess
-
-
 def test_setup_scaffold_main_writes_manifest(tmp_path):
     """End-to-end: running setup_scaffold against a host with an agent-authored
     section + Python source writes .doc-core-manifest.json and reports it."""
@@ -270,6 +268,8 @@ def test_setup_scaffold_main_writes_manifest(tmp_path):
     assert r.returncode == 0, r.stderr
     out = _json.loads(r.stdout)
     assert out["core_manifest"]["written"] == ["docs/site-src/.doc-core-manifest.json"]
+    assert out["core_manifest"]["pages"] == 1
+    assert out["core_manifest"]["dropped"] == []
     art = _json.loads(
         (tmp_path / "docs" / "site-src" / ".doc-core-manifest.json").read_text()
     )

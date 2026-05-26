@@ -6,3 +6,5 @@ mkdocs-awesome-pages-plugin>=2.9
 mkdocstrings[python]>=0.25
 mkdocs-gen-files>=0.5
 mkdocs-literate-nav>=0.6
+# OpenAPI rendering (only used when an api-extract section lists the openapi extractor).
+mkdocs-render-swagger-plugin>=0.1

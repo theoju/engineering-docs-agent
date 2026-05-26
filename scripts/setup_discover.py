@@ -48,6 +48,44 @@ def detect_ci(cwd: Path) -> str | None:
     return None
 
 
+_LOOSE_DIRS = ("src", "scripts")
+_SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "build", "dist", "tests", "test"}
+
+
+def detect_python(cwd: Path) -> dict:
+    """Resolve a Python source root generically.
+
+    Returns {"detected", "scan_dir", "path_root"}: scan_dir is walked for
+    *.py; path_root goes on mkdocstrings' `paths` so a module identifier is
+    its path relative to path_root. A top-level package (a dir with
+    __init__.py) wins; else a conventional loose-module dir (src/scripts).
+    """
+    for child in sorted(cwd.iterdir()):
+        if (
+            child.is_dir()
+            and child.name not in _SKIP_DIRS
+            and not child.name.startswith(".")
+            and (child / "__init__.py").exists()
+        ):
+            return {"detected": True, "scan_dir": child.name, "path_root": "."}
+    for name in _LOOSE_DIRS:
+        d = cwd / name
+        if d.is_dir() and any(d.glob("*.py")):
+            return {"detected": True, "scan_dir": name, "path_root": name}
+    return {"detected": False, "scan_dir": None, "path_root": None}
+
+
+def detect_openapi_hint(cwd: Path) -> str | None:
+    """Return an OpenAPI schema filename at the repo root, or None.
+
+    Checks repo-root openapi.json/.yaml/.yml only — a hint, not a deep search.
+    """
+    for name in ("openapi.json", "openapi.yaml", "openapi.yml"):
+        if (cwd / name).exists():
+            return name
+    return None
+
+
 def detect_jira_hint(cwd: Path) -> dict | None:
     """Detect Jira hints from CI workflow files or .env.example.
 
@@ -115,6 +153,8 @@ def discover(cwd: Path) -> dict:
         "lens_paths": lens_paths,
         "ci": ci,
         "jira_hint": jira_hint,
+        "python": detect_python(cwd),
+        "openapi_hint": detect_openapi_hint(cwd),
     }
     if warnings:
         out["warnings"] = warnings

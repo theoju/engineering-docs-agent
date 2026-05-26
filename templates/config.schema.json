@@ -127,6 +127,7 @@
                 }
               },
               "sources": { "type": "array", "items": { "type": "string" } },
+              "openapi": { "type": "string", "minLength": 1 },
               "repo_url_base": { "type": "string" }
             }
           }

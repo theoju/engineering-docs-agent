@@ -117,6 +117,47 @@ def _validate_site_sections(config: dict) -> None:
                 )
 
 
+def _validate_api_sections(config: dict) -> None:
+    """Cross-field checks for api-extract sections (CCE-23 capability API).
+
+    - an api-extract section must declare a non-empty `extractors`
+    - its `sources` must be repo-relative (no absolute or '..' paths)
+    - the `openapi` extractor requires a repo-relative `openapi:` path
+    Schema enforces the extractor enum and the `openapi` field type.
+    """
+    site = config.get("site")
+    if not site:
+        return
+    for s in site.get("sections", []) or []:
+        if s.get("generator") != "api-extract":
+            continue
+        extractors = s.get("extractors") or []
+        if not extractors:
+            raise ConfigError(
+                f"site.section '{s.get('key')}' uses generator api-extract but "
+                "declares no extractors"
+            )
+        for src in s.get("sources") or []:
+            sp = str(src)
+            if sp.startswith("/") or ".." in PurePosixPath(sp).parts:
+                raise ConfigError(
+                    f"site.section '{s.get('key')}' source {sp!r} must be relative "
+                    "to the repo (no absolute or '..' paths)"
+                )
+        if "openapi" in extractors:
+            path = s.get("openapi")
+            if not path:
+                raise ConfigError(
+                    f"site.section '{s.get('key')}' lists the openapi extractor "
+                    "but has no `openapi:` schema path"
+                )
+            if path.startswith("/") or ".." in PurePosixPath(path).parts:
+                raise ConfigError(
+                    f"site.section '{s.get('key')}' openapi path {path!r} must be "
+                    "relative to the repo (no absolute or '..' paths)"
+                )
+
+
 def load_config_validated(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ConfigError(f"config not found: {path}")
@@ -131,6 +172,7 @@ def load_config_validated(path: Path) -> dict[str, Any]:
         raise ConfigError(f"config invalid at {e.json_path}: {e.message}") from e
     _validate_lens_paths_are_editable(raw)
     _validate_site_sections(raw)
+    _validate_api_sections(raw)
     return raw
 
 

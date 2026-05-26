@@ -604,7 +604,10 @@ def _load_core_manifest_pages(repo_root: Path, docs_dir: str) -> list[dict]:
     manifest_path = repo_root / docs_dir / ".doc-core-manifest.json"
     if not manifest_path.exists():
         return []
-    manifest = load_json(manifest_path)
+    try:
+        manifest = load_json(manifest_path)
+    except OSError:  # path is a dir, unreadable, etc. — degrade to no pages
+        return []
     pages = manifest.get("pages") if isinstance(manifest, dict) else None
     return pages if isinstance(pages, list) else []
 
@@ -718,6 +721,9 @@ def compute_core_drift(
     ``reasons`` is an ordered subset of ``["source", "citation"]``. Empty list
     when there is no docs_dir, no manifest, or no core page drifted.
     """
+    # Non-empty output requires site.docs_dir: when a host has no site: block M
+    # and C1 produce no drift, so the intersection is empty regardless of the
+    # docs.source_dir fallback _resolve_docs_dir may return here.
     docs_dir = _resolve_docs_dir(config)
     if docs_dir is None:
         return []

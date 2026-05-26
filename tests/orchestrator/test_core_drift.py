@@ -39,6 +39,12 @@ def test_load_core_manifest_pages_no_pages_key_returns_empty(tmp_path):
     assert runner._load_core_manifest_pages(tmp_path, "docs/site-src") == []
 
 
+def test_load_core_manifest_pages_unreadable_returns_empty(tmp_path):
+    # Path exists but is a directory (or otherwise unreadable) -> no pages, no raise.
+    (tmp_path / "docs" / "site-src" / ".doc-core-manifest.json").mkdir(parents=True)
+    assert runner._load_core_manifest_pages(tmp_path, "docs/site-src") == []
+
+
 _CONFIG = {"site": {"docs_dir": "docs/site-src"}}
 _EMPTY_LEDGER = {"gone": [], "ambiguous": []}
 

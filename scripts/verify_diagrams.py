@@ -281,3 +281,64 @@ def verify_site(site_dir: Path, source_dir: Path, fixtures_dir: Path) -> dict:
                     }
                 )
     return build_ledger(self_test, page_results)
+
+
+_FIXTURES_DIR = (
+    Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "diagrams" / "render"
+)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        description="Verify Mermaid diagrams render in the built site."
+    )
+    ap.add_argument("--site-dir", type=Path, required=True, help="built MkDocs site")
+    ap.add_argument(
+        "--source-dir", type=Path, required=True, help="docs source scanned for fences"
+    )
+    ap.add_argument(
+        "--fixtures-dir", type=Path, default=_FIXTURES_DIR, help="self-test fixtures"
+    )
+    ap.add_argument(
+        "--self-test-only", action="store_true", help="run only the Phase A handshake"
+    )
+    ap.add_argument(
+        "--require",
+        action="store_true",
+        help="hard-fail if Playwright is unavailable (CI sets this)",
+    )
+    ap.add_argument("--json", action="store_true", help="emit the full JSON ledger")
+    args = ap.parse_args(argv)
+
+    if not _PLAYWRIGHT_AVAILABLE:
+        msg = (
+            "diagram gate unavailable: install docs tooling with "
+            "`pip install -r requirements-docs.txt && playwright install chromium`"
+        )
+        if args.require:
+            print(msg, file=sys.stderr)
+            return 2
+        print(msg)  # local convenience: skip, not fail
+        return 0
+
+    if args.self_test_only:
+        st = run_self_test(args.fixtures_dir)
+        print(
+            json.dumps({"self_test": st}, indent=2) if args.json else f"self_test={st}"
+        )
+        return 0 if st["ok"] else 1
+
+    ledger = verify_site(args.site_dir, args.source_dir, args.fixtures_dir)
+    if args.json:
+        print(json.dumps(ledger, indent=2))
+    else:
+        print(
+            f"self_test_ok={ledger['self_test']['ok']} "
+            f"pages={ledger['checked_pages']} expected={ledger['expected_diagrams']} "
+            f"rendered={ledger['rendered_diagrams']} failures={len(ledger['failures'])}"
+        )
+    return 0 if ledger_ok(ledger) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

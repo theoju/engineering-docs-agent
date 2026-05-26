@@ -66,7 +66,8 @@ def _resolve_specs_dir(repo_root: Path, site_config, specs_dir=None) -> Path | N
 
 def _spec_key(stem: str) -> str:
     """Derive a slug key from a spec filename stem: strip a leading YYYY-MM-DD-
-    and a trailing -design/-plan, then slugify. Never empty for a non-empty stem.
+    and any trailing -design and/or -plan suffixes (checked in turn), then
+    slugify. Never empty for a non-empty stem.
     """
     s = _DATE_PREFIX.sub("", stem)
     for suf in ("-design", "-plan"):
@@ -101,6 +102,12 @@ def detect_core_manifest(repo_root, site_config, *, specs_dir=None) -> dict | No
     """Return {"version": 1, "pages": [...]} of candidate core pages, or None
     when there is no agent-authored section or nothing to document. Pure
     detection — no tracked-file filtering (write_core_manifest does that).
+
+    A spec page with no extractable source globs and no detectable source root
+    is emitted with source_files == []; this is intentional. Per the spec,
+    entries that document nothing are dropped at build time by
+    write_core_manifest (zero tracked-file matches), not here — detection only
+    produces candidates.
     """
     repo_root = Path(repo_root)
     section = _agent_authored_section(site_config)
@@ -154,5 +161,5 @@ def detect_core_manifest(repo_root, site_config, *, specs_dir=None) -> dict | No
     return {"version": 1, "pages": pages}
 
 
-def _dedupe_and_sort(pages, section_path):
+def _dedupe_and_sort(pages, section_path):  # section_path reserved for Task 4
     return sorted(pages, key=lambda p: p["key"])

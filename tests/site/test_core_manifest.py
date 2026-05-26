@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json as _json
 import sys
 from pathlib import Path
 
@@ -185,3 +186,49 @@ def test_detect_collision_when_two_specs_slug_same_key(tmp_path):
     (specs / "2026-02-02-api-design.md").write_text("`pkg/b.py`\n")
     manifest = cm.detect_core_manifest(tmp_path, _site(), specs_dir="specs")
     assert [p["key"] for p in manifest["pages"]] == ["api", "api-2"]
+
+
+def test_write_drops_empty_glob_entries_and_writes_artifact(tmp_path):
+    # Source tree (no git -> _resolve_tracked_files falls back to rglob).
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "payments.py").write_text("# pay\n")
+    (tmp_path / "docs" / "site-src").mkdir(parents=True)
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    # payments.md -> matches a tracked file; ghost.md -> matches nothing (dropped)
+    (specs / "2026-05-26-payments-design.md").write_text("`pkg/payments.py`\n")
+    (specs / "2026-05-26-ghost-design.md").write_text("`pkg/does_not_exist.py`\n")
+
+    ledger = cm.write_core_manifest(tmp_path, _site(), specs_dir="specs")
+    assert ledger["written"] == ["docs/site-src/.doc-core-manifest.json"]
+    assert ledger["pages"] == 1
+    assert ledger["dropped"] == ["ghost"]
+
+    art = _json.loads(
+        (tmp_path / "docs" / "site-src" / ".doc-core-manifest.json").read_text()
+    )
+    assert art["version"] == 1
+    assert [p["key"] for p in art["pages"]] == ["payments"]
+    assert art["pages"][0]["source_files"] == ["pkg/payments.py"]
+
+
+def test_write_no_manifest_when_detection_returns_none(tmp_path):
+    (tmp_path / "docs" / "site-src").mkdir(parents=True)
+    ledger = cm.write_core_manifest(tmp_path, _site())  # no source, no specs
+    assert ledger == {"written": [], "pages": 0, "dropped": []}
+    assert not (tmp_path / "docs" / "site-src" / ".doc-core-manifest.json").exists()
+
+
+def test_write_no_manifest_when_all_entries_dropped(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "docs" / "site-src").mkdir(parents=True)
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    (specs / "2026-05-26-ghost-design.md").write_text("`pkg/missing.py`\n")
+    # Force the overview/per-spec glob to match nothing by removing the only .py
+    (tmp_path / "pkg" / "__init__.py").unlink()
+    ledger = cm.write_core_manifest(tmp_path, _site(), specs_dir="specs")
+    assert ledger["written"] == []
+    assert not (tmp_path / "docs" / "site-src" / ".doc-core-manifest.json").exists()

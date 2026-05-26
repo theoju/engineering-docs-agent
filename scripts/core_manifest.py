@@ -161,6 +161,42 @@ def detect_core_manifest(repo_root, site_config, *, specs_dir=None) -> dict | No
     return {"version": 1, "pages": pages}
 
 
+def write_core_manifest(repo_root, site_config, *, specs_dir=None) -> dict:
+    """Detect the manifest, drop entries whose globs match zero tracked files,
+    and write <docs_dir>/.doc-core-manifest.json. Returns a ledger
+    {"written": [...], "pages": N, "dropped": [keys]}. Writes nothing when
+    detection yields None, docs_dir is unusable, or every entry is dropped.
+    """
+    repo_root = Path(repo_root)
+    ledger: dict = {"written": [], "pages": 0, "dropped": []}
+    manifest = detect_core_manifest(repo_root, site_config, specs_dir=specs_dir)
+    if manifest is None:
+        return ledger
+    docs_dir = site_config.get("docs_dir") if isinstance(site_config, dict) else None
+    if not isinstance(docs_dir, str) or not docs_dir.strip("/"):
+        return ledger
+
+    tracked = source_map._resolve_tracked_files(repo_root)
+    kept: list[dict] = []
+    for p in manifest["pages"]:
+        regexes = [source_map._glob_to_regex(g) for g in p["source_files"]]
+        if regexes and any(r.fullmatch(f) for r in regexes for f in tracked):
+            kept.append(p)
+        else:
+            ledger["dropped"].append(p["key"])
+    if not kept:
+        return ledger
+
+    artifact = {"version": 1, "pages": kept}
+    out_rel = f"{docs_dir.rstrip('/')}/.doc-core-manifest.json"
+    (repo_root / out_rel).write_text(
+        json.dumps(artifact, indent=2) + "\n", encoding="utf-8"
+    )
+    ledger["written"] = [out_rel]
+    ledger["pages"] = len(kept)
+    return ledger
+
+
 def _dedupe_and_sort(pages: list[dict], section_path: str) -> list[dict]:
     """Sort pages by key; disambiguate a colliding key deterministically by
     appending -2, -3, ... (in sorted order) and rewriting its page path to match.

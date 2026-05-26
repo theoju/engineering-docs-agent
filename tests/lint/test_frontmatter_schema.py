@@ -125,6 +125,42 @@ def test_non_agent_authored_page_keeps_default_set(tmp_path):
     assert "synthesized_into" in out["results"][0]["message"]
 
 
+def test_synthesized_core_page_passes_block_rule(tmp_path):
+    """A page written by _synthesize_core_page passes frontmatter_schema when its
+    section's generator is agent-authored (absolute-path frame, as the
+    orchestrator dispatches)."""
+    import sys
+
+    scripts = Path(__file__).resolve().parents[2] / "scripts"
+    sys.path.insert(0, str(scripts))
+    import orchestrator_runner as runner  # noqa: E402
+
+    docs_dir = "docs/site-src"
+    page_entry = {
+        "key": "api",
+        "title": "API layer",
+        "page": "core/api.md",
+        "source_files": ["backend/api/**/*.py"],
+    }
+    target = tmp_path / docs_dir / "core" / "api.md"
+    target.parent.mkdir(parents=True)
+    runner._synthesize_core_page(target, page_entry, today="2026-05-26")
+
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "site:\n"
+        f"  docs_dir: {docs_dir}\n"
+        "  sections:\n"
+        "    - key: core\n"
+        "      path: core/\n"
+        "      title: Core\n"
+        "      generator: agent-authored\n"
+    )
+    rc, out = _run([target], cfg)
+    assert rc == 0, out["results"][0].get("message", "")
+    assert all(r["ok"] for r in out["results"])
+
+
 def test_orchestrator_absolute_path_frame_resolves_agent_authored(tmp_path):
     """Pin the orchestrator's real frame: pages are authored at the absolute
     path repo_root/lens_path/hint (orchestrator_runner.py:763) and handed to

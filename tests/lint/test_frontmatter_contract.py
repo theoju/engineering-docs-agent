@@ -215,3 +215,67 @@ def test_section_generator_for_docs_dir_relative_longest_match_wins():
     }
     # bare-frame page under architecture/ still resolves agent-authored
     assert fc.section_generator_for("architecture/index.md", cfg) == "agent-authored"
+
+
+def test_agent_authored_frontmatter_dict_shape():
+    d = fc.agent_authored_frontmatter_dict(
+        description="API layer",
+        source_files=["a/b.py", "a/c.py"],
+        last_reviewed="2026-05-26",
+    )
+    assert d == {
+        "description": "API layer",
+        "source_files": ["a/b.py", "a/c.py"],
+        "last_reviewed": "2026-05-26",
+        "status": "draft",
+    }
+    assert set(fc.AGENT_AUTHORED_REQUIRED) <= set(d)
+
+
+def test_agent_authored_frontmatter_dict_copies_source_files():
+    src = ["a/b.py"]
+    d = fc.agent_authored_frontmatter_dict(
+        description="x", source_files=src, last_reviewed="2026-05-26"
+    )
+    src.append("mutated")
+    assert d["source_files"] == ["a/b.py"]  # not aliased to caller's list
+
+
+def test_agent_authored_frontmatter_text_valid_and_complete():
+    import yaml as _yaml
+
+    text = fc.agent_authored_frontmatter_text(
+        description="API layer",
+        source_files=["a/b.py", "a/c.py"],
+        last_reviewed="2026-05-26",
+    )
+    assert text.startswith("---\n") and text.endswith("---\n")
+    body = _yaml.safe_load(text.split("---", 2)[1])
+    assert set(fc.AGENT_AUTHORED_REQUIRED) <= set(body)
+    assert body["description"] == "API layer"
+    assert body["source_files"] == ["a/b.py", "a/c.py"]
+    assert body["last_reviewed"] == "2026-05-26"
+    assert body["status"] == "draft"
+
+
+def test_agent_authored_frontmatter_text_empty_source_files():
+    import yaml as _yaml
+
+    text = fc.agent_authored_frontmatter_text(
+        description="x", source_files=[], last_reviewed="2026-05-26"
+    )
+    body = _yaml.safe_load(text.split("---", 2)[1])
+    assert body["source_files"] == []
+
+
+def test_agent_authored_frontmatter_text_custom_status():
+    import yaml as _yaml
+
+    text = fc.agent_authored_frontmatter_text(
+        description="x",
+        source_files=["a.py"],
+        last_reviewed="2026-05-26",
+        status="reviewed",
+    )
+    body = _yaml.safe_load(text.split("---", 2)[1])
+    assert body["status"] == "reviewed"

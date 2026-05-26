@@ -148,3 +148,40 @@ def test_detect_none_when_section_path_blank(tmp_path):
     (tmp_path / "pkg").mkdir()
     (tmp_path / "pkg" / "__init__.py").write_text("")
     assert cm.detect_core_manifest(tmp_path, _site(path="/")) is None
+
+
+def test_dedupe_and_sort_orders_by_key():
+    pages = [
+        {"key": "zebra", "title": "Z", "page": "arch/zebra.md", "source_files": []},
+        {"key": "alpha", "title": "A", "page": "arch/alpha.md", "source_files": []},
+    ]
+    out = cm._dedupe_and_sort(pages, "arch")
+    assert [p["key"] for p in out] == ["alpha", "zebra"]
+
+
+def test_dedupe_and_sort_disambiguates_colliding_keys():
+    pages = [
+        {"key": "api", "title": "API", "page": "arch/api.md", "source_files": ["a"]},
+        {"key": "api", "title": "API", "page": "arch/api.md", "source_files": ["b"]},
+        {"key": "api", "title": "API", "page": "arch/api.md", "source_files": ["c"]},
+    ]
+    out = cm._dedupe_and_sort(pages, "arch")
+    assert [p["key"] for p in out] == ["api", "api-2", "api-3"]
+    assert [p["page"] for p in out] == [
+        "arch/api.md",
+        "arch/api-2.md",
+        "arch/api-3.md",
+    ]
+    # disambiguation rewrites key + page but preserves the rest of the entry
+    assert out[1]["source_files"] == ["b"]
+
+
+def test_detect_collision_when_two_specs_slug_same_key(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    (specs / "2026-01-01-api-design.md").write_text("`pkg/a.py`\n")
+    (specs / "2026-02-02-api-design.md").write_text("`pkg/b.py`\n")
+    manifest = cm.detect_core_manifest(tmp_path, _site(), specs_dir="specs")
+    assert [p["key"] for p in manifest["pages"]] == ["api", "api-2"]

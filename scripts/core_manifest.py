@@ -161,5 +161,19 @@ def detect_core_manifest(repo_root, site_config, *, specs_dir=None) -> dict | No
     return {"version": 1, "pages": pages}
 
 
-def _dedupe_and_sort(pages, section_path):  # section_path reserved for Task 4
-    return sorted(pages, key=lambda p: p["key"])
+def _dedupe_and_sort(pages: list[dict], section_path: str) -> list[dict]:
+    """Sort pages by key; disambiguate a colliding key deterministically by
+    appending -2, -3, ... (in sorted order) and rewriting its page path to match.
+    """
+    out: list[dict] = []
+    seen: dict[str, int] = {}
+    for p in sorted(pages, key=lambda x: x["key"]):
+        k = p["key"]
+        if k in seen:
+            seen[k] += 1
+            nk = f"{k}-{seen[k]}"
+            out.append({**p, "key": nk, "page": f"{section_path}/{nk}.md"})
+        else:
+            seen[k] = 1
+            out.append(p)
+    return out

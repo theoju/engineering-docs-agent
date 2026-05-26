@@ -34,7 +34,12 @@ def section_generator_for(page: Path | str, config: dict) -> str | None:
     ``docs_dir`` segment entirely) falls back to matching the section ``path``
     alone, so callers in any frame resolve correctly. The fallback fires only
     when the full match found nothing AND ``docs_dir`` is absent from the page,
-    so it cannot change the result for any path that already matches.
+    so it cannot change the result for any path that already matches. Frame 2
+    trades precision for robustness: a bare/relative page that lacks
+    ``docs_dir`` but contains a section-name segment will match that section,
+    so it is sound for the orchestrator's absolute-path frame (always Frame 1)
+    — be deliberate before feeding arbitrary relative paths from outside the
+    docs tree.
     """
     site = config.get("site") if isinstance(config, dict) else None
     if not isinstance(site, dict):
@@ -67,6 +72,9 @@ def section_generator_for(page: Path | str, config: dict) -> str | None:
 
     # Frame 1 — absolute / repo-relative: page embeds docs_dir/section.
     full_len, full_gen = _best(lambda rel: str(PurePosixPath(docs_dir) / rel))
+    # >=0 means a section matched (even a generatorless one, gen=None); do NOT
+    # change to `full_gen is not None` or a matched generatorless section would
+    # wrongly fall through to Frame 2.
     if full_len >= 0:
         return full_gen
     # Frame 2 — docs_dir-relative / bare: only when docs_dir is truly absent,

@@ -294,3 +294,52 @@ def test_main_default_routes_nightly_run(monkeypatch):
     rc = runner.main()
     assert rc == 0
     assert seen == {"run": True}
+
+
+import subprocess
+
+_RUNNER = Path(__file__).resolve().parents[2] / "scripts" / "orchestrator_runner.py"
+_FAKES_BOOTSTRAP = Path(__file__).parent / "fakes_bootstrap"
+
+
+def _run_bootstrap_cli(repo_root: Path):
+    return subprocess.run(
+        [
+            sys.executable,
+            str(_RUNNER),
+            "--repo-root",
+            str(repo_root),
+            "--bootstrap-core",
+            "--dry-run-subagents",
+            str(_FAKES_BOOTSTRAP),
+            "--today",
+            "2026-05-26",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_bootstrap_core_e2e_creates_then_idempotent(tmp_path):
+    _host(tmp_path)
+    r = _run_bootstrap_cli(tmp_path)
+    assert r.returncode == 0, r.stderr
+    api = tmp_path / "docs/site-src/core/api.md"
+    storage = tmp_path / "docs/site-src/core/storage.md"
+    assert api.exists() and storage.exists()
+    text = api.read_text()
+    assert "last_reviewed: '2026-05-26'" in text
+    assert "status: draft" in text
+    assert "TODO(human)" in text
+    assert "```mermaid" not in text
+
+    before = api.read_text()
+    r2 = _run_bootstrap_cli(tmp_path)
+    assert r2.returncode == 0, r2.stderr
+    ledger = _json.loads(r2.stdout)
+    assert api.read_text() == before  # idempotent: not rewritten
+    assert sorted(ledger["skipped_existing"]) == [
+        "docs/site-src/core/api.md",
+        "docs/site-src/core/storage.md",
+    ]
+    assert ledger["authored"] == []

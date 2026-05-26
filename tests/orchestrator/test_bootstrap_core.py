@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json as _json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -208,6 +209,20 @@ def test_bootstrap_empty_manifest_is_noop(tmp_path, monkeypatch):
     assert calls == []
 
 
+def test_bootstrap_corrupt_manifest_is_noop(tmp_path, monkeypatch):
+    # A corrupt manifest must degrade to a clean no-op, never crash.
+    _host(tmp_path, manifest=None)
+    (tmp_path / "docs/site-src/.doc-core-manifest.json").write_text("{ not valid json")
+    calls = []
+    monkeypatch.setattr(runner, "dispatch_validated", _spy(calls))
+    rc = runner.run_bootstrap_core(
+        tmp_path, dry_run_dir=tmp_path / "fakes", today="2026-05-26"
+    )
+    assert rc == 0
+    assert calls == []
+    assert not (tmp_path / "docs/site-src/core/api.md").exists()
+
+
 def test_bootstrap_ok_false_payload_is_recorded(tmp_path, monkeypatch, capsys):
     _host(tmp_path)
 
@@ -295,8 +310,6 @@ def test_main_default_routes_nightly_run(monkeypatch):
     assert rc == 0
     assert seen == {"run": True}
 
-
-import subprocess
 
 _RUNNER = Path(__file__).resolve().parents[2] / "scripts" / "orchestrator_runner.py"
 _FAKES_BOOTSTRAP = Path(__file__).parent / "fakes_bootstrap"

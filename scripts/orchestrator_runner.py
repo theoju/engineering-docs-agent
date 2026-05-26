@@ -1068,6 +1068,17 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         add_partial(state, f"verify_citations_failed: {exc}", info_only=True)
     state["current_run"]["citation_drift"] = citation_ledger
 
+    # Canonical-core drift (C2) — flag-only sibling after M/C1. Intersects the
+    # core manifest with the M/C1 drift results; never edits a page or dispatches.
+    try:
+        core_drifted = compute_core_drift(
+            repo_root, config, drifted_pages, citation_ledger
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
+        core_drifted = []
+        add_partial(state, f"core_drift_failed: {exc}", info_only=True)
+    state["current_run"]["core_drift"] = core_drifted
+
     # Gap detection
     dismissed = set(state.get("dismissed_gap_flags", {}).keys())
     gap_verdicts = []
@@ -1117,6 +1128,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                 entry_lines.append(f"- {g['pr_id']}: {g['reasoning']}")
         entry_lines.extend(_drift_whats_new_lines(drifted_pages))
         entry_lines.extend(_citation_drift_whats_new_lines(citation_ledger))
+        entry_lines.extend(_core_drift_whats_new_lines(core_drifted))
         entry = "\n".join(entry_lines) + "\n\n"
         existing = whats_new.read_text() if whats_new.exists() else ""
         whats_new.write_text(entry + existing)
@@ -1158,6 +1170,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         "partial_reasons": state["current_run"]["partial_reasons"],
         "source_drift": drifted_pages,
         "citation_drift": citation_ledger,
+        "core_drift": core_drifted,
     }
     notifier_result, reasons = dispatch_validated(
         "notifier",

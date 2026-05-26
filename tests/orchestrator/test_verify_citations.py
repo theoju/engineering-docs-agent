@@ -128,6 +128,43 @@ def test_verify_citations_fix_rewrites_relocated(tmp_path):
     assert "`src/b.py:1`" not in page.read_text()
 
 
+def test_fix_two_relocated_same_path_do_not_collide(tmp_path):
+    # Regression: A relocates 1->12, B relocates 12->20. A page-global replace
+    # would rewrite A to :12, then the B-pass would catch BOTH :12 spans and
+    # push them to :20, corrupting A. Offset-splicing must keep them distinct.
+    repo = tmp_path
+    lines = ["x"] * 20
+    lines[11] = "def alpha():"  # line 12
+    lines[19] = "def beta():"  # line 20
+    _write(repo / "src/a.py", "\n".join(lines) + "\n")
+    docs = repo / "docs/site-src"
+    page = _write(
+        docs / "core/x.md",
+        "A `src/a.py:1` <!--pin:def alpha-->\nB `src/a.py:12` <!--pin:def beta-->\n",
+    )
+    vc.verify_citations(docs, repo, fix=True)
+    out = page.read_text()
+    assert out.count("`src/a.py:12`") == 1  # A landed at 12, not clobbered
+    assert out.count("`src/a.py:20`") == 1  # B landed at 20
+    assert "A `src/a.py:12` <!--pin:def alpha-->" in out
+
+
+def test_fix_leaves_bare_reference_untouched(tmp_path):
+    # Regression: a bare `path:line` prose reference (no pin) that duplicates a
+    # pinned citation's span must not be rewritten by --fix.
+    repo = tmp_path
+    _write(repo / "src/b.py", "# pad\ndef handler():\n")  # def handler -> line 2
+    docs = repo / "docs/site-src"
+    page = _write(
+        docs / "core/x.md",
+        "Pinned `src/b.py:1` <!--pin:def handler--> and bare `src/b.py:1` here.\n",
+    )
+    vc.verify_citations(docs, repo, fix=True)
+    out = page.read_text()
+    assert "`src/b.py:2` <!--pin:def handler-->" in out  # pinned one relocated
+    assert "bare `src/b.py:1` here" in out  # bare reference untouched
+
+
 def test_verify_citations_empty_when_no_docs_dir(tmp_path):
     ledger = vc.verify_citations(tmp_path / "nope", tmp_path, fix=False)
     assert ledger == {

@@ -23,20 +23,33 @@ _CITATION_RE = re.compile(
 )
 
 
+def _iter_citations(text: str):
+    """Yield (match, {path, line(int), token}) for every citation+pin pair in
+    `text`. The match carries the span offsets so a caller can rewrite a single
+    citation in place without disturbing identical text elsewhere on the page.
+    Citations whose pin token is empty are skipped (a pin with no token can't
+    be verified). Never raises.
+    """
+    for m in _CITATION_RE.finditer(text):
+        token = m.group("token").strip()
+        if not token:
+            continue
+        yield (
+            m,
+            {
+                "path": m.group("path"),
+                "line": int(m.group("line")),
+                "token": token,
+            },
+        )
+
+
 def _parse_page_citations(text: str) -> list[dict]:
     """Return [{path, line(int), token}] for every citation+pin pair in `text`.
     Citations whose pin token is empty are skipped (a pin with no token can't
     be verified). Never raises.
     """
-    out: list[dict] = []
-    for m in _CITATION_RE.finditer(text):
-        token = m.group("token").strip()
-        if not token:
-            continue
-        out.append(
-            {"path": m.group("path"), "line": int(m.group("line")), "token": token}
-        )
-    return out
+    return [cit for _m, cit in _iter_citations(text)]
 
 
 def _classify_citation(repo_root: Path, cit: dict) -> dict:
@@ -95,8 +108,13 @@ def verify_citations(
             text = md.read_text()
         except OSError:
             continue
-        new_text = text
-        for cit in _parse_page_citations(text):
+        # Rebuild the page from verbatim segments, splicing each relocated
+        # citation only at its own match offsets. A page-global str.replace
+        # would corrupt look-alikes: a second same-path citation whose line
+        # equals this one's new line, or a bare `path:line` prose reference.
+        pieces: list[str] = []
+        last = 0
+        for m, cit in _iter_citations(text):
             ledger["checked"] += 1
             res = _classify_citation(repo_root, cit)
             status = res["status"]
@@ -114,7 +132,11 @@ def verify_citations(
                 if fix:
                     old_span = f"`{cit['path']}:{cit['line']}`"
                     new_span = f"`{cit['path']}:{res['new_line']}`"
-                    new_text = new_text.replace(old_span, new_span)
+                    # m.group(0) is `path:line`<ws><!--pin:...-->; the code span
+                    # is at offset 0, so replace exactly that one occurrence.
+                    pieces.append(text[last : m.start()])
+                    pieces.append(m.group(0).replace(old_span, new_span, 1))
+                    last = m.end()
             elif status == "ambiguous":
                 ledger["ambiguous"].append(
                     {
@@ -135,8 +157,9 @@ def verify_citations(
                     }
                 )
                 review.add(page)
-        if fix and new_text != text:
-            md.write_text(new_text)
+        if fix and pieces:
+            pieces.append(text[last:])
+            md.write_text("".join(pieces))
     ledger["pages_review_needed"] = sorted(review)
     return ledger
 

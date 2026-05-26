@@ -232,3 +232,46 @@ def test_write_no_manifest_when_all_entries_dropped(tmp_path):
     ledger = cm.write_core_manifest(tmp_path, _site(), specs_dir="specs")
     assert ledger["written"] == []
     assert not (tmp_path / "docs" / "site-src" / ".doc-core-manifest.json").exists()
+
+
+import subprocess
+
+
+def test_setup_scaffold_main_writes_manifest(tmp_path):
+    """End-to-end: running setup_scaffold against a host with an agent-authored
+    section + Python source writes .doc-core-manifest.json and reports it."""
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "core.py").write_text("# core\n")
+    cfg = tmp_path / "site.yaml"
+    cfg.write_text(
+        "docs_dir: docs/site-src\n"
+        "theme: material\n"
+        "sections:\n"
+        "  - {key: home, path: index.md, title: Home}\n"
+        "  - key: architecture\n"
+        "    path: architecture/\n"
+        "    title: Architecture\n"
+        "    generator: agent-authored\n"
+    )
+    scaffold = Path(__file__).resolve().parents[2] / "scripts" / "setup_scaffold.py"
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(scaffold),
+            "--repo-root",
+            str(tmp_path),
+            "--config",
+            str(cfg),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    out = _json.loads(r.stdout)
+    assert out["core_manifest"]["written"] == ["docs/site-src/.doc-core-manifest.json"]
+    art = _json.loads(
+        (tmp_path / "docs" / "site-src" / ".doc-core-manifest.json").read_text()
+    )
+    assert [p["key"] for p in art["pages"]] == ["system-overview"]
+    assert art["pages"][0]["source_files"] == ["pkg/**/*.py"]

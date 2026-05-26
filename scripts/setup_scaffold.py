@@ -22,6 +22,7 @@ import yaml
 # its own dir on sys.path[0]; this makes that explicit and import-safe too.)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import contracts_doc  # noqa: E402
+import core_manifest  # noqa: E402
 import setup_discover  # noqa: E402
 import site_structure  # noqa: E402
 
@@ -72,6 +73,7 @@ def main() -> int:
     )
 
     result["contracts"] = contracts_doc.generate_contracts(args.repo_root, site)
+    result["core_manifest"] = core_manifest.write_core_manifest(args.repo_root, site)
     print(json.dumps(result, indent=2))
     return 0
 

@@ -595,6 +595,20 @@ def _resolve_docs_dir(config: dict) -> str | None:
     return None
 
 
+def _load_core_manifest_pages(repo_root: Path, docs_dir: str) -> list[dict]:
+    """The validated ``pages`` list from ``<docs_dir>/.doc-core-manifest.json``,
+    or ``[]`` when the manifest is absent, unreadable, or carries no pages list.
+    Never raises. Shared by ``run_bootstrap_core`` and ``compute_core_drift`` so
+    both read the manifest through one contract.
+    """
+    manifest_path = repo_root / docs_dir / ".doc-core-manifest.json"
+    if not manifest_path.exists():
+        return []
+    manifest = load_json(manifest_path)
+    pages = manifest.get("pages") if isinstance(manifest, dict) else None
+    return pages if isinstance(pages, list) else []
+
+
 def compute_source_drift(repo_root: Path, config: dict, prs: list[dict]) -> list[dict]:
     """Run the source-map generator and return drifted pages for this batch.
     Changed files = union of every PR's files[] (dict-with-path or plain string).
@@ -1141,9 +1155,8 @@ def run_bootstrap_core(
     if not manifest_path.exists():
         print("no core manifest; run setup first", file=sys.stderr)
         return 0
-    manifest = load_json(manifest_path)
-    pages = manifest.get("pages") if isinstance(manifest, dict) else None
-    if not isinstance(pages, list) or not pages:
+    pages = _load_core_manifest_pages(repo_root, docs_dir)
+    if not pages:
         return 0
 
     today = today or datetime.now(timezone.utc).date().isoformat()

@@ -529,6 +529,54 @@ def _page_target_is_editable(rel_posix: str, editable_globs: list[str]) -> bool:
     )
 
 
+def _core_page_skeleton(page: dict) -> str:
+    """A deterministic, diagram-free Markdown body for a bootstrapped core page:
+    a rationale stub the human must fill, a source-file inventory, and a
+    gotchas/layering stub. No mermaid (waits on C3); no fabricated C1 pins
+    (the production page-author emits verified pins).
+    """
+    title = page.get("title") or page.get("key") or "Component"
+    src = page.get("source_files") or []
+    lines = [
+        f"# {title}",
+        "",
+        "TODO(human): rationale — why this component exists and its role in the system.",
+        "",
+        "## Source files",
+        "",
+    ]
+    if src:
+        lines.extend(f"- `{p}`" for p in src)
+    else:
+        lines.append("_No source files mapped._")
+    lines += [
+        "",
+        "## Gotchas & layering rules",
+        "",
+        "TODO(human): rationale — accreted rules and constraints not derivable "
+        "from current source.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _synthesize_core_page(target_path: Path, page: dict, today: str) -> None:
+    """Dry-run stand-in for the production page-author: write a C2 core page
+    (agent-authored frontmatter built from the manifest entry + injected
+    ``today``, then the diagram-free skeleton). Mirrors the nightly dry-run
+    synth but is manifest-aware.
+    """
+    import frontmatter_contract as fmc
+
+    fm = fmc.agent_authored_frontmatter_text(
+        description=page.get("title") or page.get("key") or "",
+        source_files=page.get("source_files") or [],
+        last_reviewed=today,
+        status="draft",
+    )
+    target_path.write_text(fm + _core_page_skeleton(page))
+
+
 def compute_source_drift(repo_root: Path, config: dict, prs: list[dict]) -> list[dict]:
     """Run the source-map generator and return drifted pages for this batch.
     Changed files = union of every PR's files[] (dict-with-path or plain string).

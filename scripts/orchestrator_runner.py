@@ -702,6 +702,64 @@ def _citation_drift_whats_new_lines(ledger: dict) -> list[str]:
     return lines
 
 
+def compute_core_drift(
+    repo_root: Path,
+    config: dict,
+    drifted_pages: list[dict],
+    citation_ledger: dict,
+) -> list[dict]:
+    """Canonical-core pages (from ``.doc-core-manifest.json``) that M flagged as
+    source-drifted or C1 flagged as citation ``gone``/``ambiguous``. Flag-only:
+    reads the manifest and the already-computed M/C1 results, **writes nothing to
+    any page and dispatches nothing**. Surfacing is independent of page status —
+    a ``reviewed`` page that drifts is still surfaced so a human re-reviews.
+
+    Returns a deterministically sorted list of ``{"page", "reasons"}`` where
+    ``reasons`` is an ordered subset of ``["source", "citation"]``. Empty list
+    when there is no docs_dir, no manifest, or no core page drifted.
+    """
+    docs_dir = _resolve_docs_dir(config)
+    if docs_dir is None:
+        return []
+    core_pages = {
+        p["page"]
+        for p in _load_core_manifest_pages(repo_root, docs_dir)
+        if isinstance(p, dict) and isinstance(p.get("page"), str)
+    }
+    if not core_pages:
+        return []
+    source_drifted = {
+        d["page"]
+        for d in (drifted_pages or [])
+        if isinstance(d, dict) and isinstance(d.get("page"), str)
+    }
+    citation_drifted = {
+        e["page"]
+        for key in ("gone", "ambiguous")
+        for e in ((citation_ledger or {}).get(key) or [])
+        if isinstance(e, dict) and isinstance(e.get("page"), str)
+    }
+    out: list[dict] = []
+    for page in sorted(core_pages & (source_drifted | citation_drifted)):
+        reasons = []
+        if page in source_drifted:
+            reasons.append("source")
+        if page in citation_drifted:
+            reasons.append("citation")
+        out.append({"page": page, "reasons": reasons})
+    return out
+
+
+def _core_drift_whats_new_lines(core_drifted: list[dict]) -> list[str]:
+    """What's-New block for drifted canonical-core pages (empty list -> no block)."""
+    if not core_drifted:
+        return []
+    lines = ["### Core pages to review (drift)"]
+    for d in core_drifted:
+        lines.append(f"- {d['page']} ({', '.join(d['reasons'])})")
+    return lines
+
+
 def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     state_path = repo_root / ".engineering-docs-agent" / "state.json"

@@ -1,7 +1,7 @@
 """State and config I/O with schema validation. Hard-fail on operator errors."""
 
 from __future__ import annotations
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 import json
 import jsonschema
@@ -72,6 +72,42 @@ def _validate_lens_paths_are_editable(config: dict) -> None:
         )
 
 
+def _validate_site_sections(config: dict) -> None:
+    """Cross-field checks for the optional site: block.
+
+    - section keys are unique
+    - every section path resolves *inside* docs_dir (no traversal/escape)
+    Schema (templates/config.schema.json) already enforces presence/types
+    and the generator enum; this covers what schema can't express.
+    """
+    site = config.get("site")
+    if not site:
+        return
+    docs_dir = (site.get("docs_dir") or "").rstrip("/")
+    sections = site.get("sections", []) or []
+
+    seen: set[str] = set()
+    dupes: list[str] = []
+    for s in sections:
+        k = s.get("key", "")
+        if k in seen:
+            dupes.append(k)
+        seen.add(k)
+    if dupes:
+        raise ConfigError(f"site.sections has duplicate key(s): {sorted(set(dupes))}")
+
+    base = PurePosixPath(docs_dir)
+    for s in sections:
+        rel = (s.get("path") or "").rstrip("/")
+        full = base / rel
+        # Reject any path that climbs out of docs_dir.
+        if ".." in PurePosixPath(rel).parts or not str(full).startswith(docs_dir):
+            raise ConfigError(
+                f"site.section '{s.get('key')}' path {rel!r} resolves outside "
+                f"docs_dir {docs_dir!r}"
+            )
+
+
 def load_config_validated(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ConfigError(f"config not found: {path}")
@@ -82,6 +118,7 @@ def load_config_validated(path: Path) -> dict[str, Any]:
     except jsonschema.ValidationError as e:
         raise ConfigError(f"config invalid at {e.json_path}: {e.message}") from e
     _validate_lens_paths_are_editable(raw)
+    _validate_site_sections(raw)
     return raw
 
 

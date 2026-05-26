@@ -244,3 +244,53 @@ def test_bootstrap_rejects_non_editable_page(tmp_path, monkeypatch, capsys):
     assert calls == []
     ledger = _json.loads(capsys.readouterr().out)
     assert any(r.startswith("unsafe_page_path:") for r in ledger["reasons"])
+
+
+def test_main_routes_bootstrap_core(monkeypatch):
+    seen = {}
+
+    def fake_bootstrap(repo_root, *, dry_run_dir, today=None):
+        seen["repo_root"] = repo_root
+        seen["dry_run_dir"] = dry_run_dir
+        seen["today"] = today
+        return 0
+
+    def fake_run(*a, **k):
+        seen["run_called"] = True
+        return 0
+
+    monkeypatch.setattr(runner, "run_bootstrap_core", fake_bootstrap)
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "prog",
+            "--repo-root",
+            "/x",
+            "--bootstrap-core",
+            "--dry-run-subagents",
+            "/fakes",
+            "--today",
+            "2026-05-26",
+        ],
+    )
+    rc = runner.main()
+    assert rc == 0
+    assert seen["today"] == "2026-05-26"
+    assert str(seen["repo_root"]) == "/x"
+    assert "run_called" not in seen  # nightly run() not invoked
+
+
+def test_main_default_routes_nightly_run(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(runner, "run", lambda *a, **k: seen.update({"run": True}) or 0)
+    monkeypatch.setattr(
+        runner,
+        "run_bootstrap_core",
+        lambda *a, **k: seen.update({"bootstrap": True}) or 0,
+    )
+    monkeypatch.setattr(sys, "argv", ["prog", "--repo-root", "/x"])
+    rc = runner.main()
+    assert rc == 0
+    assert seen == {"run": True}

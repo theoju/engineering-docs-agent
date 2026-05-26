@@ -1339,7 +1339,19 @@ def main() -> int:
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--dry-run-subagents", type=Path, default=None)
     parser.add_argument("--no-pr", action="store_true")
+    parser.add_argument(
+        "--bootstrap-core",
+        action="store_true",
+        help="C2: author missing canonical-core pages from the manifest, then exit.",
+    )
+    parser.add_argument(
+        "--today", default=None, help="ISO date for last_reviewed (bootstrap-core)."
+    )
     args = parser.parse_args()
+    if args.bootstrap_core:
+        return run_bootstrap_core(
+            args.repo_root, dry_run_dir=args.dry_run_subagents, today=args.today
+        )
     return run(args.repo_root, dry_run_dir=args.dry_run_subagents, no_pr=args.no_pr)
 
 

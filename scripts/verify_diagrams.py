@@ -116,6 +116,22 @@ def ledger_ok(ledger: dict) -> bool:
 # Browser layer (requires Playwright — guarded by _PLAYWRIGHT_AVAILABLE)
 # ---------------------------------------------------------------------------
 
+# Mermaid renders asynchronously; wait until every .mermaid element has either
+# produced an <svg> or surfaced an error, rather than sleeping a fixed interval
+# (a flat sleep risks a FALSE count_mismatch on a slow CI runner). A page with no
+# diagram / no loader script never settles and times out -> we then measure as-is.
+_RENDER_SETTLED_JS = r"""
+() => {
+  const els = Array.from(document.querySelectorAll('.mermaid, pre.mermaid'));
+  if (els.length === 0) return true;
+  return els.every(el =>
+    el.querySelector('svg') ||
+    /syntax error/i.test(el.textContent || '') ||
+    el.querySelector('[class*="error"]') !== null
+  );
+}
+"""
+
 # In-page measurement: per .mermaid element, does it carry a real <svg> with
 # non-zero geometry and NO Mermaid error signature? Returns one dict per element.
 _MEASURE_JS = r"""
@@ -129,7 +145,8 @@ _MEASURE_JS = r"""
       /syntax error/i.test(txt) ||
       el.querySelector('[class*="error"]') !== null ||
       (svg && /error/i.test(svg.getAttribute('aria-roledescription') || ''));
-    return { hasSvg: !!svg, w: box.width, h: box.height, hasError };
+    return { hasSvg: !!svg, w: box.width, h: box.height, hasError,
+             errText: hasError ? txt.trim().slice(0, 120) : "" };
   });
 }
 """
@@ -152,7 +169,8 @@ def _serve(site_dir: Path):
 
 def _assert_page(page_obj, url: str) -> dict:
     """Load url, wait for Mermaid to settle, and measure every .mermaid element.
-    Captures same-origin 4xx/5xx responses as asset errors."""
+    Captures same-origin 4xx/5xx responses as asset errors. Never raises: a
+    navigation/runtime error is recorded as a failed page (http_status 0)."""
     asset_errors: list[str] = []
 
     def _on_response(resp):
@@ -161,18 +179,31 @@ def _assert_page(page_obj, url: str) -> dict:
             asset_errors.append(f"{name} {resp.status}")
 
     page_obj.on("response", _on_response)
-    resp = page_obj.goto(url, wait_until="load")
-    http_status = resp.status if resp else 0
-    # Give Mermaid time to render (or to inject its error box).
-    page_obj.wait_for_timeout(1500)
-    measured = page_obj.evaluate(_MEASURE_JS)
-    page_obj.remove_listener("response", _on_response)
+    try:
+        resp = page_obj.goto(url, wait_until="load")
+        http_status = resp.status if resp else 0
+        try:
+            page_obj.wait_for_function(_RENDER_SETTLED_JS, timeout=5000)
+        except Exception:
+            pass  # blank/no-loader page never settles — measure as-is
+        measured = page_obj.evaluate(_MEASURE_JS)
+    except Exception as exc:  # navigation/runtime failure -> recorded, not raised
+        return {
+            "http_status": 0,
+            "rendered_ok": 0,
+            "error_boxes": [],
+            "asset_errors": [str(exc)],
+        }
+    finally:
+        page_obj.remove_listener("response", _on_response)
     rendered_ok = sum(
         1
         for m in measured
         if m["hasSvg"] and m["w"] > 0 and m["h"] > 0 and not m["hasError"]
     )
-    error_boxes = ["Syntax error in text" for m in measured if m["hasError"]]
+    error_boxes = [
+        m.get("errText") or "mermaid error" for m in measured if m["hasError"]
+    ]
     return {
         "http_status": http_status,
         "rendered_ok": rendered_ok,
@@ -220,6 +251,11 @@ def verify_site(site_dir: Path, source_dir: Path, fixtures_dir: Path) -> dict:
     """Full gate: Phase A self-test handshake, then Phase B per-page verification
     of every source page that declares a Mermaid fence."""
     self_test = run_self_test(fixtures_dir)
+    # Don't scan/load if the gate can't prove itself (self-test failed) or
+    # Playwright is unavailable — returning here avoids calling sync_playwright()
+    # (which is None without Playwright) and never certifies on a failed handshake.
+    if not _PLAYWRIGHT_AVAILABLE or not self_test["ok"]:
+        return build_ledger(self_test, [])
     expected = scan_mermaid_sources(source_dir)
     page_results: list[dict] = []
     if expected:

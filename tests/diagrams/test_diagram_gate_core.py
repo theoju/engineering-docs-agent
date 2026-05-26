@@ -6,6 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 import verify_diagrams as vd  # noqa: E402
 
+FIX_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "diagrams" / "render"
+
 
 def test_scan_counts_mermaid_fences(tmp_path):
     (tmp_path / "core").mkdir()
@@ -119,3 +121,16 @@ def test_ledger_ok_true_when_clean_and_selftest_ok():
 def test_ledger_not_ok_when_selftest_failed():
     ledger = vd.build_ledger({"good": "pass", "broken": "pass", "ok": False}, [])
     assert vd.ledger_ok(ledger) is False
+
+
+def test_verify_site_returns_clean_ledger_without_playwright(monkeypatch, tmp_path):
+    # Fix-1 guard: verify_site must not call into Playwright when it's absent.
+    monkeypatch.setattr(vd, "_PLAYWRIGHT_AVAILABLE", False)
+    site = tmp_path / "site"
+    site.mkdir()
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "good.md").write_text("```mermaid\ngraph TD; A-->B;\n```\n")
+    ledger = vd.verify_site(site, src, FIX_DIR)
+    assert ledger["self_test"]["ok"] is False
+    assert ledger["checked_pages"] == 0  # did not scan/load

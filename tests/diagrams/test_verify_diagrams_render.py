@@ -47,3 +47,15 @@ def test_verify_site_flags_count_mismatch(tmp_path):
 def test_assert_page_detects_error_box():
     result = vd._render_one(FIX, "broken.html")
     assert result["error_boxes"], "broken mermaid must surface an error box"
+
+
+def test_assert_page_asset404_flags_asset_error():
+    result = vd._render_one(FIX, "asset404.html")
+    assert any("missing.css" in a for a in result["asset_errors"])
+
+
+def test_assert_page_blank_renders_nothing():
+    result = vd._render_one(FIX, "blank.html")
+    assert result["http_status"] == 200
+    assert result["rendered_ok"] == 0
+    assert result["error_boxes"] == []

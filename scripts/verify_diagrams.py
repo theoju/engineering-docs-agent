@@ -59,9 +59,7 @@ def source_to_built_urls(page: str) -> list[str]:
     stem = page[:-3] if page.endswith(".md") else page
     name = stem.rsplit("/", 1)[-1]
     if name == "index":
-        return [
-            f"{stem}.html"
-        ]  # index.md -> index.html ; foo/index.md -> foo/index.html
+        return [f"{stem}.html"]
     return [f"{stem}/index.html", f"{stem}.html"]
 
 

@@ -28,7 +28,7 @@ def test_main_require_hard_fails_when_playwright_absent(monkeypatch, tmp_path):
     assert rc != 0
 
 
-def test_main_self_test_only_requires_playwright(monkeypatch, tmp_path):
+def test_main_self_test_only_skips_when_playwright_absent(monkeypatch, tmp_path):
     monkeypatch.setattr(vd, "_PLAYWRIGHT_AVAILABLE", False)
     rc = vd.main(
         ["--site-dir", str(tmp_path), "--source-dir", str(tmp_path), "--self-test-only"]

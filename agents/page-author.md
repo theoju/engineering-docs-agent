@@ -26,7 +26,7 @@ Voice must match the provided samples.
 - `lens`: lens name (e.g. "core")
 - `summaries`: list of `pr-summarizer` outputs that affect this page
 - `voice_samples`: list of `{path, content}` — recent pages from the same lens, plus CLAUDE.md content if available, plus optional `docs-agent-voice.md` content
-- `frontmatter_template`: dict with required keys per spec §6.1 (`status`, `sources`, `synthesized_into`)
+- `frontmatter_template`: dict of the frontmatter keys the caller wants written. The required set is generator-aware (see `scripts/frontmatter_contract.py`): the default authoring path uses `status`, `sources`, `synthesized_into`; `agent-authored` (Capability C2 core) pages use `description`, `source_files`, `last_reviewed`, `status`.
 
 ## Output schema (canonical)
 

@@ -6,7 +6,7 @@ instead of invoking Claude.
 """
 
 from __future__ import annotations
-import argparse, json, os, subprocess, sys
+import argparse, fnmatch, json, os, subprocess, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -519,6 +519,16 @@ def dispatch_validated(
     return raw, dispatch_reasons
 
 
+def _page_target_is_editable(rel_posix: str, editable_globs: list[str]) -> bool:
+    """True if a repo-relative page path may be authored: it matches at least
+    one ``agent_editable_paths`` glob, or no globs are configured (permissive).
+    Shared by the nightly authoring loop and ``run_bootstrap_core``.
+    """
+    return not editable_globs or any(
+        fnmatch.fnmatch(rel_posix, g) for g in editable_globs
+    )
+
+
 def compute_source_drift(repo_root: Path, config: dict, prs: list[dict]) -> list[dict]:
     """Run the source-map generator and return drifted pages for this batch.
     Changed files = union of every PR's files[] (dict-with-path or plain string).
@@ -744,7 +754,6 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         summaries.append(summary_with_pr)
 
     # Page authoring: batch doc_targets per (lens, page_hint).
-    import fnmatch
     import frontmatter_contract as fmc
 
     editable_globs = config.get("docs", {}).get("agent_editable_paths", [])
@@ -766,9 +775,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         except ValueError:
             add_partial(state, f"unsafe_page_path: {hint}")
             continue
-        if editable_globs and not any(
-            fnmatch.fnmatch(str(rel), g) for g in editable_globs
-        ):
+        if not _page_target_is_editable(str(rel), editable_globs):
             add_partial(state, f"unsafe_page_path: {rel}")
             continue
         target_path.parent.mkdir(parents=True, exist_ok=True)

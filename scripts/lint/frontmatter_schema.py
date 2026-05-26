@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 import yaml
 
+# import sibling scripts/ module (first lint rule to do so; see archive_indexes.py)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import frontmatter_contract as fc  # noqa: E402
 

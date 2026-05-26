@@ -153,3 +153,27 @@ def test_section_generator_for_accepts_str_page():
         fc.section_generator_for("/r/docs/site-src/core/a.md", _CONFIG)
         == "agent-authored"
     )
+
+
+def test_default_frontmatter_dict_shape():
+    d = fc.default_frontmatter_dict(["https://pr/1"])
+    assert d == {"status": "draft", "sources": ["https://pr/1"], "synthesized_into": []}
+    assert set(fc.DEFAULT_REQUIRED) <= set(d)
+
+
+def test_default_frontmatter_dict_empty_sources():
+    assert fc.default_frontmatter_dict() == {
+        "status": "draft",
+        "sources": [],
+        "synthesized_into": [],
+    }
+
+
+def test_default_frontmatter_text_is_valid_and_complete():
+    import yaml as _yaml
+
+    text = fc.default_frontmatter_text()
+    assert text.startswith("---\n") and text.endswith("---\n")
+    body = _yaml.safe_load(text.split("---", 2)[1])
+    assert set(fc.DEFAULT_REQUIRED) <= set(body)
+    assert body["status"] == "draft"

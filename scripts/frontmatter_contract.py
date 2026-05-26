@@ -28,6 +28,11 @@ def section_generator_for(page: Path | str, config: dict) -> str | None:
     page (longest match wins, so a nested section beats its parent). Returns
     None when there is no ``site:`` block, no ``docs_dir``, or no match — which
     yields the default field set. Never raises (malformed config -> None).
+
+    ``page`` must be in the same path frame as ``docs_dir`` (absolute or
+    repo-relative) for the prefix match to fire; a docs_dir-relative or bare
+    page path will not match and yields the default field set. Never raises
+    (malformed config -> None).
     """
     site = config.get("site") if isinstance(config, dict) else None
     if not isinstance(site, dict):
@@ -56,3 +61,13 @@ def section_generator_for(page: Path | str, config: dict) -> str | None:
             best_len = len(full)
             best_gen = s.get("generator")
     return best_gen
+
+
+def default_frontmatter_dict(sources: list[str] | None = None) -> dict:
+    """The default (non-agent-authored) frontmatter the orchestrator authors."""
+    return {"status": "draft", "sources": list(sources or []), "synthesized_into": []}
+
+
+def default_frontmatter_text() -> str:
+    """The default frontmatter block for the dry-run page synthesizer."""
+    return "---\nstatus: draft\nsources: []\nsynthesized_into: []\n---\n"

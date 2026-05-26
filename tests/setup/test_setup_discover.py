@@ -95,3 +95,20 @@ def test_pages_publishable_only_mkdocs_on_actions():
     assert detect_pages_publishable("docusaurus", "github_actions") is False
     assert detect_pages_publishable("mkdocs", "gitlab_ci") is False
     assert detect_pages_publishable(None, "github_actions") is False
+
+
+def test_discover_reports_pages_publishable_for_mkdocs_actions(tmp_path):
+    (tmp_path / "mkdocs.yml").write_text("site_name: x\n")
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    from setup_discover import discover
+
+    out = discover(tmp_path)
+    assert out["pages_publishable"] is True
+
+
+def test_discover_not_publishable_without_framework(tmp_path):
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    from setup_discover import discover
+
+    out = discover(tmp_path)
+    assert out["pages_publishable"] is False

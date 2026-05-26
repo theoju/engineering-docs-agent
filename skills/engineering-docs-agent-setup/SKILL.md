@@ -31,6 +31,7 @@ Run in the host repo's working directory. Accepts `--dry-run` flag to emit propo
 4. Compose final config dict.
 5. If `--dry-run`, dump YAML to stdout and exit.
 6. Write `.engineering-docs-agent/config.yml`, `.engineering-docs-agent/state.json` (initial), `.github/workflows/docs-agent-run.yml`, `.github/workflows/docs-agent-verify.yml`, optionally `docs-agent-glossary.yml`.
+   6a. If discovery's `pages_publishable` is true (MkDocs + GitHub Actions) OR the user supplied a `publishing.build_command`, also write `.github/workflows/docs-agent-pages.yml` from `templates/workflow-pages.yml`. For a non-MkDocs host, substitute the "Build site" run step with the `build_command` and the `upload-pages-artifact` `path:` with `publishing.site_dir`. Set `publishing.build_workflow: docs-agent-pages.yml` and `publishing.base_url` via `derive_pages_base_url(owner, repo, cname)`. If neither condition holds, skip the pages workflow and print: "Pages deploy not scaffolded (no MkDocs site and no publishing.build_command) — add one to enable publishing." `configure-pages(enablement:true)` sets the repo's Pages source to GitHub Actions on first run.
 7. Scaffold the documentation site structure:
    `python <plugin_root>/scripts/setup_scaffold.py --repo-root . --site-name "<repo title>"`
    This writes `docs/site-src/` (sections + grid-card home + .pages) and a

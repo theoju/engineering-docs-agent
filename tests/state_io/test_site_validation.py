@@ -108,3 +108,53 @@ site:
 def test_no_site_block_is_fine(tmp_path: Path):
     cfg = load_config_validated(_write(tmp_path, ""))
     assert "site" not in cfg
+
+
+def test_source_absolute_path_raises(tmp_path: Path):
+    with pytest.raises(ConfigError) as exc:
+        load_config_validated(
+            _write(
+                tmp_path,
+                """
+site:
+  docs_dir: docs/site-src
+  sections:
+    - { key: archive, path: archive/, title: Archive, generator: archive-index,
+        sources: ["/etc/passwd"] }
+""",
+            )
+        )
+    assert "source" in str(exc.value).lower()
+
+
+def test_source_traversal_raises(tmp_path: Path):
+    with pytest.raises(ConfigError) as exc:
+        load_config_validated(
+            _write(
+                tmp_path,
+                """
+site:
+  docs_dir: docs/site-src
+  sections:
+    - { key: archive, path: archive/, title: Archive, generator: archive-index,
+        sources: ["../../secrets"] }
+""",
+            )
+        )
+    assert "source" in str(exc.value).lower()
+
+
+def test_relative_sources_pass(tmp_path: Path):
+    cfg = load_config_validated(
+        _write(
+            tmp_path,
+            """
+site:
+  docs_dir: docs/site-src
+  sections:
+    - { key: archive, path: archive/, title: Archive, generator: archive-index,
+        sources: [docs/superpowers/specs, docs/superpowers/plans] }
+""",
+        )
+    )
+    assert cfg["site"]["sections"][0]["key"] == "archive"

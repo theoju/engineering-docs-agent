@@ -173,3 +173,24 @@ publishing: { base_url: https://x, build_workflow: deploy.yml, url_map_rule: sta
 notifications: {}
 """)
     validate(cfg, SCHEMA)
+
+
+def test_site_section_repo_url_base_allowed():
+    cfg = yaml.safe_load("""
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: {}
+sources: { git: { host: github } }
+lint: {}
+publishing: { base_url: https://x, build_workflow: deploy.yml, url_map_rule: standard }
+notifications: {}
+site:
+  docs_dir: docs/site-src
+  sections:
+    - { key: archive, path: archive/, title: Archive, generator: archive-index,
+        sources: [docs/superpowers/specs], repo_url_base: https://h/blob/main/ }
+""")
+    validate(cfg, SCHEMA)

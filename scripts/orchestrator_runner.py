@@ -595,6 +595,23 @@ def _resolve_docs_dir(config: dict) -> str | None:
     return None
 
 
+def _load_core_manifest_pages(repo_root: Path, docs_dir: str) -> list[dict]:
+    """The validated ``pages`` list from ``<docs_dir>/.doc-core-manifest.json``,
+    or ``[]`` when the manifest is absent, unreadable, or carries no pages list.
+    Never raises. Shared by ``run_bootstrap_core`` and ``compute_core_drift`` so
+    both read the manifest through one contract.
+    """
+    manifest_path = repo_root / docs_dir / ".doc-core-manifest.json"
+    if not manifest_path.exists():
+        return []
+    try:
+        manifest = load_json(manifest_path)
+    except OSError:  # path is a dir, unreadable, etc. — degrade to no pages
+        return []
+    pages = manifest.get("pages") if isinstance(manifest, dict) else None
+    return pages if isinstance(pages, list) else []
+
+
 def compute_source_drift(repo_root: Path, config: dict, prs: list[dict]) -> list[dict]:
     """Run the source-map generator and return drifted pages for this batch.
     Changed files = union of every PR's files[] (dict-with-path or plain string).
@@ -685,6 +702,67 @@ def _citation_drift_whats_new_lines(ledger: dict) -> list[str]:
         lines.append(f"- {g['page']} — citation gone: {g['path']} ({g['token']})")
     for a in ledger.get("ambiguous", []):
         lines.append(f"- {a['page']} — ambiguous: {a['path']} ({a['token']})")
+    return lines
+
+
+def compute_core_drift(
+    repo_root: Path,
+    config: dict,
+    drifted_pages: list[dict],
+    citation_ledger: dict,
+) -> list[dict]:
+    """Canonical-core pages (from ``.doc-core-manifest.json``) that M flagged as
+    source-drifted or C1 flagged as citation ``gone``/``ambiguous``. Flag-only:
+    reads the manifest and the already-computed M/C1 results, **writes nothing to
+    any page and dispatches nothing**. Surfacing is independent of page status —
+    a ``reviewed`` page that drifts is still surfaced so a human re-reviews.
+
+    Returns a deterministically sorted list of ``{"page", "reasons"}`` where
+    ``reasons`` is an ordered subset of ``["source", "citation"]``. Empty list
+    when there is no docs_dir, no manifest, or no core page drifted.
+    """
+    # Non-empty output requires site.docs_dir: when a host has no site: block M
+    # and C1 produce no drift, so the intersection is empty regardless of the
+    # docs.source_dir fallback _resolve_docs_dir may return here.
+    docs_dir = _resolve_docs_dir(config)
+    if docs_dir is None:
+        return []
+    core_pages = {
+        p["page"]
+        for p in _load_core_manifest_pages(repo_root, docs_dir)
+        if isinstance(p, dict) and isinstance(p.get("page"), str)
+    }
+    if not core_pages:
+        return []
+    source_drifted = {
+        d["page"]
+        for d in (drifted_pages or [])
+        if isinstance(d, dict) and isinstance(d.get("page"), str)
+    }
+    citation_drifted = {
+        e["page"]
+        for key in ("gone", "ambiguous")
+        for e in ((citation_ledger or {}).get(key) or [])
+        if isinstance(e, dict) and isinstance(e.get("page"), str)
+    }
+    out: list[dict] = []
+    for page in sorted(core_pages & (source_drifted | citation_drifted)):
+        reasons = []
+        if page in source_drifted:
+            reasons.append("source")
+        if page in citation_drifted:
+            reasons.append("citation")
+        out.append({"page": page, "reasons": reasons})
+    return out
+
+
+def _core_drift_whats_new_lines(core_drifted: list[dict]) -> list[str]:
+    """What's-New block for drifted canonical-core pages (empty list -> no block)."""
+    if not core_drifted:
+        return []
+    lines = ["### Core pages to review (drift)"]
+    for d in core_drifted:
+        lines.append(f"- {d['page']} ({', '.join(d['reasons'])})")
     return lines
 
 
@@ -996,6 +1074,17 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         add_partial(state, f"verify_citations_failed: {exc}", info_only=True)
     state["current_run"]["citation_drift"] = citation_ledger
 
+    # Canonical-core drift (C2) — flag-only sibling after M/C1. Intersects the
+    # core manifest with the M/C1 drift results; never edits a page or dispatches.
+    try:
+        core_drifted = compute_core_drift(
+            repo_root, config, drifted_pages, citation_ledger
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
+        core_drifted = []
+        add_partial(state, f"core_drift_failed: {exc}", info_only=True)
+    state["current_run"]["core_drift"] = core_drifted
+
     # Gap detection
     dismissed = set(state.get("dismissed_gap_flags", {}).keys())
     gap_verdicts = []
@@ -1045,6 +1134,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                 entry_lines.append(f"- {g['pr_id']}: {g['reasoning']}")
         entry_lines.extend(_drift_whats_new_lines(drifted_pages))
         entry_lines.extend(_citation_drift_whats_new_lines(citation_ledger))
+        entry_lines.extend(_core_drift_whats_new_lines(core_drifted))
         entry = "\n".join(entry_lines) + "\n\n"
         existing = whats_new.read_text() if whats_new.exists() else ""
         whats_new.write_text(entry + existing)
@@ -1086,6 +1176,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         "partial_reasons": state["current_run"]["partial_reasons"],
         "source_drift": drifted_pages,
         "citation_drift": citation_ledger,
+        "core_drift": core_drifted,
     }
     notifier_result, reasons = dispatch_validated(
         "notifier",
@@ -1141,9 +1232,8 @@ def run_bootstrap_core(
     if not manifest_path.exists():
         print("no core manifest; run setup first", file=sys.stderr)
         return 0
-    manifest = load_json(manifest_path)
-    pages = manifest.get("pages") if isinstance(manifest, dict) else None
-    if not isinstance(pages, list) or not pages:
+    pages = _load_core_manifest_pages(repo_root, docs_dir)
+    if not pages:
         return 0
 
     today = today or datetime.now(timezone.utc).date().isoformat()

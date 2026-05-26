@@ -655,3 +655,57 @@ def test_run_surfaces_source_drift_in_whats_new_and_state(tmp_path):
     assert state["current_run"]["source_drift"] == expected_drift, (
         f"source_drift run state mismatch: {state['current_run'].get('source_drift')}"
     )
+
+
+def test_run_surfaces_core_drift_in_whats_new_and_state(tmp_path):
+    """C2 drift-update stage wiring: a manifest core page that M flags as
+    source-drifted is surfaced under 'Core pages to review (drift)' in the
+    What's-New entry AND recorded in run state. Flag-only — pinned at the helper
+    level (test_core_drift.py); here we pin the run() wiring end-to-end.
+
+    The fake source collector (FAKES) returns PR #1 with a changed file
+    backend/connectors/foo.py, so the seeded core page (source_files glob
+    backend/connectors/*.py) drifts under M and, being in the manifest, surfaces
+    under C2.
+    """
+    connectors_page = "docs/site-src/core/connectors.md"
+    connectors_content = (
+        "---\nsource_files:\n  - backend/connectors/*.py\n---\n# Connectors\n"
+    )
+    state_path = _init_host(tmp_path, seed_files={connectors_page: connectors_content})
+
+    site_block = (
+        "site:\n"
+        "  docs_dir: docs/site-src\n"
+        "  sections:\n"
+        "    - {key: core, path: core, title: Core, generator: agent-authored}\n"
+    )
+    cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
+    cfg.write_text(CONFIG_YAML + site_block)
+
+    manifest = {
+        "version": 1,
+        "pages": [
+            {
+                "key": "connectors",
+                "title": "Connectors",
+                "page": "core/connectors.md",
+                "source_files": ["backend/connectors/*.py"],
+            }
+        ],
+    }
+    (tmp_path / "docs" / "site-src" / ".doc-core-manifest.json").write_text(
+        json.dumps(manifest)
+    )
+
+    rc = _run_inproc(tmp_path, FAKES)
+    assert rc == 0, "run() must exit 0"
+
+    whats_new = (tmp_path / "docs" / "site-src" / "whats-new.md").read_text()
+    assert "### Core pages to review (drift)" in whats_new
+    assert "- core/connectors.md (source)" in whats_new
+
+    state = json.loads(state_path.read_text())
+    assert state["current_run"]["core_drift"] == [
+        {"page": "core/connectors.md", "reasons": ["source"]}
+    ]

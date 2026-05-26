@@ -204,3 +204,28 @@ def test_orchestrator_absolute_path_frame_resolves_agent_authored(tmp_path):
     rc, out = _run([page], config)
     assert out["results"][0]["ok"] is False
     assert "description" in out["results"][0]["message"]
+
+
+def test_agent_authored_status_reviewed_passes_block_rule(tmp_path):
+    """The draft -> reviewed lifecycle (C2 sub-plan 4): an agent-authored page
+    with status: reviewed still satisfies the block rule — the rule checks field
+    presence, not the status value, so a human-reviewed core page is never
+    deleted by the pipeline."""
+    cfg = tmp_path / "c.yml"
+    cfg.write_text(
+        "site:\n  docs_dir: docs/site-src\n  sections:\n"
+        "    - {key: core, path: core/, title: Core, generator: agent-authored}\n"
+    )
+    page = tmp_path / "docs/site-src/core/api.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "---\n"
+        "description: The API layer\n"
+        "source_files: [backend/app/api/router.py]\n"
+        "last_reviewed: 2026-05-26\n"
+        "status: reviewed\n"
+        "---\n\n# API\n"
+    )
+    rc, out = _run([page], cfg)
+    assert rc == 0
+    assert all(r["ok"] for r in out["results"])

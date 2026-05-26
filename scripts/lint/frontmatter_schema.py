@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Any
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import frontmatter_contract as fc  # noqa: E402
+
 RULE_NAME = "frontmatter_schema"
 SEVERITY = "block"
-REQUIRED_FIELDS = ("status", "sources", "synthesized_into")
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -33,7 +35,9 @@ def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
     fm = parse_frontmatter(path.read_text())
     if fm is None:
         return False, "no frontmatter or YAML parse error"
-    missing = [f for f in REQUIRED_FIELDS if f not in fm]
+    generator = fc.section_generator_for(path, config)
+    required = fc.required_fields(generator)
+    missing = [f for f in required if f not in fm]
     if missing:
         return False, f"missing required field(s): {', '.join(missing)}"
     return True, "ok"

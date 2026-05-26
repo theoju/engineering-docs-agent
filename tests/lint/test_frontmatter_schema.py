@@ -50,3 +50,76 @@ def test_no_frontmatter(tmp_path):
     rc, out = _run([FIX / "bad_no_frontmatter.md"], cfg)
     assert rc == 1
     assert "frontmatter" in out["results"][0]["message"].lower()
+
+
+def test_agent_authored_page_passes_with_new_fields(tmp_path):
+    cfg = tmp_path / "c.yml"
+    cfg.write_text(
+        "site:\n"
+        "  docs_dir: docs/site-src\n"
+        "  sections:\n"
+        "    - key: core\n"
+        "      path: core/\n"
+        "      title: Core\n"
+        "      generator: agent-authored\n"
+    )
+    page = tmp_path / "docs/site-src/core/api.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "---\n"
+        "description: The API layer\n"
+        "source_files: [backend/app/api/router.py]\n"
+        "last_reviewed: 2026-05-26\n"
+        "status: draft\n"
+        "---\n\n# API\n"
+    )
+    rc, out = _run([page], cfg)
+    assert rc == 0
+    assert all(r["ok"] for r in out["results"])
+
+
+def test_agent_authored_page_missing_source_files_fails(tmp_path):
+    cfg = tmp_path / "c.yml"
+    cfg.write_text(
+        "site:\n  docs_dir: docs/site-src\n  sections:\n"
+        "    - {key: core, path: core/, title: Core, generator: agent-authored}\n"
+    )
+    page = tmp_path / "docs/site-src/core/api.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "---\ndescription: x\nlast_reviewed: 2026-05-26\nstatus: draft\n---\n\n# API\n"
+    )
+    rc, out = _run([page], cfg)
+    assert rc == 1
+    assert "source_files" in out["results"][0]["message"]
+
+
+def test_agent_authored_rejects_old_default_fields(tmp_path):
+    cfg = tmp_path / "c.yml"
+    cfg.write_text(
+        "site:\n  docs_dir: docs/site-src\n  sections:\n"
+        "    - {key: core, path: core/, title: Core, generator: agent-authored}\n"
+    )
+    page = tmp_path / "docs/site-src/core/api.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "---\nstatus: draft\nsources: []\nsynthesized_into: []\n---\n\n# API\n"
+    )
+    rc, out = _run([page], cfg)
+    assert rc == 1
+    msg = out["results"][0]["message"]
+    assert "description" in msg and "source_files" in msg and "last_reviewed" in msg
+
+
+def test_non_agent_authored_page_keeps_default_set(tmp_path):
+    cfg = tmp_path / "c.yml"
+    cfg.write_text(
+        "site:\n  docs_dir: docs/site-src\n  sections:\n"
+        "    - {key: ops, path: operations/, title: Ops}\n"
+    )
+    page = tmp_path / "docs/site-src/operations/run.md"
+    page.parent.mkdir(parents=True)
+    page.write_text("---\nstatus: accepted\nsources: [a]\n---\n\n# Run\n")
+    rc, out = _run([page], cfg)
+    assert rc == 1
+    assert "synthesized_into" in out["results"][0]["message"]

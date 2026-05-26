@@ -38,8 +38,23 @@ jobs:
         run: python -m playwright install --with-deps chromium
       - name: Run diagram render tests (Playwright now present)
         run: python -m pytest tests/diagrams -q
+      - name: Detect a built docs site
+        id: site
+        # The render tests above already validate the gate's logic in CI. The
+        # build + site gate below only apply where the host actually has a
+        # MkDocs site; with no mkdocs.yml there is nothing to gate (generic-first
+        # degradation), so skip them cleanly rather than fail the build.
+        run: |
+          if [ -e mkdocs.yml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "no mkdocs.yml — skipping build + site gate (render tests validated the gate)"
+          fi
       - name: Build the docs site
+        if: steps.site.outputs.present == 'true'
         run: mkdocs build --strict
       - name: Diagram render gate (required)
+        if: steps.site.outputs.present == 'true'
         # --require => a missing Playwright here is a HARD failure, never a skip.
         run: python scripts/verify_diagrams.py --site-dir site --source-dir docs/site-src --require --json

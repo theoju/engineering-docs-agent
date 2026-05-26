@@ -195,8 +195,8 @@ def test_enablement_and_nojekyll_and_no_jekyll_build():
     text = TPL.read_text()
     assert "enablement: true" in text
     assert ".nojekyll" in text
-    # Must not rely on the legacy Jekyll build path.
-    assert "jekyll" not in text.lower()
+    # The only acceptable "jekyll" is the .nojekyll marker; no legacy Jekyll.
+    assert text.lower().replace(".nojekyll", "").find("jekyll") == -1
 
 def test_default_build_workflow_filename_is_the_scaffold_target():
     # The setup skill writes this file as docs-agent-pages.yml and sets
@@ -251,7 +251,7 @@ jobs:
         run: |
           pip install mkdocs-material
           mkdocs build --strict
-      - name: Disable Jekyll on the built artifact
+      - name: Write .nojekyll so Pages serves the artifact as-is
         run: touch site/.nojekyll
       - uses: actions/upload-pages-artifact@v5
         with:
@@ -539,7 +539,7 @@ jobs:
         run: |
           pip install -r requirements-docs.txt
           mkdocs build --strict
-      - name: Disable Jekyll on the built artifact
+      - name: Write .nojekyll so Pages serves the artifact as-is
         run: touch site/.nojekyll
       - uses: actions/upload-pages-artifact@v5
         with:

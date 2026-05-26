@@ -107,6 +107,15 @@ def _validate_site_sections(config: dict) -> None:
                 f"docs_dir {docs_dir!r}"
             )
 
+    for s in sections:
+        for src in s.get("sources", []) or []:
+            sp = str(src)
+            if sp.startswith("/") or ".." in PurePosixPath(sp).parts:
+                raise ConfigError(
+                    f"site.section '{s.get('key')}' source {sp!r} must be a "
+                    "relative path inside the repo (no absolute or '..' paths)"
+                )
+
 
 def _validate_api_sections(config: dict) -> None:
     """Cross-field checks for api-extract sections (CCE-23 capability API).
@@ -152,7 +161,10 @@ def _validate_api_sections(config: dict) -> None:
 def load_config_validated(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ConfigError(f"config not found: {path}")
-    raw = yaml.safe_load(path.read_text()) or {}
+    try:
+        raw = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as e:
+        raise ConfigError(f"config YAML invalid in {path}: {e}") from e
     schema = json.loads((TEMPLATES_DIR / "config.schema.json").read_text())
     try:
         jsonschema.validate(raw, schema)

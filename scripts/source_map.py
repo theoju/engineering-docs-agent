@@ -1,0 +1,203 @@
+"""doc↔source map generator (capability M).
+
+Resolves each site page's `source_files:` globs against the repo's tracked
+files into a dual-view artifact. `_glob_to_regex` and `_collect_page_patterns`
+are shared with source_drift.py (imported there).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+
+def _page_globs(md: Path) -> tuple[list[str], str | None]:
+    """Return (globs, skip_reason) for one page. globs is the list of string
+    entries in `source_files:` (empty if the page opts out); skip_reason is set
+    for malformed frontmatter or a non-list source_files, else None. Never raises.
+
+    Parses frontmatter directly rather than via archive_indexes.parse_frontmatter:
+    M must distinguish malformed/non-dict frontmatter to record it as a skip
+    reason, but the archive parser deliberately collapses those cases to {}.
+    """
+    try:
+        text = md.read_text()
+    except OSError:
+        return [], "malformed frontmatter"
+    if not text.startswith("---"):
+        return [], None
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return [], None
+    try:
+        fm = yaml.safe_load(parts[1])
+    except yaml.YAMLError:
+        return [], "malformed frontmatter"
+    if not isinstance(fm, dict):
+        return [], "malformed frontmatter"
+    sf = fm.get("source_files")
+    if sf is None:
+        return [], None
+    if not isinstance(sf, list):
+        return [], "source_files is not a list"
+    return [x for x in sf if isinstance(x, str) and x], None
+
+
+def _collect_page_patterns(docs_dir: Path) -> dict[str, list[str]]:
+    """Map each opted-in page (POSIX path relative to docs_dir) to its
+    source_files globs. Pages that opt out (no/empty source_files) or are malformed are omitted.
+    """
+    out: dict[str, list[str]] = {}
+    if not docs_dir.is_dir():
+        return out
+    for md in sorted(docs_dir.rglob("*.md")):
+        globs, _reason = _page_globs(md)
+        if globs:
+            out[md.relative_to(docs_dir).as_posix()] = globs
+    return out
+
+
+def _glob_to_regex(glob: str) -> re.Pattern:
+    """Translate a POSIX path glob to an anchored regex (use `.fullmatch`).
+
+    `**/` matches zero or more path segments (incl. none); `**` matches
+    anything including `/`; `*` matches a run of non-`/`; `?` matches one
+    non-`/`; every other character is escaped. Python 3.9's fnmatch /
+    PurePath.match mishandle `**`, hence this explicit translator.
+    """
+    i, n = 0, len(glob)
+    parts: list[str] = []
+    while i < n:
+        if glob[i : i + 3] == "**/":
+            parts.append("(?:.*/)?")
+            i += 3
+        elif glob[i : i + 2] == "**":
+            parts.append(".*")
+            i += 2
+        elif glob[i] == "*":
+            parts.append("[^/]*")
+            i += 1
+        elif glob[i] == "?":
+            parts.append("[^/]")
+            i += 1
+        else:
+            parts.append(re.escape(glob[i]))
+            i += 1
+    return re.compile("".join(parts))
+
+
+_SKIP_DIRS = {".git", ".venv", "node_modules", "site", "__pycache__"}
+
+
+def _resolve_tracked_files(repo_root: Path) -> list[str]:
+    """Repo-relative POSIX paths of candidate source files. Prefers
+    `git ls-files`; falls back to a filtered rglob when not a git repo.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo_root), "ls-files"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        files = [ln for ln in out.stdout.splitlines() if ln]
+        # empty → unborn repo or staging-only; fall through to rglob below
+        if files:
+            return files
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    files = []
+    for p in repo_root.rglob("*"):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(repo_root)
+        if any(part in _SKIP_DIRS for part in rel.parts):
+            continue
+        files.append(rel.as_posix())
+    return files
+
+
+def generate_source_map(repo_root: Path, docs_dir_rel: str) -> dict:
+    """Write <docs_dir>/.doc-source-map.json (dual view) and return a ledger:
+    {"written": [...], "pages_scanned": N, "mapped_sources": M, "skipped": [...]}.
+    Skips writing (clean) when no page declares source_files.
+    """
+    docs_dir = repo_root / docs_dir_rel
+    pages = sorted(docs_dir.rglob("*.md")) if docs_dir.is_dir() else []
+    patterns: dict[str, list[str]] = {}
+    skipped: list[dict] = []
+    for md in pages:
+        globs, reason = _page_globs(md)
+        page = md.relative_to(docs_dir).as_posix()
+        if reason:
+            skipped.append({"page": page, "reason": reason})
+        elif globs:
+            patterns[page] = globs
+
+    ledger = {
+        "written": [],
+        "pages_scanned": len(pages),
+        "mapped_sources": 0,
+        "skipped": skipped,
+    }
+    if not patterns:
+        return ledger
+
+    tracked = _resolve_tracked_files(repo_root)
+    inverse: dict[str, list[str]] = {}
+    for page in sorted(patterns):
+        regexes = [_glob_to_regex(g) for g in patterns[page]]
+        for f in tracked:
+            if any(r.fullmatch(f) for r in regexes):
+                inverse.setdefault(f, [])
+                if page not in inverse[f]:
+                    inverse[f].append(page)
+
+    artifact = {
+        "version": 1,
+        "_generated": "auto-generated by engineering-docs-agent; do not edit",
+        "map": {k: sorted(inverse[k]) for k in sorted(inverse)},
+        "patterns": {k: patterns[k] for k in sorted(patterns)},
+    }
+    out_rel = f"{docs_dir_rel.rstrip('/')}/.doc-source-map.json"
+    (repo_root / out_rel).write_text(
+        json.dumps(artifact, indent=2) + "\n", encoding="utf-8"
+    )
+    ledger["written"] = [out_rel]
+    ledger["mapped_sources"] = len(inverse)
+    return ledger
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Generate the doc-source map.")
+    ap.add_argument("--repo-root", type=Path, required=True)
+    ap.add_argument("--config", type=Path, required=True)
+    args = ap.parse_args(argv)
+    from state_io import ConfigError, load_config_validated  # scripts/ already on path
+
+    try:
+        config = load_config_validated(args.config)
+    except (ConfigError, yaml.YAMLError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    docs_dir = (config.get("site") or {}).get("docs_dir")
+    if not docs_dir:
+        print(
+            json.dumps(
+                {"written": [], "pages_scanned": 0, "mapped_sources": 0, "skipped": []},
+                indent=2,
+            )
+        )
+        return 0
+    print(json.dumps(generate_source_map(args.repo_root, docs_dir), indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

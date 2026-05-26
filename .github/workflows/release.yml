@@ -8,7 +8,7 @@ on:
 jobs:
   live-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
@@ -27,5 +27,10 @@ jobs:
         run: |
           npm install -g @anthropic-ai/claude-code || true
           which claude || (echo "claude CLI not installed" && exit 1)
+      - name: Assert API key is configured
+        # In CI, env-var auth is the only auth path (no keychain OAuth). Fail
+        # with an actionable message if the secret is missing, rather than
+        # letting the live tests fail opaquely on a None dispatch response.
+        run: '[ -n "$ANTHROPIC_API_KEY" ] || (echo "ANTHROPIC_API_KEY secret not configured" && exit 1)'
       - name: Run live tests
         run: pytest -m live -v

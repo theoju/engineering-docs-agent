@@ -1,4 +1,5 @@
 # conftest.py
+import re
 import sys
 from pathlib import Path
 
@@ -15,7 +16,9 @@ def pytest_collection_modifyitems(config, items):
     CI's regular suite.
     """
     marker_expr = config.getoption("markexpr") or ""
-    if "live" in marker_expr:
+    # Word-boundary match so a future marker whose name merely contains "live"
+    # (e.g. "deliverable") doesn't accidentally disable the default-skip guard.
+    if re.search(r"\blive\b", marker_expr):
         return  # user explicitly opted in; collect normally
     skip_live = pytest.mark.skip(
         reason="live test — run with `pytest -m live` to opt in"

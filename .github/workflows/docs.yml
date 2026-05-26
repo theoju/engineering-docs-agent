@@ -31,9 +31,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install docs tooling
+        # jsonschema + pyyaml are the agent-runtime deps: the tests/diagrams
+        # suite includes the runtime-isolation test, which imports
+        # orchestrator_runner in a subprocess to prove it never pulls in
+        # Playwright. That import needs the agent runtime's own deps present.
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-docs.txt pytest pyyaml
+          python -m pip install -r requirements-docs.txt pytest pyyaml jsonschema
       - name: Install Chromium for Playwright
         run: python -m playwright install --with-deps chromium
       - name: Run diagram render tests (Playwright now present)

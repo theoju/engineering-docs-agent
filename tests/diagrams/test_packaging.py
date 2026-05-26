@@ -40,3 +40,7 @@ def test_docs_workflow_runs_the_gate():
     assert "mkdocs build" in body
     # Scoped to docs / gate files, not every push.
     assert "paths:" in body
+    # The tests/diagrams suite includes the runtime-isolation test, which
+    # imports the agent runtime (orchestrator_runner -> state_io -> jsonschema)
+    # in a subprocess; the CI env must install jsonschema or that import fails.
+    assert "jsonschema" in body

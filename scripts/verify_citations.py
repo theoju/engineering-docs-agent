@@ -58,7 +58,11 @@ def _classify_citation(repo_root: Path, cit: dict) -> dict:
     "new_line"; "ambiguous" adds "lines". Never raises.
     """
     try:
-        lines = (repo_root / cit["path"]).read_text().splitlines()
+        lines = (
+            (repo_root / cit["path"])
+            .read_text(encoding="utf-8", errors="replace")
+            .splitlines()
+        )
     except OSError:
         return {"status": "gone"}
     token = cit["token"]

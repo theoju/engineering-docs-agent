@@ -911,9 +911,16 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     try:
         citation_ledger = compute_citation_drift(repo_root, config, prs)
     except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
-        import verify_citations as _vc
-
-        citation_ledger = _vc._empty_ledger()
+        # Inline the empty ledger: if the failure was importing verify_citations
+        # itself, re-importing here would re-raise and defeat the best-effort guard.
+        citation_ledger = {
+            "checked": 0,
+            "ok": 0,
+            "relocated": [],
+            "ambiguous": [],
+            "gone": [],
+            "pages_review_needed": [],
+        }
         add_partial(state, f"verify_citations_failed: {exc}", info_only=True)
     state["current_run"]["citation_drift"] = citation_ledger
 

@@ -208,6 +208,27 @@ def test_bootstrap_empty_manifest_is_noop(tmp_path, monkeypatch):
     assert calls == []
 
 
+def test_bootstrap_ok_false_payload_is_recorded(tmp_path, monkeypatch, capsys):
+    _host(tmp_path)
+
+    def fake(name, inputs, *, dry_run_dir, cwd=None):
+        return ({"ok": False, "error": "validator rejected"}, [])
+
+    monkeypatch.setattr(runner, "dispatch_validated", fake)
+    rc = runner.run_bootstrap_core(
+        tmp_path, dry_run_dir=tmp_path / "fakes", today="2026-05-26"
+    )
+    assert rc == 0
+    ledger = _json.loads(capsys.readouterr().out)
+    assert ledger["authored"] == []
+    assert any(
+        "page_author_error" in r and "validator rejected" in r
+        for r in ledger["reasons"]
+    )
+    # the page must NOT have been written
+    assert not (tmp_path / "docs/site-src/core/api.md").exists()
+
+
 def test_bootstrap_rejects_non_editable_page(tmp_path, monkeypatch, capsys):
     cfg = _CONFIG_WITH_SITE.replace(
         'agent_editable_paths: ["docs/site-src/**"]',

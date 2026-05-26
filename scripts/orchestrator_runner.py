@@ -1205,6 +1205,9 @@ def run_bootstrap_core(
             if dry_run_dir and not target_path.exists():
                 _synthesize_core_page(target_path, page, today)
             ledger["authored"].append(str(rel))
+        else:
+            err = out.get("error") or "page-author returned ok=false"
+            ledger["reasons"].append(f"page_author_error: {rel}: {err}")
 
     print(json.dumps(ledger, indent=2))
     return 0

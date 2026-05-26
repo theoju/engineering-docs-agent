@@ -1,7 +1,0 @@
-site:
-  docs_dir: tests/fixtures/frontmatter_schema
-  sections:
-    - key: core
-      path: core/
-      title: Core
-      generator: agent-authored

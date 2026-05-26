@@ -93,6 +93,18 @@ is visible in `.engineering-docs-agent/state.json` partial_reasons and in
 Slack/email notifications. See `agents/source-collector.md` Step 5 +
 Forbidden outputs §6 for the agent-side contract.
 
+## Live integration tests
+
+The default `pytest` run is fully mocked — no network, no LLM, no cost. A separate `@pytest.mark.live` gate covers the real-LLM dispatch path:
+
+```bash
+pytest -m live -v
+```
+
+These tests invoke the real `claude` CLI and cost roughly **$1-3 per full pass** (each test ~$0.10-$0.50). They require the `claude` CLI installed and authenticated (OAuth or `ANTHROPIC_API_KEY`), network access, and API quota. Live tests are skipped by default (a `conftest.py` hook); opt in with `-m live`. CI runs them only on tag pushes (`.github/workflows/release.yml`), never per-PR.
+
+What's covered: one `dispatch_subagent` call per payload shape (notifier with a digest, pr-summarizer with PR metadata). The dispatch path is the system-under-test — the kinds of wiring bugs CCE-2 and CCE-3 fixed are exactly what these catch.
+
 ## Architecture
 
 See the [design spec](docs/superpowers/specs/2026-05-19-engineering-docs-agent-design.md).

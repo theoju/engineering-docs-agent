@@ -92,3 +92,48 @@ def default_frontmatter_dict(sources: list[str] | None = None) -> dict:
 def default_frontmatter_text() -> str:
     """The default frontmatter block for the dry-run page synthesizer."""
     return "---\nstatus: draft\nsources: []\nsynthesized_into: []\n---\n"
+
+
+def agent_authored_frontmatter_dict(
+    *,
+    description: str,
+    source_files: list[str],
+    last_reviewed: str,
+    status: str = "draft",
+) -> dict:
+    """The agent-authored (C2 core) frontmatter the bootstrap entry authors.
+
+    Field set is AGENT_AUTHORED_REQUIRED; ``source_files`` is copied so the
+    caller's list cannot be mutated through the returned dict.
+    """
+    return {
+        "description": description,
+        "source_files": list(source_files or []),
+        "last_reviewed": last_reviewed,
+        "status": status,
+    }
+
+
+def agent_authored_frontmatter_text(
+    *,
+    description: str,
+    source_files: list[str],
+    last_reviewed: str,
+    status: str = "draft",
+) -> str:
+    """YAML frontmatter block for a C2 agent-authored core page (dry-run synth).
+
+    Fields are emitted in AGENT_AUTHORED_REQUIRED order. ``description`` must be
+    a single plain-text line (callers pass a slug-derived title), so no YAML
+    escaping is needed — keeping this module yaml-free like its siblings.
+    """
+    lines = ["---", f"description: {description}"]
+    if source_files:
+        lines.append("source_files:")
+        lines.extend(f"  - {p}" for p in source_files)
+    else:
+        lines.append("source_files: []")
+    lines.append(f"last_reviewed: '{last_reviewed}'")
+    lines.append(f"status: {status}")
+    lines.append("---")
+    return "\n".join(lines) + "\n"

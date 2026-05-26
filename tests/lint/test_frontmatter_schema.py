@@ -123,3 +123,48 @@ def test_non_agent_authored_page_keeps_default_set(tmp_path):
     rc, out = _run([page], cfg)
     assert rc == 1
     assert "synthesized_into" in out["results"][0]["message"]
+
+
+def test_orchestrator_absolute_path_frame_resolves_agent_authored(tmp_path):
+    """Pin the orchestrator's real frame: pages are authored at the absolute
+    path repo_root/lens_path/hint (orchestrator_runner.py:763) and handed to
+    the frontmatter_schema block rule (lint_runner.run_rule, subprocess). A C2
+    page under an agent-authored section must resolve agent-authored and PASS;
+    missing a C2 field must FAIL (rule fired, not silently defaulted)."""
+    config = tmp_path / "config.yml"
+    config.write_text(
+        "site:\n"
+        "  docs_dir: docs/site-src\n"
+        "  sections:\n"
+        "    - key: architecture\n"
+        "      path: architecture/\n"
+        "      title: Architecture\n"
+        "      generator: agent-authored\n"
+    )
+    # Page at the orchestrator's real frame: repo_root / docs_dir / section / file
+    page = tmp_path / "docs" / "site-src" / "architecture" / "system-overview.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "---\n"
+        "description: System overview\n"
+        "source_files:\n"
+        "  - scripts/**/*.py\n"
+        "last_reviewed: 2026-05-26\n"
+        "status: draft\n"
+        "---\n\n# System overview\n"
+    )
+    rc, out = _run([page], config)
+    assert out["results"][0]["ok"] is True, out["results"][0]["message"]
+
+    # Negative: drop a C2-required field -> rule must block at this same frame.
+    page.write_text(
+        "---\n"
+        "source_files:\n"
+        "  - scripts/**/*.py\n"
+        "last_reviewed: 2026-05-26\n"
+        "status: draft\n"
+        "---\n\n# System overview\n"
+    )
+    rc, out = _run([page], config)
+    assert out["results"][0]["ok"] is False
+    assert "description" in out["results"][0]["message"]

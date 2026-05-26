@@ -177,3 +177,41 @@ def test_default_frontmatter_text_is_valid_and_complete():
     body = _yaml.safe_load(text.split("---", 2)[1])
     assert set(fc.DEFAULT_REQUIRED) <= set(body)
     assert body["status"] == "draft"
+
+
+def test_section_generator_for_docs_dir_relative_page():
+    # docs_dir absent from the page path -> resolves via the section path alone.
+    assert fc.section_generator_for("core/api.md", _CONFIG) == "agent-authored"
+    assert fc.section_generator_for(Path("core/api.md"), _CONFIG) == "agent-authored"
+
+
+def test_section_generator_for_bare_file_section_page():
+    assert fc.section_generator_for("whats-new.md", _CONFIG) == "changelog"
+
+
+def test_section_generator_for_docs_dir_relative_no_section_is_none():
+    assert fc.section_generator_for("elsewhere/x.md", _CONFIG) is None
+
+
+def test_section_generator_for_under_docs_dir_no_section_stays_none():
+    # docs_dir IS present but no section contains the page -> None (no fallback).
+    assert fc.section_generator_for("/r/docs/site-src/elsewhere/x.md", _CONFIG) is None
+
+
+def test_section_generator_for_docs_dir_relative_longest_match_wins():
+    cfg = {
+        "site": {
+            "docs_dir": "docs/site-src",
+            "sections": [
+                {
+                    "key": "arch",
+                    "path": "architecture/",
+                    "title": "A",
+                    "generator": "agent-authored",
+                },
+                {"key": "home", "path": "index.md", "title": "H"},
+            ],
+        }
+    }
+    # bare-frame page under architecture/ still resolves agent-authored
+    assert fc.section_generator_for("architecture/index.md", cfg) == "agent-authored"

@@ -1,0 +1,6 @@
+# Docs-tooling dependencies — build + verify the docs site.
+# SEPARATE from the agent runtime (stdlib + pyyaml + jsonschema). Never merge
+# these into the agent runtime requirements; Playwright must not enter that path.
+playwright==1.49.1
+mkdocs==1.6.1
+mkdocs-material==9.5.49

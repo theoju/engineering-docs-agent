@@ -49,7 +49,9 @@ def test_resolve_specs_dir_explicit_arg(tmp_path):
 
 
 def test_resolve_specs_dir_from_archive_sources(tmp_path):
-    specs = tmp_path / "docs" / "superpowers" / "specs"
+    # Non-default path so this exercises the archive-source branch, not the
+    # docs/superpowers/specs default fallback.
+    specs = tmp_path / "custom" / "spec-docs"
     specs.mkdir(parents=True)
     site = _site()
     site["sections"].append(
@@ -57,7 +59,7 @@ def test_resolve_specs_dir_from_archive_sources(tmp_path):
             "key": "archive",
             "path": "archive/",
             "generator": "archive-index",
-            "sources": ["docs/superpowers/specs", "docs/superpowers/plans"],
+            "sources": ["custom/spec-docs", "docs/superpowers/plans"],
         }
     )
     assert cm._resolve_specs_dir(tmp_path, site, None) == specs

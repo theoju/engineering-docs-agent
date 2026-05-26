@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import setup_discover  # noqa: E402
-import source_map  # noqa: E402  reuse _resolve_tracked_files / _glob_to_regex
+import source_map  # noqa: E402,F401  used in write_core_manifest (Task 5)
 
 _CODE_EXTS = (".py", ".js", ".ts", ".tsx", ".go", ".rs", ".java", ".rb")
 _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")

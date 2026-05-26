@@ -189,9 +189,9 @@ def write_core_manifest(repo_root, site_config, *, specs_dir=None) -> dict:
 
     artifact = {"version": 1, "pages": kept}
     out_rel = f"{docs_dir.rstrip('/')}/.doc-core-manifest.json"
-    (repo_root / out_rel).write_text(
-        json.dumps(artifact, indent=2) + "\n", encoding="utf-8"
-    )
+    out_path = repo_root / out_rel
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
     ledger["written"] = [out_rel]
     ledger["pages"] = len(kept)
     return ledger
@@ -208,6 +208,10 @@ def _dedupe_and_sort(pages: list[dict], section_path: str) -> list[dict]:
         if k in seen:
             seen[k] += 1
             nk = f"{k}-{seen[k]}"
+            while nk in seen:  # avoid colliding with a literal key like api-2
+                seen[k] += 1
+                nk = f"{k}-{seen[k]}"
+            seen[nk] = 1
             out.append({**p, "key": nk, "page": f"{section_path}/{nk}.md"})
         else:
             seen[k] = 1

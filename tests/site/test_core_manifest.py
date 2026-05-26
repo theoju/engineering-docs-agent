@@ -235,6 +235,32 @@ def test_write_no_manifest_when_all_entries_dropped(tmp_path):
     assert not (tmp_path / "docs" / "site-src" / ".doc-core-manifest.json").exists()
 
 
+def test_write_creates_docs_dir_if_missing(tmp_path):
+    # write_core_manifest is standalone-safe: it creates the artifact's parent
+    # dir even when docs_dir does not pre-exist (no apply_scaffold ran first).
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "core.py").write_text("# core\n")
+    # NOTE: docs/site-src is deliberately NOT created here.
+    ledger = cm.write_core_manifest(tmp_path, _site())
+    assert ledger["written"] == ["docs/site-src/.doc-core-manifest.json"]
+    assert (tmp_path / "docs" / "site-src" / ".doc-core-manifest.json").exists()
+
+
+def test_dedupe_and_sort_second_order_collision_no_duplicate():
+    # A generated key (api-2) must not collide with a literal api-2.
+    pages = [
+        {"key": "api", "title": "A", "page": "arch/api.md", "source_files": ["x"]},
+        {"key": "api", "title": "A", "page": "arch/api.md", "source_files": ["y"]},
+        {"key": "api-2", "title": "A2", "page": "arch/api-2.md", "source_files": ["z"]},
+    ]
+    out = cm._dedupe_and_sort(pages, "arch")
+    keys = [p["key"] for p in out]
+    assert len(keys) == len(set(keys)), f"duplicate keys: {keys}"
+    pages_out = [p["page"] for p in out]
+    assert len(pages_out) == len(set(pages_out)), f"duplicate pages: {pages_out}"
+
+
 def test_setup_scaffold_main_writes_manifest(tmp_path):
     """End-to-end: running setup_scaffold against a host with an agent-authored
     section + Python source writes .doc-core-manifest.json and reports it."""

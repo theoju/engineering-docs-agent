@@ -59,3 +59,50 @@ def source_to_built_urls(page: str) -> list[str]:
             f"{stem}.html"
         ]  # index.md -> index.html ; foo/index.md -> foo/index.html
     return [f"{stem}/index.html", f"{stem}.html"]
+
+
+def _page_failure(page: str, expected: int, result: dict) -> dict | None:
+    """Decide the single failure for one page from its measured result, or
+    None if the page is clean. Precedence (first match wins): page_missing ->
+    error_box -> asset_error -> count_mismatch. Pure; never raises.
+    """
+    if result.get("http_status") != 200:
+        return {
+            "page": page,
+            "reason": "page_missing",
+            "http": result.get("http_status"),
+        }
+    errors = result.get("error_boxes") or []
+    if errors:
+        return {"page": page, "reason": "error_box", "detail": errors[0]}
+    assets = result.get("asset_errors") or []
+    if assets:
+        return {"page": page, "reason": "asset_error", "detail": assets[0]}
+    rendered = int(result.get("rendered_ok") or 0)
+    if rendered < expected:
+        return {
+            "page": page,
+            "reason": "count_mismatch",
+            "expected": expected,
+            "rendered": rendered,
+        }
+    return None
+
+
+def build_ledger(self_test: dict, page_results: list[dict]) -> dict:
+    """Assemble the JSON ledger from the self-test outcome and per-page results.
+    Each page_result is {page, expected, rendered_ok, failure(dict|None)}.
+    """
+    failures = [r["failure"] for r in page_results if r.get("failure")]
+    return {
+        "self_test": self_test,
+        "checked_pages": len(page_results),
+        "expected_diagrams": sum(int(r.get("expected") or 0) for r in page_results),
+        "rendered_diagrams": sum(int(r.get("rendered_ok") or 0) for r in page_results),
+        "failures": failures,
+    }
+
+
+def ledger_ok(ledger: dict) -> bool:
+    """The gate passes iff the self-test held and no page failed."""
+    return bool(ledger.get("self_test", {}).get("ok")) and not ledger.get("failures")

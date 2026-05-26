@@ -42,3 +42,80 @@ def test_source_to_built_urls_directory_and_flat():
 def test_source_to_built_urls_index_page():
     assert vd.source_to_built_urls("index.md") == ["index.html"]
     assert vd.source_to_built_urls("core/index.md") == ["core/index.html"]
+
+
+def _result(http=200, rendered=1, errors=None, assets=None):
+    return {
+        "http_status": http,
+        "rendered_ok": rendered,
+        "error_boxes": errors or [],
+        "asset_errors": assets or [],
+    }
+
+
+def test_page_failure_ok_returns_none():
+    assert vd._page_failure("core/api/", 1, _result(rendered=1)) is None
+
+
+def test_page_failure_page_missing():
+    f = vd._page_failure("core/gone/", 1, _result(http=404, rendered=0))
+    assert f == {"page": "core/gone/", "reason": "page_missing", "http": 404}
+
+
+def test_page_failure_error_box_beats_count():
+    f = vd._page_failure(
+        "core/api/", 2, _result(rendered=1, errors=["Syntax error in text"])
+    )
+    assert f["reason"] == "error_box"
+    assert f["detail"] == "Syntax error in text"
+
+
+def test_page_failure_asset_error():
+    f = vd._page_failure("g/setup/", 1, _result(rendered=1, assets=["main.css 404"]))
+    assert f["reason"] == "asset_error"
+    assert f["detail"] == "main.css 404"
+
+
+def test_page_failure_count_mismatch():
+    f = vd._page_failure("core/api/", 2, _result(rendered=1))
+    assert f == {
+        "page": "core/api/",
+        "reason": "count_mismatch",
+        "expected": 2,
+        "rendered": 1,
+    }
+
+
+def test_build_ledger_and_ok():
+    ledger = vd.build_ledger(
+        {"good": "pass", "broken": "fail", "ok": True},
+        [
+            {"page": "core/api/", "expected": 2, "rendered_ok": 2, "failure": None},
+            {
+                "page": "g/x/",
+                "expected": 1,
+                "rendered_ok": 0,
+                "failure": {
+                    "page": "g/x/",
+                    "reason": "count_mismatch",
+                    "expected": 1,
+                    "rendered": 0,
+                },
+            },
+        ],
+    )
+    assert ledger["checked_pages"] == 2
+    assert ledger["expected_diagrams"] == 3
+    assert ledger["rendered_diagrams"] == 2
+    assert len(ledger["failures"]) == 1
+    assert vd.ledger_ok(ledger) is False
+
+
+def test_ledger_ok_true_when_clean_and_selftest_ok():
+    ledger = vd.build_ledger({"good": "pass", "broken": "fail", "ok": True}, [])
+    assert vd.ledger_ok(ledger) is True
+
+
+def test_ledger_not_ok_when_selftest_failed():
+    ledger = vd.build_ledger({"good": "pass", "broken": "pass", "ok": False}, [])
+    assert vd.ledger_ok(ledger) is False

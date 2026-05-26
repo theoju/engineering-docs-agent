@@ -14,9 +14,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 _WF_DIR = ROOT / ".github" / "workflows"
-# Cover both extensions GitHub honours so a future `.yaml` workflow can't
-# slip past the guard.
-WORKFLOWS = sorted([*_WF_DIR.glob("*.yml"), *_WF_DIR.glob("*.yaml")])
+_TPL_DIR = ROOT / "templates"
+# Repo workflows + scaffolded workflow templates (templates/workflow-*.yml).
+# Templates are copied verbatim to host repos, so they must meet the same floor.
+WORKFLOWS = sorted(
+    [*_WF_DIR.glob("*.yml"), *_WF_DIR.glob("*.yaml"), *_TPL_DIR.glob("workflow-*.yml")]
+)
 
 # Minimum major version whose `runs.using` is node24, per action.
 NODE24_FLOOR = {

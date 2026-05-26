@@ -29,10 +29,12 @@ def section_generator_for(page: Path | str, config: dict) -> str | None:
     None when there is no ``site:`` block, no ``docs_dir``, or no match — which
     yields the default field set. Never raises (malformed config -> None).
 
-    ``page`` must be in the same path frame as ``docs_dir`` (absolute or
-    repo-relative) for the prefix match to fire; a docs_dir-relative or bare
-    page path will not match and yields the default field set. Never raises
-    (malformed config -> None).
+    Frame-robust: absolute and repo-relative pages match via the embedded
+    ``docs_dir/path`` suffix. A docs_dir-relative or bare page (one lacking the
+    ``docs_dir`` segment entirely) falls back to matching the section ``path``
+    alone, so callers in any frame resolve correctly. The fallback fires only
+    when the full match found nothing AND ``docs_dir`` is absent from the page,
+    so it cannot change the result for any path that already matches.
     """
     site = config.get("site") if isinstance(config, dict) else None
     if not isinstance(site, dict):
@@ -47,20 +49,31 @@ def section_generator_for(page: Path | str, config: dict) -> str | None:
     except TypeError:
         return None
     bounded = f"/{page_posix}/"  # segment-bounded haystack
-    best_len = -1
-    best_gen: str | None = None
-    for s in sections:
-        if not isinstance(s, dict):
-            continue
-        rel = s.get("path")
-        rel = rel.strip("/") if isinstance(rel, str) else ""
-        if not rel:
-            continue
-        full = str(PurePosixPath(docs_dir) / rel)
-        if f"/{full}/" in bounded and len(full) > best_len:
-            best_len = len(full)
-            best_gen = s.get("generator")
-    return best_gen
+
+    def _best(needle_for) -> tuple[int, str | None]:
+        best_len, best_gen = -1, None
+        for s in sections:
+            if not isinstance(s, dict):
+                continue
+            rel = s.get("path")
+            rel = rel.strip("/") if isinstance(rel, str) else ""
+            if not rel:
+                continue
+            needle = needle_for(rel)
+            if f"/{needle}/" in bounded and len(needle) > best_len:
+                best_len = len(needle)
+                best_gen = s.get("generator")
+        return best_len, best_gen
+
+    # Frame 1 — absolute / repo-relative: page embeds docs_dir/section.
+    full_len, full_gen = _best(lambda rel: str(PurePosixPath(docs_dir) / rel))
+    if full_len >= 0:
+        return full_gen
+    # Frame 2 — docs_dir-relative / bare: only when docs_dir is truly absent,
+    # so a page under docs_dir that matched no section stays None.
+    if f"/{docs_dir}/" in bounded:
+        return None
+    return _best(lambda rel: rel)[1]
 
 
 def default_frontmatter_dict(sources: list[str] | None = None) -> dict:

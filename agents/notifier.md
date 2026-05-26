@@ -15,7 +15,7 @@ configured channels (Slack webhook + SMTP email).
 
 ## Inputs
 
-- `digest`: `{ pr_url, run_summary_bullets, gap_flags, lint_failures, build_status, verified, failed_urls, partial_reasons, source_drift, citation_drift }`
+- `digest`: `{ pr_url, run_summary_bullets, gap_flags, lint_failures, build_status, verified, failed_urls, partial_reasons, source_drift, citation_drift, core_drift }`
 - `slack_config`: `{ enabled, webhook_url }` (webhook_url passed from env via the workflow)
 - `email_config`: `{ enabled, smtp_server, smtp_user, smtp_password, from_address, recipients }`
 - `mode`: "run" | "verify" — "run" for "PR opened" digest, "verify" for "PR landed" follow-up

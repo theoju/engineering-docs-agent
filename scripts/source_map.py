@@ -16,19 +16,28 @@ from pathlib import Path
 
 import yaml
 
-# archive_indexes lives alongside this module; reuse its frontmatter parser.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from archive_indexes import parse_frontmatter  # noqa: E402
-
 
 def _page_globs(md: Path) -> tuple[list[str], str | None]:
     """Return (globs, skip_reason) for one page. globs is the list of string
     entries in `source_files:` (empty if the page opts out); skip_reason is set
     for malformed frontmatter or a non-list source_files, else None. Never raises.
+
+    Parses frontmatter directly rather than via archive_indexes.parse_frontmatter:
+    M must distinguish malformed/non-dict frontmatter to record it as a skip
+    reason, but the archive parser deliberately collapses those cases to {}.
     """
     try:
-        fm = parse_frontmatter(md)
-    except (yaml.YAMLError, OSError):
+        text = md.read_text()
+    except OSError:
+        return [], "malformed frontmatter"
+    if not text.startswith("---"):
+        return [], None
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return [], None
+    try:
+        fm = yaml.safe_load(parts[1])
+    except yaml.YAMLError:
         return [], "malformed frontmatter"
     if not isinstance(fm, dict):
         return [], "malformed frontmatter"

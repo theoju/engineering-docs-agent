@@ -554,6 +554,64 @@ def _drift_whats_new_lines(drifted_pages: list[dict]) -> list[str]:
     return lines
 
 
+def _changed_pages_from_map(
+    repo_root: Path, docs_dir_rel: str, prs: list[dict]
+) -> set[str] | None:
+    """Pages (POSIX, relative to docs_dir) whose mapped source files changed in
+    this batch, read from <docs_dir>/.doc-source-map.json. Returns None when the
+    map is absent/unreadable (caller then verifies all pages).
+    """
+    map_path = repo_root / docs_dir_rel.rstrip("/") / ".doc-source-map.json"
+    try:
+        artifact = json.loads(map_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    source_to_pages = artifact.get("map")
+    if not isinstance(source_to_pages, dict):
+        return None
+    changed = {
+        (f["path"] if isinstance(f, dict) else f)
+        for pr in prs
+        for f in (pr.get("files") or [])
+        if isinstance(f, (dict, str)) and (f.get("path") if isinstance(f, dict) else f)
+    }
+    pages: set[str] = set()
+    for src, page_list in source_to_pages.items():
+        if src in changed and isinstance(page_list, list):
+            pages.update(p for p in page_list if isinstance(p, str))
+    return pages
+
+
+def compute_citation_drift(repo_root: Path, config: dict, prs: list[dict]) -> dict:
+    """Verify file:line citations for this batch and return the C1 ledger.
+    Auto-fixes relocated citations in place (committed with the run's other doc
+    edits). Scopes to pages whose mapped sources changed (via .doc-source-map.json),
+    falling back to a full scan when no map exists. Empty ledger when no docs_dir.
+    """
+    import verify_citations as _vc
+
+    docs_dir_rel = (config.get("site") or {}).get("docs_dir")
+    if not docs_dir_rel:
+        return _vc._empty_ledger()
+    pages = _changed_pages_from_map(repo_root, docs_dir_rel, prs)
+    return _vc.verify_citations(
+        repo_root / docs_dir_rel, repo_root, fix=True, pages=pages
+    )
+
+
+def _citation_drift_whats_new_lines(ledger: dict) -> list[str]:
+    """What's-New block for citation drift (empty list -> no block)."""
+    pages = ledger.get("pages_review_needed") or []
+    if not pages:
+        return []
+    lines = ["### Pages to review (citation drift)"]
+    for g in ledger.get("gone", []):
+        lines.append(f"- {g['page']} — citation gone: {g['path']} ({g['token']})")
+    for a in ledger.get("ambiguous", []):
+        lines.append(f"- {a['page']} — ambiguous: {a['path']} ({a['token']})")
+    return lines
+
+
 def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     state_path = repo_root / ".engineering-docs-agent" / "state.json"
@@ -848,6 +906,24 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         add_partial(state, f"source_map_failed: {exc}", info_only=True)
     state["current_run"]["source_drift"] = drifted_pages
 
+    # Citation verification + drift (C1) — best-effort; auto-fixes relocated
+    # citations in place (committed with the run's other doc edits).
+    try:
+        citation_ledger = compute_citation_drift(repo_root, config, prs)
+    except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
+        # Inline the empty ledger: if the failure was importing verify_citations
+        # itself, re-importing here would re-raise and defeat the best-effort guard.
+        citation_ledger = {
+            "checked": 0,
+            "ok": 0,
+            "relocated": [],
+            "ambiguous": [],
+            "gone": [],
+            "pages_review_needed": [],
+        }
+        add_partial(state, f"verify_citations_failed: {exc}", info_only=True)
+    state["current_run"]["citation_drift"] = citation_ledger
+
     # Gap detection
     dismissed = set(state.get("dismissed_gap_flags", {}).keys())
     gap_verdicts = []
@@ -896,6 +972,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             for g in gaps_flagged:
                 entry_lines.append(f"- {g['pr_id']}: {g['reasoning']}")
         entry_lines.extend(_drift_whats_new_lines(drifted_pages))
+        entry_lines.extend(_citation_drift_whats_new_lines(citation_ledger))
         entry = "\n".join(entry_lines) + "\n\n"
         existing = whats_new.read_text() if whats_new.exists() else ""
         whats_new.write_text(entry + existing)
@@ -936,6 +1013,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         "lint_failures": state["current_run"]["partial_reasons"],
         "partial_reasons": state["current_run"]["partial_reasons"],
         "source_drift": drifted_pages,
+        "citation_drift": citation_ledger,
     }
     notifier_result, reasons = dispatch_validated(
         "notifier",

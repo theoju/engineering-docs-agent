@@ -589,6 +589,80 @@ def test_multi_pr_runs_lists_all_in_whats_new(tmp_path):
     assert "PR #3" in whats_new
 
 
+def test_compose_whats_new_preserves_frontmatter():
+    """A leading YAML frontmatter block and the title H1 stay on top; the new
+    entry sorts above older dated entries (reverse chronological)."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    existing = (
+        "---\n"
+        "title: What's New\n"
+        "status: draft\n"
+        "---\n\n"
+        "# What's New\n\n"
+        "## 2026-05-20\n"
+        "- PR #99: earlier entry\n"
+    )
+    entry = "## 2026-05-27\n- PR #1: new entry\n\n"
+
+    out = runner._compose_whats_new(existing, entry)
+
+    assert out.startswith("---\n"), out[:80]
+    assert (
+        out.index("# What's New")
+        < out.index("## 2026-05-27")
+        < out.index("## 2026-05-20")
+    )
+
+
+def test_compose_whats_new_no_frontmatter_prepends():
+    """Without frontmatter, behavior is the prior simple prepend; empty file
+    yields just the entry."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    assert (
+        runner._compose_whats_new("## old\n- x\n", "## new\n- y\n\n")
+        == "## new\n- y\n\n## old\n- x\n"
+    )
+    assert runner._compose_whats_new("", "## new\n- y\n\n") == "## new\n- y\n\n"
+
+
+def test_whats_new_prepend_preserves_frontmatter(tmp_path):
+    """run() must not push YAML frontmatter below the new entry. Reproduces the
+    dry-run finding: the entry landed above the frontmatter, breaking parsing."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+    import archive_indexes
+
+    importlib.reload(runner)
+
+    seeded = (
+        "---\n"
+        "title: What's New\n"
+        "status: draft\n"
+        "---\n\n"
+        "# What's New\n\n"
+        "## 2026-05-20\n"
+        "- PR #99: earlier entry\n"
+    )
+    _init_host(tmp_path, seed_files={"docs/site-src/whats-new.md": seeded})
+
+    rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+    assert rc == 0
+
+    content = (tmp_path / "docs" / "site-src" / "whats-new.md").read_text()
+    # Frontmatter must remain at line 1 so it still parses.
+    assert content.startswith("---\n"), content[:80]
+    assert archive_indexes.parse_frontmatter(content).get("title") == "What's New"
+    # New entry present, below the title, above the older entry.
+    assert "PR #1" in content
+    assert (
+        content.index("# What's New") < content.index("PR #1") < content.index("PR #99")
+    )
+
+
 def test_source_collector_error_propagates_partial(tmp_path):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner

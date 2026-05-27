@@ -766,6 +766,38 @@ def _core_drift_whats_new_lines(core_drifted: list[dict]) -> list[str]:
     return lines
 
 
+def _compose_whats_new(existing: str, entry: str) -> str:
+    """Insert `entry` as the newest dated section of a What's-New file.
+
+    Preserves a leading YAML frontmatter block (``--- ... ---``) at line 1 and
+    a following top-level ``# `` title heading, then inserts `entry` before the
+    first ``## `` dated section so entries stay reverse-chronological. With no
+    frontmatter/title the result reduces to the prior simple prepend
+    (``entry + existing``); an empty file yields just `entry`.
+
+    The frontmatter split mirrors ``archive_indexes.parse_frontmatter``
+    (``text.split("---", 2)``), so the same delimiter assumptions apply.
+    """
+    if not existing.strip():
+        return entry
+    preamble = ""
+    rest = existing
+    if rest.startswith("---"):
+        parts = rest.split("---", 2)
+        if len(parts) == 3:
+            preamble = "---" + parts[1] + "---"
+            rest = parts[2]
+    # Keep leading blanks + a single "# " title heading in the header region;
+    # insert before the first "## " dated section (or at the end if none).
+    lines = rest.splitlines(keepends=True)
+    insert_at = next(
+        (i for i, ln in enumerate(lines) if ln.startswith("## ")), len(lines)
+    )
+    header = "".join(lines[:insert_at])
+    tail = "".join(lines[insert_at:])
+    return preamble + header + entry + tail
+
+
 def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     state_path = repo_root / ".engineering-docs-agent" / "state.json"
@@ -1155,7 +1187,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         entry_lines.extend(_core_drift_whats_new_lines(core_drifted))
         entry = "\n".join(entry_lines) + "\n\n"
         existing = whats_new.read_text() if whats_new.exists() else ""
-        whats_new.write_text(entry + existing)
+        whats_new.write_text(_compose_whats_new(existing, entry))
 
     state["current_run"]["pr_number"] = None
     state_path.write_text(json.dumps(state, indent=2))

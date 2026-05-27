@@ -867,6 +867,18 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     jira_lookup = {issue["key"]: issue for issue in jira_issues}
 
     summaries = []
+    available_sections_by_lens: dict[str, list[str]] = {}
+    for _ln in list(config.get("docs", {}).get("lens_paths", {}).keys()):
+        try:
+            _lp, _ = resolve_lens(config, _ln)
+            _root = repo_root / _lp
+            available_sections_by_lens[_ln] = (
+                sorted(p.name for p in _root.iterdir() if p.is_dir())
+                if _root.is_dir()
+                else []
+            )
+        except (KeyError, OSError):
+            available_sections_by_lens[_ln] = []
     for pr in prs:
         jira_context = [
             jira_lookup[k] for k in pr.get("jira_keys", []) if k in jira_lookup
@@ -877,6 +889,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                 "pr": pr,
                 "jira_context": jira_context,
                 "lens_names": list(config.get("docs", {}).get("lens_paths", {}).keys()),
+                "available_sections": available_sections_by_lens,
             },
             dry_run_dir=dry_run_dir,
             cwd=repo_root,

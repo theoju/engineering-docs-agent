@@ -51,7 +51,7 @@ def _section_index_stub(section: dict) -> str:
         "status: draft\n"
         "---\n\n"
         f"# {section['title']}\n\n"
-        "_This section is scaffolded. Content will be added here._\n"
+        f"_{section['title']}: content will be added here as the docs-agent runner summarizes merged changes._\n"
     )
 
 

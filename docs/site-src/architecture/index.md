@@ -5,4 +5,4 @@ status: draft
 
 # Architecture
 
-_This section is scaffolded. Content will be added here._
+_Architecture: component design, agent contracts, data flows, and system internals._

@@ -5,4 +5,4 @@ status: draft
 
 # Decision Archive
 
-_This section is scaffolded. Content will be added here._
+_Decision Archive: ADRs, design rationale, and "why we chose X" records._

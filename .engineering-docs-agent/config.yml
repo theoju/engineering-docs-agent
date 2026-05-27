@@ -1,13 +1,14 @@
 docs:
   framework: mkdocs
-  source_dir: docs
-  whats_new_file: docs/_agent-sandbox/whats-new.md
+  # Publish-aligned (CCE-34): the agent authors into the SAME tree MkDocs
+  # publishes (docs/site-src), so generated content deploys to Pages and the
+  # publish-verifier's source_dir-stripping URL map resolves correctly.
+  source_dir: docs/site-src
+  whats_new_file: docs/site-src/whats-new.md
   agent_editable_paths:
-    - "docs/_agent-sandbox/**"
-    - "docs/superpowers/**"
+    - "docs/site-src/**"
   lens_paths:
-    core: docs/
-    superpowers: docs/superpowers/
+    core: docs/site-src/
 
 sources:
   git:

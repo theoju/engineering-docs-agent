@@ -873,7 +873,11 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             _lp, _ = resolve_lens(config, _ln)
             _root = repo_root / _lp
             available_sections_by_lens[_ln] = (
-                sorted(p.name for p in _root.iterdir() if p.is_dir())
+                sorted(
+                    p.name
+                    for p in _root.iterdir()
+                    if p.is_dir() and not p.name.startswith(".")
+                )
                 if _root.is_dir()
                 else []
             )

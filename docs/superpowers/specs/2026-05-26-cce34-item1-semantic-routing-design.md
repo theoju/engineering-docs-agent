@@ -334,3 +334,23 @@ validation logic with an arbitrary lens name — they do not need to change.
 | `docs/_agent-sandbox/.gitkeep`             | Delete via `git rm`                                                                                         |
 
 No config changes. No new dependencies. No new abstractions.
+
+---
+
+## Implementation note — scaffolded section stubs
+
+The setup skill scaffolds each section with an `index.md` stub that currently
+reads `_This section is scaffolded. Content will be added here._` The
+implementation plan should include a task to replace those stubs with
+meaningful one-liners that describe what belongs in each section. Example:
+
+| Section                 | Stub content                                                                           |
+| ----------------------- | -------------------------------------------------------------------------------------- |
+| `architecture/index.md` | `_Architecture: component design, agent contracts, data flows, and system internals._` |
+| `operations/index.md`   | `_Operations: deployment workflows, configuration guides, and runbooks._`              |
+| `archive/index.md`      | `_Decision Archive: ADRs, design rationale, and "why we chose X" records._`            |
+
+This is a zero-config improvement: the stubs give both human readers and the
+pr-summarizer's LLM clearer signal about section intent when it reads the lens
+root. The setup skill's scaffolding template is the right place to make this
+change — the dogfood repo's existing stubs should be updated in the same task.

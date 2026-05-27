@@ -3,7 +3,7 @@
 The schema enforces UNIVERSAL structural rules:
 - page_hint must be a relative (no leading slash) .md path
 - page_hint must not end in a source-code extension (.py, .json, .yml, etc.)
-- lens must be one of ["core", "superpowers"]
+- lens must be a non-empty string (any host-defined lens name is valid)
 - additionalProperties is false at root and on doc_targets items
 
 Host-config-specific rules (e.g., the production sandbox prefix
@@ -41,12 +41,14 @@ def test_minimal_valid(validator: Draft7Validator) -> None:
     validator.validate(doc)
 
 
-def test_create_lens_relative_md_accepted(validator: Draft7Validator) -> None:
+def test_create_lens_relative_semantic_path_accepted(
+    validator: Draft7Validator,
+) -> None:
     """The host-config sandbox prefix is documented in the prompt, not the schema."""
     doc = {
         "pr_number": 1,
         "doc_targets": [
-            {"lens": "core", "action": "create", "page_hint": "_agent-sandbox/foo.md"}
+            {"lens": "core", "action": "create", "page_hint": "operations/foo.md"}
         ],
     }
     validator.validate(doc)
@@ -107,7 +109,7 @@ def test_edit_allows_lens_relative_md(validator: Draft7Validator) -> None:
         "pr_number": 1,
         "doc_targets": [
             {
-                "lens": "superpowers",
+                "lens": "onboarding",
                 "action": "edit",
                 "page_hint": "measurements/2026-05-20-cce12.md",
             }
@@ -131,12 +133,21 @@ def test_edit_rejects_source_extension(validator: Draft7Validator) -> None:
         validator.validate(doc)
 
 
-def test_unknown_lens_rejected(validator: Draft7Validator) -> None:
+def test_arbitrary_lens_accepted(validator: Draft7Validator) -> None:
+    """Any non-empty lens string is valid; enforcement of known lenses is at runtime."""
     doc = {
         "pr_number": 1,
         "doc_targets": [
             {"lens": "archive", "action": "edit", "page_hint": "specs/foo.md"}
         ],
+    }
+    validator.validate(doc)  # must NOT raise
+
+
+def test_empty_lens_rejected(validator: Draft7Validator) -> None:
+    doc = {
+        "pr_number": 1,
+        "doc_targets": [{"lens": "", "action": "edit", "page_hint": "ops/foo.md"}],
     }
     with pytest.raises(ValidationError):
         validator.validate(doc)
@@ -155,7 +166,7 @@ def test_extra_doc_target_field_rejected(validator: Draft7Validator) -> None:
             {
                 "lens": "core",
                 "action": "create",
-                "page_hint": "_agent-sandbox/foo.md",
+                "page_hint": "operations/foo.md",
                 "extra": 1,
             }
         ],

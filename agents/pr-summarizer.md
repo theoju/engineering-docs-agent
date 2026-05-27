@@ -45,7 +45,7 @@ docs lenses + actions should reflect it.
         "required": ["lens", "action", "page_hint"],
         "additionalProperties": false,
         "properties": {
-          "lens": { "type": "string", "enum": ["core", "superpowers"] },
+          "lens": { "type": "string", "minLength": 1 },
           "action": { "type": "string", "enum": ["create", "edit"] },
           "page_hint": {
             "type": "string",

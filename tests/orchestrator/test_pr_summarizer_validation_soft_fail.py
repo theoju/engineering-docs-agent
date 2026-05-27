@@ -49,15 +49,15 @@ def test_invalid_page_hint_yields_schema_invalid_reason(tmp_path: Path) -> None:
     )
 
 
-def test_valid_sandbox_create_passes(tmp_path: Path) -> None:
-    """A clean sandbox-relative create page_hint validates and returns the dict."""
+def test_valid_section_create_passes(tmp_path: Path) -> None:
+    """A semantic section-relative create page_hint validates and returns the dict."""
     good_output = {
         "pr_number": 42,
         "doc_targets": [
             {
                 "lens": "core",
                 "action": "create",
-                "page_hint": "_agent-sandbox/2026-05-21-foo.md",
+                "page_hint": "operations/2026-05-21-foo.md",
             }
         ],
     }

@@ -10,7 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # `claude setup-token` mints an OAuth token (sk-ant-oat…) tied to a
+      # Claude subscription; the CLI reads it from CLAUDE_CODE_OAUTH_TOKEN,
+      # NOT ANTHROPIC_API_KEY (which is for console sk-ant-api… keys).
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python
@@ -27,10 +30,12 @@ jobs:
         run: |
           npm install -g @anthropic-ai/claude-code || true
           which claude || (echo "claude CLI not installed" && exit 1)
-      - name: Assert API key is configured
-        # In CI, env-var auth is the only auth path (no keychain OAuth). Fail
+      - name: Assert auth token is configured
+        # In CI, env-var auth is the only auth path (no interactive keychain
+        # OAuth). dispatch_subagent inherits the full env (orchestrator_runner.py),
+        # so CLAUDE_CODE_OAUTH_TOKEN propagates to the claude subprocess. Fail
         # with an actionable message if the secret is missing, rather than
         # letting the live tests fail opaquely on a None dispatch response.
-        run: '[ -n "$ANTHROPIC_API_KEY" ] || (echo "ANTHROPIC_API_KEY secret not configured" && exit 1)'
+        run: '[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || (echo "CLAUDE_CODE_OAUTH_TOKEN secret not configured" && exit 1)'
       - name: Run live tests
         run: pytest -m live -v

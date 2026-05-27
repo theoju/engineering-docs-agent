@@ -741,6 +741,34 @@ def test_available_sections_empty_when_lens_root_missing(tmp_path, monkeypatch):
     assert captured[0]["available_sections"]["extra"] == []
 
 
+def test_available_sections_excludes_hidden_dirs(tmp_path, monkeypatch):
+    """Dot-prefixed dirs (e.g. .git in a broad lens root) are never routing targets."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    captured: list[dict] = []
+    real = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
+        if name == "pr-summarizer":
+            captured.append(inputs)
+        return real(name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons)
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+
+    _init_host(tmp_path)
+    # A hidden dir alongside a real section must not surface as a routing target.
+    (tmp_path / "docs" / "site-src" / "core" / "operations").mkdir()
+    (tmp_path / "docs" / "site-src" / "core" / ".hidden").mkdir()
+
+    runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+
+    assert captured
+    assert captured[0]["available_sections"]["core"] == ["operations"]
+
+
 def test_run_surfaces_core_drift_in_whats_new_and_state(tmp_path):
     """C2 drift-update stage wiring: a manifest core page that M flags as
     source-drifted is surfaced under 'Core pages to review (drift)' in the

@@ -1058,7 +1058,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     # Archive index regeneration
     import archive_indexes
 
-    for lens in config.get("docs", {}).get("lens_paths", {}):
+    for lens in lens_paths:
         try:
             lens_path, opts = resolve_lens(config, lens)
         except KeyError:

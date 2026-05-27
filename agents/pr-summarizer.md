@@ -82,9 +82,9 @@ The canonical schema is in §Output schema above. The shape described here is th
   "breaking": false,
   "doc_targets": [
     {
-      "lens": "superpowers",
+      "lens": "core",
       "action": "edit",
-      "page_hint": "measurements/2026-05-20-cce12-tool-use-baseline.md"
+      "page_hint": "architecture/orchestrator.md"
     },
     {
       "lens": "core",

@@ -2,9 +2,35 @@
 
 ## [Unreleased]
 
-### Live integration test gate (CCE-6)
+## [0.2.0] — 2026-05-27
 
-- Added `@pytest.mark.live` marker and a `conftest.py` default-skip hook: live real-LLM tests run only via `pytest -m live`. Two `dispatch_subagent` smoke tests (notifier, pr-summarizer) exercise the real dispatch path with different payload shapes. New `.github/workflows/release.yml` runs them on tag pushes only. Cost ~$1-3 per full pass; the default mocked suite stays free.
+Consolidates the work merged since v0.1.4 (CCE-17 through CCE-34). The headline additions are a structured, publishable docs site; verified-citation and core-manifest authoring stages; a Playwright diagram-render CI gate; a generic GitHub Pages publish target; and discovery-driven semantic section routing for generated pages. No breaking changes to the host config surface; existing `.engineering-docs-agent/config.yml` files continue to load.
+
+### Semantic section routing (CCE-34, item 1)
+
+- The orchestrator scans each lens root for top-level section directories at runtime and passes them to the pr-summarizer as `available_sections`. Generated `action: create` pages now route into published sections (`operations/`, `architecture/`, `archive/`) instead of the removed `_agent-sandbox/` path, which was no longer in `agent_editable_paths` and silently dropped. Hidden directories are excluded from the scan (generic-first safety for arbitrary host repos).
+- The pr-summarizer `lens` schema field opened from a hardcoded enum to any non-empty string; known-lens enforcement stays at runtime via `resolve_lens`. Scaffolded section stubs now carry descriptive bodies so the summarizer LLM gets clearer section-intent signal. Vestigial `docs/_agent-sandbox/.gitkeep` removed; stale `_agent-sandbox/**` references in `state_io.py` and the README aligned to `docs/site-src/**`.
+
+### GitHub Pages publish target (CCE-32) + dogfood alignment (CCE-34)
+
+- Generic, Actions-source GitHub Pages deploy capability: the setup skill scaffolds a `workflow-pages.yml` deploy template when `detect_pages_publishable` confirms the host builds docs, wires `publishing.target` / `build_command` / `site_dir`, and derives the base URL for the publish-verifier. Non-MkDocs hosts are supported via `publishing.build_command` + `site_dir`. This repo's own site now deploys to Pages from `docs/site-src/`.
+
+### Diagram render gate (CCE-30)
+
+- New required CI gate renders Mermaid diagrams via Playwright on docs changes and asserts per-page render success, with graceful skip when Playwright is absent and a pinned test that the agent runtime never imports Playwright.
+
+### Structured docs site + authoring stages (CCE-23, CCE-26, CCE-28)
+
+- Structured docs-site scaffolding, decision archive, source-map drift detection, and an API reference surface (CCE-23). Verified-citation enforcement and agent-authored frontmatter helpers (CCE-26). Core-manifest detection, a `--bootstrap-core` authoring mode, and a nightly core-drift update stage (CCE-28).
+
+### Source-collector reliability (CCE-17, CCE-18, CCE-19)
+
+- Fixes to the pr-summarizer page-hint contract, source-collector Jira auth, and the diff-window bound.
+
+### CI hardening (CCE-6, CCE-31)
+
+- Added `@pytest.mark.live` marker and a `conftest.py` default-skip hook: live real-LLM tests run only via `pytest -m live`. Two `dispatch_subagent` smoke tests (notifier, pr-summarizer) exercise the real dispatch path with different payload shapes. New `.github/workflows/release.yml` runs them on tag pushes only. Cost ~$1-3 per full pass; the default mocked suite stays free. (CCE-6)
+- Bumped CI actions to Node-24-compatible majors (`checkout@v5`, `setup-python@v6`). (CCE-31)
 
 ## [0.1.4] — 2026-05-20
 

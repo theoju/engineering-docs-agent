@@ -867,8 +867,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     jira_lookup = {issue["key"]: issue for issue in jira_issues}
 
     summaries = []
+    lens_paths = config.get("docs", {}).get("lens_paths", {}) or {}
     available_sections_by_lens: dict[str, list[str]] = {}
-    for _ln in list(config.get("docs", {}).get("lens_paths", {}).keys()):
+    for _ln in lens_paths:
         try:
             _lp, _ = resolve_lens(config, _ln)
             _root = repo_root / _lp
@@ -892,7 +893,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             {
                 "pr": pr,
                 "jira_context": jira_context,
-                "lens_names": list(config.get("docs", {}).get("lens_paths", {}).keys()),
+                "lens_names": list(lens_paths.keys()),
                 "available_sections": available_sections_by_lens,
             },
             dry_run_dir=dry_run_dir,

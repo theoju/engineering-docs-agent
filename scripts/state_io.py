@@ -27,8 +27,8 @@ def _validate_lens_paths_are_editable(config: dict) -> None:
     are on the same path branch — i.e., one starts with the other.
 
     This lets a narrower editable scope satisfy a wider lens path
-    (e.g., editable 'docs/_agent-sandbox/**' covers lens 'core' at 'docs/':
-    the agent reads all of docs/ but writes only to the sandbox sub-path).
+    (e.g., editable 'docs/site-src/**' covers lens 'core' at 'docs/site-src/':
+    the glob and lens root are co-located; any path under site-src is writable).
     """
     docs = config.get("docs", {}) or {}
     lenses = docs.get("lens_paths", {}) or {}

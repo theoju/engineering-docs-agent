@@ -657,6 +657,118 @@ def test_run_surfaces_source_drift_in_whats_new_and_state(tmp_path):
     )
 
 
+def test_available_sections_passed_to_pr_summarizer(tmp_path, monkeypatch):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    captured: list[dict] = []
+    real = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
+        if name == "pr-summarizer":
+            captured.append(inputs)
+        return real(name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons)
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+
+    _init_host(tmp_path)
+    # Create subdirs inside the lens root after git init (scan is filesystem-only)
+    (tmp_path / "docs" / "site-src" / "core" / "architecture").mkdir()
+    (tmp_path / "docs" / "site-src" / "core" / "operations").mkdir()
+
+    runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+
+    assert captured, "expected at least one pr-summarizer dispatch"
+    sections = captured[0].get("available_sections", {})
+    assert sections.get("core") == ["architecture", "operations"]
+
+
+def test_available_sections_empty_when_no_subdirs(tmp_path, monkeypatch):
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    captured: list[dict] = []
+    real = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
+        if name == "pr-summarizer":
+            captured.append(inputs)
+        return real(name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons)
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+
+    _init_host(tmp_path)  # core/ dir exists but has no subdirs
+    runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+
+    assert captured
+    assert captured[0]["available_sections"] == {"core": []}
+
+
+def test_available_sections_empty_when_lens_root_missing(tmp_path, monkeypatch):
+    """Lens root that does not exist on disk → empty list, no crash."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    captured: list[dict] = []
+    real = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
+        if name == "pr-summarizer":
+            captured.append(inputs)
+        return real(name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons)
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+
+    _init_host(tmp_path)
+    # Add a second lens pointing to a dir that does not exist
+    cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
+    cfg.write_text(
+        cfg.read_text().replace(
+            "    core: docs/site-src/core",
+            "    core: docs/site-src/core\n    extra: docs/site-src/missing-dir",
+        )
+    )
+
+    runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+
+    assert captured
+    assert captured[0]["available_sections"]["extra"] == []
+
+
+def test_available_sections_excludes_hidden_dirs(tmp_path, monkeypatch):
+    """Dot-prefixed dirs (e.g. .git in a broad lens root) are never routing targets."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    captured: list[dict] = []
+    real = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
+        if name == "pr-summarizer":
+            captured.append(inputs)
+        return real(name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons)
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+
+    _init_host(tmp_path)
+    # A hidden dir alongside a real section must not surface as a routing target.
+    (tmp_path / "docs" / "site-src" / "core" / "operations").mkdir()
+    (tmp_path / "docs" / "site-src" / "core" / ".hidden").mkdir()
+
+    runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+
+    assert captured
+    assert captured[0]["available_sections"]["core"] == ["operations"]
+
+
 def test_run_surfaces_core_drift_in_whats_new_and_state(tmp_path):
     """C2 drift-update stage wiring: a manifest core page that M flags as
     source-drifted is surfaced under 'Core pages to review (drift)' in the

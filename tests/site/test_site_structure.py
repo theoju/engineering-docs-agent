@@ -41,6 +41,8 @@ def test_section_index_stub_has_title_and_draft_frontmatter():
     stub = files["docs/site-src/api/index.md"].content
     assert "title: API reference" in stub
     assert "status: draft" in stub
+    assert "API reference: content will be added here" in stub
+    assert "This section is scaffolded" not in stub
 
 
 def test_page_section_has_no_directory():

@@ -34,7 +34,7 @@ This repo is configured to run the agent against itself — a reference layout f
 
 1. `.engineering-docs-agent/config.yml` — host config (framework, paths, Jira project keys, voice samples, publishing target).
 2. `.engineering-docs-agent/state.example.json` — seed template. Copy to `state.json` on first setup; the runtime file is gitignored so per-run mutations stay local.
-3. `docs/_agent-sandbox/` — agent-editable area (`agent_editable_paths` glob restricts writes here).
+3. `docs/site-src/` — agent-editable area and MkDocs source dir; the `agent_editable_paths` glob (`docs/site-src/**`) restricts writes here, and the same tree publishes to GitHub Pages.
 
 Bootstrap a fresh checkout:
 
@@ -62,12 +62,12 @@ That makes the seven agents resolvable without `--plugin-dir` workarounds. The m
 
 The agent reads from **lens paths** and writes to **editable paths**. They overlap, but they are different:
 
-- `docs.lens_paths` defines _where docs live for each lens_ (e.g., `core: docs/`, `superpowers: docs/superpowers/`). The voice-load, gap-detection, and PR-summarization stages read from these paths.
+- `docs.lens_paths` defines _where docs live for each lens_ (e.g., `core: docs/site-src/`). The voice-load, gap-detection, and PR-summarization stages read from these paths.
 - `docs.agent_editable_paths` defines _where the agent may write_. The orchestrator's runtime filter rejects any proposed page outside these globs.
 
 **Invariant:** every `lens_paths` entry must be covered by at least one `agent_editable_paths` glob. The config loader enforces this at boot via `_validate_lens_paths_are_editable` in `scripts/state_io.py`. A lens with no matching editable glob means the agent reads docs it can never update — usually a mistake.
 
-The editable globs may be **narrower** than the lens path — e.g., `core: docs/` paired with editable `docs/_agent-sandbox/**` is valid: the agent reads everything under `docs/` but only writes to the sandbox. The validator accepts this because the editable glob's anchor (`docs/_agent-sandbox/`) starts with the lens path (`docs/`). The compatibility rule is bidirectional: glob anchor and lens path must share a path branch.
+The editable glob may be **narrower** than the lens path — e.g., a lens `core: docs/` paired with editable `docs/generated/**` is valid: the agent reads everything under `docs/` but only writes to the `generated/` sub-path. The validator accepts this because the editable glob's anchor (`docs/generated/`) starts with the lens path (`docs/`). The compatibility rule is bidirectional: glob anchor and lens path must share a path branch. This repo's dogfood config keeps the two co-located: lens `docs/site-src/` with editable `docs/site-src/**`.
 
 ### Jira enrichment (optional)
 

@@ -5,4 +5,4 @@ status: draft
 
 # Operations
 
-_This section is scaffolded. Content will be added here._
+_Operations: deployment workflows, configuration guides, and runbooks._

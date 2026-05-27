@@ -867,6 +867,23 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     jira_lookup = {issue["key"]: issue for issue in jira_issues}
 
     summaries = []
+    lens_paths = config.get("docs", {}).get("lens_paths", {}) or {}
+    available_sections_by_lens: dict[str, list[str]] = {}
+    for _ln in lens_paths:
+        try:
+            _lp, _ = resolve_lens(config, _ln)
+            _root = repo_root / _lp
+            available_sections_by_lens[_ln] = (
+                sorted(
+                    p.name
+                    for p in _root.iterdir()
+                    if p.is_dir() and not p.name.startswith(".")
+                )
+                if _root.is_dir()
+                else []
+            )
+        except (KeyError, OSError):
+            available_sections_by_lens[_ln] = []
     for pr in prs:
         jira_context = [
             jira_lookup[k] for k in pr.get("jira_keys", []) if k in jira_lookup
@@ -876,7 +893,8 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             {
                 "pr": pr,
                 "jira_context": jira_context,
-                "lens_names": list(config.get("docs", {}).get("lens_paths", {}).keys()),
+                "lens_names": list(lens_paths.keys()),
+                "available_sections": available_sections_by_lens,
             },
             dry_run_dir=dry_run_dir,
             cwd=repo_root,
@@ -1040,7 +1058,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     # Archive index regeneration
     import archive_indexes
 
-    for lens in config.get("docs", {}).get("lens_paths", {}):
+    for lens in lens_paths:
         try:
             lens_path, opts = resolve_lens(config, lens)
         except KeyError:

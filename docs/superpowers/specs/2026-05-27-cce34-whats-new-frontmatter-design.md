@@ -43,14 +43,14 @@ Full suite at fix time: 557 passed, 3 skipped.
 
 The fix exposed a more durable finding than the bug itself: the system has **two** whats-new writers.
 
-- **LLM skill path** — `skills/engineering-docs-agent/SKILL.md` step 9, the production nightly path. Authors the dated entry as prose and is frontmatter-aware. A real nightly run (commit `21ff6b7`) placed its `## 2026-05-27` section correctly below `# What's New`, so the **live site was never corrupted**.
+- **LLM skill path** — `skills/engineering-docs-agent/SKILL.md` step 9, the production nightly path. Authors the dated entry as prose. In the observed nightly run (commit `21ff6b7`) it placed the `## 2026-05-27` section correctly below `# What's New`, so the **live site was never corrupted** — but the skill carries no explicit frontmatter-preservation contract; that correctness is observed, not guaranteed.
 - **Python script path** — `scripts/orchestrator_runner.py`, the programmatic / dry-run / test / documented-bootstrap path. Mechanical prepend; this is the path that carried the bug and that `_compose_whats_new` fixes.
 
 These two writers can drift in output format and are unevenly tested. This spec records the divergence as an **open architectural question**. It does not prescribe a reconciliation — sharing a helper, collapsing to one writer, or converging the formats are all candidate future work for a separate brainstorm/spec, not decided here.
 
 ## Scope & non-goals
 
-- **Severity:** a programmatic-path defect, not a live-site corruptor — production authoring goes through the frontmatter-aware skill path.
+- **Severity:** a programmatic-path defect, not a live-site corruptor — production authoring goes through the LLM skill path, whose observed output places entries correctly.
 - **Non-goals:** reconciling the two writers; changing skill-path authoring; redesigning the whats-new file format.
 
 ## Files changed (all in PR #44)

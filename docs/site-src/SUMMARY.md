@@ -1,0 +1,6 @@
+* [Home](index.md)
+* [Architecture](architecture/)
+* [API reference](api/)
+* [Operations](operations/)
+* [Decision Archive](archive/)
+* [What's New](whats-new.md)

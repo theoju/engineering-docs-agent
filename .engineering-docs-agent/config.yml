@@ -27,8 +27,8 @@ lint:
   tier1: default
 
 publishing:
-  base_url: https://theoju.github.io/engineering-docs-agent
-  build_workflow: deploy.yml
+  base_url: https://theoju.github.io/engineering-docs-agent/
+  build_workflow: docs-pages.yml
   url_map_rule: standard
   verify_timeout_seconds: 60
 

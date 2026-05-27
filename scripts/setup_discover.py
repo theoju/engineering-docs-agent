@@ -129,6 +129,24 @@ def detect_jira_hint(cwd: Path) -> dict | None:
     return None
 
 
+def derive_pages_base_url(owner: str, repo: str, cname: str | None = None) -> str:
+    """Project site -> https://<owner>.github.io/<repo>/; user/org site
+    (repo named <owner>.github.io) -> https://<owner>.github.io/; custom
+    domain (CNAME) -> https://<cname>/."""
+    if cname:
+        return f"https://{cname.strip().rstrip('/')}/"
+    if repo.lower() == f"{owner.lower()}.github.io":
+        return f"https://{owner}.github.io/"
+    return f"https://{owner}.github.io/{repo}/"
+
+
+def detect_pages_publishable(framework: str | None, ci: str | None) -> bool:
+    """True when the host can be auto-scaffolded for Pages deploy: MkDocs on
+    GitHub Actions. Other frameworks need a config build_command (handled by
+    the setup skill), so they are not auto-publishable here."""
+    return ci == "github_actions" and framework == "mkdocs"
+
+
 def discover(cwd: Path) -> dict:
     """Discover host repo settings. Returns a structured dict with optional warnings."""
     warnings: list[dict] = []
@@ -155,6 +173,7 @@ def discover(cwd: Path) -> dict:
         "jira_hint": jira_hint,
         "python": detect_python(cwd),
         "openapi_hint": detect_openapi_hint(cwd),
+        "pages_publishable": detect_pages_publishable(framework, ci),
     }
     if warnings:
         out["warnings"] = warnings

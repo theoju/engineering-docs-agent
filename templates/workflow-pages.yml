@@ -1,0 +1,53 @@
+# templates/workflow-pages.yml — GitHub Pages deploy (GitHub Actions source)
+# Drop into the host repo at .github/workflows/docs-agent-pages.yml
+# MkDocs-first. For a non-MkDocs host the setup skill rewrites the "Build site"
+# step to run publishing.build_command and the artifact path to publishing.site_dir.
+name: docs-agent pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs-agent-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v6
+        with:
+          enablement: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Build site
+        run: |
+          pip install mkdocs-material
+          mkdocs build --strict
+      - name: Write .nojekyll so Pages serves the artifact as-is
+        run: touch site/.nojekyll
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

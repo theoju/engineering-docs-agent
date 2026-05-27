@@ -86,7 +86,15 @@
         "base_url": { "type": "string" },
         "build_workflow": { "type": "string" },
         "url_map_rule": { "type": "string" },
-        "verify_timeout_seconds": { "type": "integer" }
+        "verify_timeout_seconds": { "type": "integer" },
+        "build_command": {
+          "type": "string",
+          "description": "Generic fallback build command for non-MkDocs hosts. Omit for MkDocs (the deploy workflow runs `mkdocs build --strict`)."
+        },
+        "site_dir": {
+          "type": "string",
+          "description": "Built-site directory to publish. Default `site` (MkDocs)."
+        }
       }
     },
     "notifications": { "type": "object" },

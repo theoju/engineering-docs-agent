@@ -61,3 +61,54 @@ env:
     hint = setup_discover.detect_jira_hint(tmp_path)
     assert hint
     assert hint.get("base_url") == "https://acme.atlassian.net"
+
+
+import sys as _sys
+
+_sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+from setup_discover import derive_pages_base_url, detect_pages_publishable
+
+
+def test_base_url_project_site():
+    assert (
+        derive_pages_base_url("theoju", "engineering-docs-agent")
+        == "https://theoju.github.io/engineering-docs-agent/"
+    )
+
+
+def test_base_url_user_site():
+    assert (
+        derive_pages_base_url("theoju", "theoju.github.io")
+        == "https://theoju.github.io/"
+    )
+
+
+def test_base_url_custom_domain():
+    assert (
+        derive_pages_base_url("theoju", "r", "docs.example.com")
+        == "https://docs.example.com/"
+    )
+
+
+def test_pages_publishable_only_mkdocs_on_actions():
+    assert detect_pages_publishable("mkdocs", "github_actions") is True
+    assert detect_pages_publishable("docusaurus", "github_actions") is False
+    assert detect_pages_publishable("mkdocs", "gitlab_ci") is False
+    assert detect_pages_publishable(None, "github_actions") is False
+
+
+def test_discover_reports_pages_publishable_for_mkdocs_actions(tmp_path):
+    (tmp_path / "mkdocs.yml").write_text("site_name: x\n")
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    from setup_discover import discover
+
+    out = discover(tmp_path)
+    assert out["pages_publishable"] is True
+
+
+def test_discover_not_publishable_without_framework(tmp_path):
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    from setup_discover import discover
+
+    out = discover(tmp_path)
+    assert out["pages_publishable"] is False

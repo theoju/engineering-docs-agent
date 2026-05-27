@@ -4,3 +4,9 @@
 playwright==1.49.1
 mkdocs==1.6.1
 mkdocs-material==9.5.49
+# MkDocs build plugins declared in this repo's mkdocs.yml (dogfood site).
+# Versions verified against the working local mkdocs 1.6.1 build.
+mkdocs-awesome-pages-plugin==2.10.1
+mkdocs-gen-files==0.6.1
+mkdocs-literate-nav==0.6.3
+mkdocstrings[python]==0.30.1

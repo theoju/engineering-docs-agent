@@ -1,0 +1,233 @@
+{
+  "version": 1,
+  "pages": [
+    {
+      "key": "cce-capability-c-canonical-core-citations",
+      "title": "Cce Capability C Canonical Core Citations",
+      "page": "architecture/cce-capability-c-canonical-core-citations.md",
+      "source_files": [
+        "backend/connectors/base.py",
+        "core/**",
+        "docs/site-src/core/**",
+        "docs/superpowers/**",
+        "scripts/audit_docs.py",
+        "scripts/verify_citations.py",
+        "scripts/verify_docs_diagrams.py",
+        "scripts/{verify_docs_diagrams,audit_docs,build_doc_source_map}.py",
+        "site-src/core/**",
+        "tests/orchestrator/test_source_map_stage.py"
+      ]
+    },
+    {
+      "key": "cce-capability-c2-canonical-core-authoring",
+      "title": "Cce Capability C2 Canonical Core Authoring",
+      "page": "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "source_files": [
+        "docs/site-src/core/**",
+        "docs/superpowers/**",
+        "scripts/audit_docs.py",
+        "scripts/build_doc_source_map.py",
+        "scripts/lint/frontmatter_schema.py",
+        "scripts/source_map.py"
+      ]
+    },
+    {
+      "key": "cce-capability-c3-diagram-render-gate",
+      "title": "Cce Capability C3 Diagram Render Gate",
+      "page": "architecture/cce-capability-c3-diagram-render-gate.md",
+      "source_files": [
+        "scripts/lint/diagrams.py",
+        "scripts/verify_citations.py",
+        "scripts/verify_diagrams.py",
+        "scripts/verify_docs_diagrams.py"
+      ]
+    },
+    {
+      "key": "cce10-source-collector-canonical-shape",
+      "title": "Cce10 Source Collector Canonical Shape",
+      "page": "architecture/cce10-source-collector-canonical-shape.md",
+      "source_files": [
+        "scripts/orchestrator_runner.py",
+        "tests/agents/test_schema_md_sync.py",
+        "tests/orchestrator/test_dispatch_subagent_env.py"
+      ]
+    },
+    {
+      "key": "cce12-source-collector-tool-use-diagnostics",
+      "title": "Cce12 Source Collector Tool Use Diagnostics",
+      "page": "architecture/cce12-source-collector-tool-use-diagnostics.md",
+      "source_files": [
+        "docs/superpowers/measurements/2026-05-20-cce12-run[1-5]-*.{stream.jsonl,meta.json,stdout.txt,stderr.txt,prompt.txt}",
+        "scripts/orchestrator_runner.py",
+        "tests/orchestrator/test_dispatch_subagent_stream_json.py"
+      ]
+    },
+    {
+      "key": "cce14-source-collector-prompt-hardening",
+      "title": "Cce14 Source Collector Prompt Hardening",
+      "page": "architecture/cce14-source-collector-prompt-hardening.md",
+      "source_files": [
+        "scripts/orchestrator_runner.py",
+        "tests/orchestrator/test_dispatch_debug_capture.py",
+        "tests/orchestrator/test_dispatch_subagent_stream_json.py"
+      ]
+    },
+    {
+      "key": "cce15-source-collector-root-cause-sweep",
+      "title": "Cce15 Source Collector Root Cause Sweep",
+      "page": "architecture/cce15-source-collector-root-cause-sweep.md",
+      "source_files": [
+        "scripts/orchestrator_runner.py",
+        "tests/orchestrator/test_dispatch_rescue.py",
+        "tests/orchestrator/test_dispatch_subagent.py",
+        "tests/orchestrator/test_dispatch_validated.py",
+        "tests/schemas/test_source_collector_schema.py"
+      ]
+    },
+    {
+      "key": "cce23-api-reference",
+      "title": "Cce23 Api Reference",
+      "page": "architecture/cce23-api-reference.md",
+      "source_files": [
+        "<docs_dir>/gen_ref_pages.py",
+        "<import_paths>/*.py",
+        "api/contracts/*.md",
+        "api/reference/*.md",
+        "scripts/contracts_doc.py",
+        "scripts/setup_discover.py",
+        "scripts/site_structure.py",
+        "scripts/state_io.py",
+        "tests/site/test_api_build_smoke.py"
+      ]
+    },
+    {
+      "key": "cce23-decision-archive",
+      "title": "Cce23 Decision Archive",
+      "page": "architecture/cce23-decision-archive.md",
+      "source_files": [
+        "advanced-data-importer/scripts/generate_archive_indexes.py",
+        "scripts/archive_indexes.py",
+        "scripts/orchestrator_runner.py",
+        "scripts/site_structure.py",
+        "scripts/state_io.py",
+        "tests/fixtures/archive_indexes/**",
+        "tests/orchestrator/test_archive_indexes.py"
+      ]
+    },
+    {
+      "key": "cce23-source-map-drift",
+      "title": "Cce23 Source Map Drift",
+      "page": "architecture/cce23-source-map-drift.md",
+      "source_files": [
+        "**/",
+        "agents/schemas/*.json",
+        "scripts/contracts.py",
+        "scripts/orchestrator_runner.py",
+        "scripts/source_drift.py",
+        "scripts/source_map.py"
+      ]
+    },
+    {
+      "key": "cce32-github-pages-publish-target",
+      "title": "Cce32 Github Pages Publish Target",
+      "page": "architecture/cce32-github-pages-publish-target.md",
+      "source_files": [
+        "docs/superpowers/plans/*.md",
+        "templates/*.yml",
+        "tests/ci/test_workflow_node_runtime.py"
+      ]
+    },
+    {
+      "key": "cce4-schema-enforcement",
+      "title": "Cce4 Schema Enforcement",
+      "page": "architecture/cce4-schema-enforcement.md",
+      "source_files": [
+        "agents/*.md",
+        "agents/schemas/*.schema.json",
+        "scripts/orchestrator_runner.py",
+        "scripts/verify_runner.py",
+        "tests/agents/test_schema_md_sync.py",
+        "tests/orchestrator/fakes_schema_invalid/*.json",
+        "tests/orchestrator/test_dispatch_subagent.py",
+        "tests/orchestrator/test_dispatch_validated.py",
+        "tests/orchestrator/test_pipeline_integration.py",
+        "tests/orchestrator/test_schema_invalid_soft_fail.py",
+        "tests/orchestrator/test_verify_runner.py"
+      ]
+    },
+    {
+      "key": "cce5-9-batch-prep-roadmap",
+      "title": "Cce5 9 Batch Prep Roadmap",
+      "page": "architecture/cce5-9-batch-prep-roadmap.md",
+      "source_files": [
+        "release/*",
+        "scripts/orchestrator_runner.py",
+        "scripts/state_io.py",
+        "tests/conftest.py"
+      ]
+    },
+    {
+      "key": "cce6-7-8-batch",
+      "title": "Cce6 7 8 Batch",
+      "page": "architecture/cce6-7-8-batch.md",
+      "source_files": [
+        "scripts/dispatch_subagent.py",
+        "scripts/orchestrator_runner.py"
+      ]
+    },
+    {
+      "key": "engineering-docs-agent",
+      "title": "Engineering Docs Agent",
+      "page": "architecture/engineering-docs-agent.md",
+      "source_files": [
+        ".claude/hooks/doc_drift.py",
+        "docs-agent/*",
+        "docs/site-src/*",
+        "docs/site-src/archive/adrs/*.md",
+        "scripts/build_doc_source_map.py",
+        "scripts/lint/<rule>.py",
+        "scripts/lint/frontmatter_schema.py",
+        "scripts/lint/lint_runner.py",
+        "scripts/lint/stub_redirect.py"
+      ]
+    },
+    {
+      "key": "structured-docs-site-generation",
+      "title": "Structured Docs Site Generation",
+      "page": "architecture/structured-docs-site-generation.md",
+      "source_files": [
+        "agents/schemas/*.json",
+        "docs/superpowers/**",
+        "scripts/build_doc_source_map.py",
+        "scripts/generate_archive_indexes.py",
+        "scripts/verify_docs_diagrams.py"
+      ]
+    },
+    {
+      "key": "v0-1-1-hardening",
+      "title": "V0 1 1 Hardening",
+      "page": "architecture/v0-1-1-hardening.md",
+      "source_files": [
+        "scripts/archive_indexes.py",
+        "scripts/contracts.py",
+        "scripts/gh_client.py",
+        "scripts/lint/diagrams.py",
+        "scripts/lint/duplicate_content.py",
+        "scripts/lint/framework_build.py",
+        "scripts/lint/lint_runner.py",
+        "scripts/lint/reading_grade.py",
+        "scripts/orchestrator_runner.py",
+        "scripts/setup_discover.py",
+        "scripts/state_io.py",
+        "scripts/verify_runner.py",
+        "templates/*.schema.json",
+        "tests/contracts/test_contracts.py",
+        "tests/contracts/test_state_io.py",
+        "tests/gh/test_gh_client.py",
+        "tests/orchestrator/test_pipeline_integration.py",
+        "tests/orchestrator/test_verify_runner.py",
+        "tests/setup/test_setup_discover.py"
+      ]
+    }
+  ]
+}

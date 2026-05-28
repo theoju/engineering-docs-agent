@@ -18,9 +18,9 @@
 
 - `.gitignore` (lines 220-221)
 - `templates/state.schema.json` (drop `current_run` block, lines 16-26 of current file)
-- `scripts/state_io.py` (add `save_persistent_state`; change `load_state_validated` return type to tuple; add legacy strip)
+- `scripts/state_io.py` (add `save_persistent_state` — Task 1 only; Task 3's load-time strip is retired, see Task 3 OBSOLETE notice)
 - `scripts/orchestrator_runner.py` (lines 815, 1193, 1209, 1212, 1247 — and a new state-advancement block before 1193)
-- `scripts/verify_runner.py` (line 28 — unpack new tuple return)
+- ~~`scripts/verify_runner.py` (line 28 — unpack new tuple return)~~ — no longer needed (Task 3 retired)
 - `tests/contracts/test_state_io.py` (extend with new tests; update 3 existing call sites for new signature)
 - `.engineering-docs-agent/state.json` (move from gitignored to tracked; content unchanged at seed `bcfc489…`)
 - `README.md` (lines 39-48 area: dogfood bootstrap)
@@ -253,7 +253,16 @@ EOF
 
 ---
 
-## Task 3: `load_state_validated` returns `(state, notes)` with legacy strip
+## Task 3: ~~`load_state_validated` returns `(state, notes)` with legacy strip~~ — **OBSOLETE**
+
+> **Retired during SDD execution (2026-05-28 13:55 PDT).** Investigation found that load-time stripping of `current_run` breaks 8 pre-existing tests in `test_state_carry_forward.py`, `test_pipeline_integration.py`, and `test_verify_runner.py` — the runner's CCE-5 stale-detection hardening at `orchestrator_runner.py:836-853` relies on `load_state_validated` returning state WITH `current_run` present so the runner can `pop` it and check its `started_at`.
+>
+> The migration path is already handled correctly by:
+>
+> 1. The runner's existing pop-and-stale-detect at `orchestrator_runner.py:836-853` (emits `stale_current_run_cleared` info-only if prior `started_at` is >24h old — pre-existing CCE-5 behavior).
+> 2. `save_persistent_state` (Task 1) — drops `current_run` at WRITE time, so the file is silently cleaned on first save after a legacy state is loaded.
+>
+> No code changes for this task. Spec §5.2 revised to match. **Proceed directly to Task 4.**
 
 **Files:**
 

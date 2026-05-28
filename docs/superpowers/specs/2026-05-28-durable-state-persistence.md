@@ -53,7 +53,7 @@ Merge-as-promotion is inherent in git:
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.gitignore`                             | Remove `.engineering-docs-agent/state.json`                                                                                                                                                                                        |
 | `templates/state.schema.json`            | Drop `current_run` from `properties`                                                                                                                                                                                               |
-| `scripts/state_io.py`                    | Add `save_persistent_state(path, state)`; `load_state_validated` strips legacy `current_run` from committed state with an `info_only` partial reason                                                                               |
+| `scripts/state_io.py`                    | Add `save_persistent_state(path, state)`. `load_state_validated` is unchanged (see §5.2)                                                                                                                                           |
 | `scripts/orchestrator_runner.py`         | Replace 4 `state_path.write_text(json.dumps(state, indent=2))` sites (lines 1193, 1209, 1212, 1247) with `save_persistent_state(state_path, state)`; insert `last_successful_run` advancement immediately before line 1193's write |
 | `.engineering-docs-agent/state.json`     | Commit at current seed (`bcfc489ac5ccaf2533ad8634b80317d8c9330be8`, `pr_number: 41`) — this is what the local file already contains                                                                                                |
 | `README.md`                              | Update §"Self-hosting (dogfood)": state.json is committed; remove the `cp` step; explain merge-as-promotion in two sentences                                                                                                       |
@@ -64,7 +64,6 @@ Merge-as-promotion is inherent in git:
 | File                                                | Purpose                                                                                                                           |
 | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `tests/state_io/test_save_persistent_state.py`      | Unit tests for the helper: drops `current_run`, preserves other fields, atomic write semantics, schema-valid output               |
-| `tests/state_io/test_load_state_legacy_strip.py`    | Migration test: committed state with `current_run` is loaded with `current_run` stripped and an info-only partial reason recorded |
 | `tests/orchestrator/test_runner_state_promotion.py` | Integration test: runner advances `last_successful_run.head_sha` before commit; the committed file does not contain `current_run` |
 
 ### Remove
@@ -93,31 +92,19 @@ The trailing newline matches git's "files end with newline" convention and avoid
 
 The in-memory `state` dict is unchanged; `current_run` continues to be used by the runner for its lifetime.
 
-### 5.2 `load_state_validated` migration
+### 5.2 `load_state_validated` (no signature change)
 
-`load_state_validated` returns `(state, notes)` where `notes` is a list of strings the runner appends to `current_run.partial_reasons` as `info_only`. This keeps the helper pure (no logging side effects, no sentinel fields) while surfacing the migration to the run digest.
+**Revised during implementation (2026-05-28).** The original spec called for a `(state, notes)` tuple return + load-time strip of `current_run`. Investigation during Task 3 SDD found this conflicts with the runner's existing CCE-5 stale-detection hardening at `orchestrator_runner.py:836-853` (8 tests broke when load-time strip was introduced).
 
-```python
-# scripts/state_io.py
-def load_state_validated(path: Path) -> tuple[dict[str, Any], list[str]]:
-    notes: list[str] = []
-    if not path.exists():
-        return {"version": "1"}, notes
-    raw = json.loads(path.read_text())
-    if "current_run" in raw:
-        # Pre-CCE-40 state had current_run persisted. Drop it; the runner
-        # creates a fresh one each run anyway (orchestrator_runner.py:836-843).
-        raw = {k: v for k, v in raw.items() if k != "current_run"}
-        notes.append("state_legacy_current_run_stripped")
-    schema = json.loads((TEMPLATES_DIR / "state.schema.json").read_text())
-    try:
-        jsonschema.validate(raw, schema)
-    except jsonschema.ValidationError as e:
-        raise StateError(f"state invalid at {e.json_path}: {e.message}") from e
-    return raw, notes
-```
+The runner's pre-existing migration path is already correct:
 
-Callers at `orchestrator_runner.py:815` unpack the tuple and pass each note to `add_partial(state, note, info_only=True)` after `current_run` is initialized.
+1. `load_state_validated` returns state with `current_run` present if a legacy file has it.
+2. `state.pop("current_run", None)` at line 836 removes the legacy `current_run` from the in-memory dict and feeds it into stale-detection.
+3. If the popped `started_at` is >24h old, the runner emits `stale_current_run_cleared` info-only (existing CCE-5 behavior).
+4. Runner initializes a fresh in-memory `current_run`.
+5. `save_persistent_state` (Task 1) writes ONLY persistent fields to disk on subsequent writes — `current_run` from the legacy file is dropped at write time, silently.
+
+**No changes to `load_state_validated`.** Keep its `dict[str, Any]` return type. The strip-on-write semantics in Task 1 + the existing pop-and-stale-detect logic in the runner together cover the migration cleanly.
 
 ### 5.3 Runner state advancement
 
@@ -179,7 +166,7 @@ The `cp .engineering-docs-agent/state.example.json .engineering-docs-agent/state
 
 ## 6. Migration & backward compatibility
 
-**Host repos forked before CCE-40:** their local `state.json` may contain `current_run`. `load_state_validated` strips it and the runner records an info-only partial reason `state_legacy_current_run_stripped`. No operator action required.
+**Host repos forked before CCE-40:** their local `state.json` may contain `current_run`. The runner's existing pop-and-stale-detect at `orchestrator_runner.py:836-853` removes it from the in-memory dict (emitting `stale_current_run_cleared` info-only if the prior `started_at` is >24h old, per existing CCE-5 hardening). `save_persistent_state` then writes only persistent fields, so the file is silently cleaned on first write. No operator action required.
 
 **`state.example.json`:** stays for fresh-host bootstrap via the setup skill. Its content (pointing at SHA `1f4563c…`) does not change — that is the v0.1.0 tag commit, the right backfill window for a fresh host.
 

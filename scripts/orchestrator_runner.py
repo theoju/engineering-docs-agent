@@ -1378,11 +1378,24 @@ def run_bootstrap_core(
     """C2 bootstrap authoring entry. Reads <docs_dir>/.doc-core-manifest.json and
     authors each declared core page that has no file yet, via the unchanged
     page-author agent. Idempotent (create-missing only), diagram-free, best-effort
-    per page (a dispatch failure records a reason and continues). No-op when there
-    is no config docs_dir, no manifest, or an empty manifest. Returns 0 on
-    success/no-op, 2 on unreadable config. Prints a JSON ledger to stdout.
+    per page (a dispatch failure or post-write verification failure records a
+    reason and continues; the rejected file is deleted so re-run retries it).
+    No-op when there is no config docs_dir, no manifest, or an empty manifest.
+    Returns 0 on success/no-op, 2 on unreadable config. Prints a JSON ledger
+    to stdout.
+
+    Post-write verification (CCE-38): after each dispatch the orchestrator
+    re-parses the frontmatter the agent wrote and runs
+    ``description_quality.check_fm`` against it. Bad YAML, missing frontmatter,
+    or a thin description rejects the page (file deleted, reason recorded).
     """
     import frontmatter_contract as fmc
+    import archive_indexes
+
+    _lint_dir = str(Path(__file__).resolve().parent / "lint")
+    if _lint_dir not in sys.path:
+        sys.path.insert(0, _lint_dir)
+    import description_quality
 
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     if not cfg_path.exists():
@@ -1420,55 +1433,100 @@ def run_bootstrap_core(
     )
     lens = (section or {}).get("key") or "core"
 
-    ledger: dict = {"authored": [], "skipped_existing": [], "reasons": []}
-    for page in pages:
-        if not isinstance(page, dict) or "page" not in page:
-            ledger["reasons"].append("manifest_page_invalid")
-            continue
-        target_path = repo_root / docs_dir / page["page"]
+    def _check(target_path: Path, page: dict) -> tuple[bool, list[str]]:
+        if not target_path.exists():
+            # Dry-run path: _synthesize_core_page writes the body after dispatch
+            # returns. The integration tests cover the synth case separately.
+            return True, []
         try:
-            rel = target_path.resolve().relative_to(repo_root.resolve())
+            rel_inner = (
+                target_path.resolve().relative_to(repo_root.resolve()).as_posix()
+            )
         except ValueError:
-            ledger["reasons"].append(f"unsafe_page_path: {page['page']}")
-            continue
-        if not _page_target_is_editable(str(rel), editable_globs):
-            ledger["reasons"].append(f"unsafe_page_path: {rel}")
-            continue
-        if target_path.exists():
-            ledger["skipped_existing"].append(str(rel))
-            continue
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        out, reasons = dispatch_validated(
-            "page-author",
-            {
-                "target_path": str(target_path),
-                "action": "create",
-                "lens": lens,
-                "summaries": [],
-                "voice_samples": voice_samples,
-                "frontmatter_template": fmc.agent_authored_frontmatter_dict(
-                    description=page.get("title") or page.get("key") or "",
-                    source_files=page.get("source_files") or [],
-                    last_reviewed=today,
-                    status="draft",
-                ),
-                "manifest_page": page,
-            },
-            dry_run_dir=dry_run_dir,
-            cwd=repo_root,
+            rel_inner = target_path.as_posix()
+        try:
+            fm = archive_indexes.parse_frontmatter_strict(target_path.read_text())
+        except yaml.YAMLError as e:
+            return False, [
+                f"frontmatter_parse_error: {rel_inner}: {e.__class__.__name__}"
+            ]
+        except ValueError:
+            return False, [f"frontmatter_missing: {rel_inner}"]
+        ok, msg = description_quality.check_fm(
+            fm, title=page.get("title"), config=config
         )
-        ledger["reasons"].extend(reasons)
-        if out is None:
-            if not reasons:
-                ledger["reasons"].append(f"page_author_invalid: {rel}")
-            continue
-        if out.get("ok"):
-            if dry_run_dir and not target_path.exists():
-                _synthesize_core_page(target_path, page, today)
-            ledger["authored"].append(str(rel))
-        else:
-            err = out.get("error") or "page-author returned ok=false"
-            ledger["reasons"].append(f"page_author_error: {rel}: {err}")
+        if not ok:
+            return False, [f"description_quality: {rel_inner}: {msg}"]
+        return True, []
+
+    progress = _BootstrapProgress(repo_root, total=len(pages))
+    progress.start()
+
+    ledger: dict = {"authored": [], "skipped_existing": [], "reasons": []}
+    try:
+        for page in pages:
+            if not isinstance(page, dict) or "page" not in page:
+                ledger["reasons"].append("manifest_page_invalid")
+                continue
+            target_path = repo_root / docs_dir / page["page"]
+            try:
+                rel = target_path.resolve().relative_to(repo_root.resolve())
+            except ValueError:
+                ledger["reasons"].append(f"unsafe_page_path: {page['page']}")
+                continue
+            rel_posix = rel.as_posix()
+            if not _page_target_is_editable(str(rel), editable_globs):
+                ledger["reasons"].append(f"unsafe_page_path: {rel}")
+                continue
+            if target_path.exists():
+                ledger["skipped_existing"].append(str(rel))
+                progress.mark_skipped(rel_posix)
+                continue
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            progress.begin_page(rel_posix)
+            out, reasons = dispatch_verified(
+                "page-author",
+                {
+                    "target_path": str(target_path),
+                    "action": "create",
+                    "lens": lens,
+                    "summaries": [],
+                    "voice_samples": voice_samples,
+                    "frontmatter_template": fmc.agent_authored_frontmatter_dict(
+                        description=page.get("title") or page.get("key") or "",
+                        source_files=page.get("source_files") or [],
+                        last_reviewed=today,
+                        status="draft",
+                    ),
+                    "manifest_page": page,
+                },
+                dry_run_dir=dry_run_dir,
+                cwd=repo_root,
+                post_write_check=_check,
+                target_path=target_path,
+                manifest_page=page,
+            )
+            ledger["reasons"].extend(reasons)
+            if out is None:
+                if not reasons:
+                    ledger["reasons"].append(f"page_author_invalid: {rel}")
+                # Find the matching reason (if any) for the progress file.
+                progress.mark_failed(
+                    rel_posix, reason=reasons[-1] if reasons else "page_author_invalid"
+                )
+                continue
+            if out.get("ok"):
+                if dry_run_dir and not target_path.exists():
+                    _synthesize_core_page(target_path, page, today)
+                ledger["authored"].append(str(rel))
+                progress.mark_completed(rel_posix)
+            else:
+                err = out.get("error") or "page-author returned ok=false"
+                msg = f"page_author_error: {rel}: {err}"
+                ledger["reasons"].append(msg)
+                progress.mark_failed(rel_posix, reason=msg)
+    finally:
+        progress.finish()
 
     print(json.dumps(ledger, indent=2))
     return 0

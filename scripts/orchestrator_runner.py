@@ -1388,11 +1388,22 @@ def open_or_append_pr(
     """
     reasons: list[tuple[str, bool]] = []
 
-    checkout = subprocess.run(
-        ["git", "-C", str(repo_root), "checkout", "-B", branch],
+    # CCE-42: fetch the remote branch first so same-hour reruns base their
+    # local branch on the existing remote tip — append-commit semantics per
+    # agents/engineering-docs-agent.md ("If a branch with that name exists
+    # AND has an open PR: git checkout it, add the new commits, git push.
+    # Append-commit, no force-push."). Without this fetch, `git checkout -B`
+    # would reset the local branch to HEAD (main) and the subsequent push
+    # would fail non-fast-forward against any existing remote SHA.
+    fetch = subprocess.run(
+        ["git", "-C", str(repo_root), "fetch", "origin", branch],
         capture_output=True,
         text=True,
     )
+    checkout_argv = ["git", "-C", str(repo_root), "checkout", "-B", branch]
+    if fetch.returncode == 0:
+        checkout_argv.append(f"origin/{branch}")
+    checkout = subprocess.run(checkout_argv, capture_output=True, text=True)
     if checkout.returncode != 0:
         reasons.append(
             (f"checkout_failed: {checkout.stderr.strip()[:_STDERR_TRUNCATE]}", False)

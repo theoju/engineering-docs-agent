@@ -70,3 +70,73 @@ def check_fm(
         return False, f"min_words: {word_count} < {cfg['min_words']}"
 
     return True, "ok"
+
+
+# Path-reading shim ---------------------------------------------------------
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import yaml
+
+# Sibling-script import pattern: place the parent scripts/ on sys.path so the
+# in-repo frontmatter_contract and archive_indexes modules resolve. Mirrors
+# frontmatter_schema.py:10.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import archive_indexes  # noqa: E402
+import frontmatter_contract as fc  # noqa: E402
+
+
+def load_config(path: Path) -> dict[str, Any]:
+    return yaml.safe_load(path.read_text()) or {}
+
+
+def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
+    """Read ``path``, resolve its section generator, and apply ``check_fm`` only
+    to agent-authored pages. Non-agent-authored sections are silent no-ops.
+
+    Frontmatter parse errors are reported as failures so this rule can also
+    surface gap-3-class defects when invoked through ``lint_runner`` rather
+    than the bootstrap callback. (The bootstrap path uses
+    ``parse_frontmatter_strict`` directly so it can record distinct reasons.)
+    """
+    if not path.exists():
+        return False, "file not found"
+    generator = fc.section_generator_for(path, config)
+    if generator != "agent-authored":
+        return True, "not agent-authored; skipped"
+    text = path.read_text()
+    try:
+        fm = archive_indexes.parse_frontmatter_strict(text)
+    except yaml.YAMLError:
+        return False, "frontmatter YAML parse error"
+    except ValueError:
+        return False, "no frontmatter block"
+    title, _ = archive_indexes.parse_title_and_summary(text)
+    return check_fm(fm, title=title or None, config=config)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--paths", type=Path, nargs="+", required=True)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    config = load_config(args.config)
+    results, any_failed = [], False
+    for p in args.paths:
+        ok, message = check_path(p, config)
+        results.append({"path": str(p), "ok": ok, "message": message})
+        if not ok:
+            any_failed = True
+    if args.json:
+        json.dump(
+            {"rule": RULE_NAME, "severity": SEVERITY, "results": results}, sys.stdout
+        )
+    return 1 if any_failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

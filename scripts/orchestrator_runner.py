@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse, fnmatch, json, os, subprocess, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 import yaml
 
 from gh_client import GhClient
@@ -517,6 +517,46 @@ def dispatch_validated(
         return None, dispatch_reasons + reasons
     # Return raw (not the dataclass) so call sites can keep using dict.get() patterns.
     return raw, dispatch_reasons
+
+
+def dispatch_verified(
+    name: str,
+    inputs: dict,
+    *,
+    dry_run_dir: Path | None,
+    cwd: Path | None = None,
+    post_write_check: Callable[[Path, dict], tuple[bool, list[str]]] | None = None,
+    target_path: Path | None = None,
+    manifest_page: dict | None = None,
+) -> tuple[dict | None, list[str]]:
+    """Dispatch a subagent through ``dispatch_validated``, then run an optional
+    post-write check against the artifact the agent produced.
+
+    On check failure, ``target_path`` is unlinked so the next bootstrap run
+    retries this page (the orchestrator's existing
+    ``if target_path.exists(): skip`` idempotency is the retry mechanism). The
+    augmented reason list is returned alongside ``out=None`` so the caller's
+    ledger receives the rejection.
+
+    ``post_write_check=None`` is a pure pass-through — callers that haven't
+    opted in see no behavior change.
+    """
+    out, reasons = dispatch_validated(name, inputs, dry_run_dir=dry_run_dir, cwd=cwd)
+    if out is None or post_write_check is None:
+        return out, reasons
+    if target_path is None:
+        raise ValueError(
+            "dispatch_verified: target_path is required when post_write_check is set"
+        )
+    ok, check_reasons = post_write_check(target_path, manifest_page or {})
+    if ok:
+        return out, reasons
+    # Reject: delete the artifact and roll up the new reasons.
+    try:
+        target_path.unlink(missing_ok=True)
+    except OSError as e:
+        check_reasons.append(f"unlink_failed: {target_path}: {e}")
+    return None, reasons + check_reasons
 
 
 def _page_target_is_editable(rel_posix: str, editable_globs: list[str]) -> bool:

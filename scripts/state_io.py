@@ -201,6 +201,22 @@ def save_persistent_state(path: Path, state: dict[str, Any]) -> None:
     path.write_text(json.dumps(persistent, indent=2) + "\n")
 
 
+def save_current_run(path: Path, state: dict[str, Any]) -> None:
+    """Write the ephemeral current_run to <path's parent>/current_run.json
+    for diagnostics + test observability.
+
+    The file is gitignored (see .gitignore) and not part of the
+    merge-as-promotion path — only state.json is committed. If `state`
+    has no `current_run` key, this is a no-op (no file is created or
+    cleared); the existing sibling file, if any, is left untouched.
+    """
+    cr = state.get("current_run")
+    if cr is None:
+        return
+    target = path.parent / "current_run.json"
+    target.write_text(json.dumps({"current_run": cr}, indent=2) + "\n")
+
+
 def add_partial(state: dict, reason: str, *, info_only: bool = False) -> None:
     """Append a partial reason to current_run.partial_reasons.
 

@@ -83,8 +83,9 @@ def test_schema_invalid_source_collector_yields_specific_reason(tmp_path):
         f"got rc={r.returncode}\nstdout={r.stdout}\nstderr={r.stderr}"
     )
 
-    state = json.loads(state_path.read_text())
-    reasons = state["current_run"]["partial_reasons"]
+    cr_path = state_path.parent / "current_run.json"
+    cr = json.loads(cr_path.read_text())["current_run"]
+    reasons = cr["partial_reasons"]
 
     schema_reasons = [
         reason
@@ -104,5 +105,5 @@ def test_schema_invalid_source_collector_yields_specific_reason(tmp_path):
         f"specific schema reason should suppress the generic returned-None reason; got {reasons}"
     )
 
-    assert state["current_run"]["partial"] is True
-    assert state["current_run"]["pr_number"] is None
+    assert cr["partial"] is True
+    assert cr["pr_number"] is None

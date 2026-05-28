@@ -262,3 +262,33 @@ def test_save_persistent_state_writes_trailing_newline(tmp_path):
     save_persistent_state(p, {"version": "1"})
     raw = p.read_text()
     assert raw.endswith("\n"), f"expected trailing newline, got {raw!r}"
+
+
+def test_save_current_run_writes_sibling(tmp_path):
+    from state_io import save_current_run
+
+    state_path = tmp_path / "state.json"
+    state = {
+        "version": "1",
+        "current_run": {
+            "started_at": "2026-05-28T00:00:00+00:00",
+            "partial": False,
+            "partial_reasons": [],
+        },
+    }
+    save_current_run(state_path, state)
+    sibling = tmp_path / "current_run.json"
+    assert sibling.exists(), "save_current_run must write a sibling current_run.json"
+    data = json.loads(sibling.read_text())
+    assert data == {"current_run": state["current_run"]}
+
+
+def test_save_current_run_noop_when_absent(tmp_path):
+    from state_io import save_current_run
+
+    state_path = tmp_path / "state.json"
+    save_current_run(state_path, {"version": "1"})
+    sibling = tmp_path / "current_run.json"
+    assert not sibling.exists(), (
+        "save_current_run must not create a file when state has no current_run"
+    )

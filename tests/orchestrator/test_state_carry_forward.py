@@ -38,6 +38,12 @@ notifications:
 """
 
 
+def _read_current_run(state_path: Path) -> dict:
+    """CCE-40: current_run lives in a sibling file, not state.json."""
+    sibling = state_path.parent / "current_run.json"
+    return json.loads(sibling.read_text())["current_run"]
+
+
 def _init_host(tmp_path: Path, seeded_state: dict) -> Path:
     (tmp_path / ".engineering-docs-agent").mkdir()
     (tmp_path / ".engineering-docs-agent" / "config.yml").write_text(CONFIG_YAML)
@@ -100,8 +106,8 @@ def test_prior_run_partial_reasons_do_not_carry_forward(tmp_path):
         f"rc={r.returncode}\nstdout={r.stdout}\nstderr={r.stderr}"
     )
 
-    state = json.loads(state_path.read_text())
-    reasons = state["current_run"].get("partial_reasons", [])
+    cr = _read_current_run(state_path)
+    reasons = cr.get("partial_reasons", [])
     assert reasons == [], (
         f"prior-run transient reasons must not carry forward; got {reasons}"
     )
@@ -124,8 +130,7 @@ def test_fresh_run_after_failed_run_starts_with_empty_reasons(tmp_path):
     r = _run_orchestrator(tmp_path)
     assert r.returncode == 0, r.stderr
 
-    state = json.loads(state_path.read_text())
-    cr = state["current_run"]
+    cr = _read_current_run(state_path)
     assert cr.get("partial") is False, (
         f"clean run after failed run should have partial=false; got {cr}"
     )
@@ -154,8 +159,8 @@ def test_stale_clear_signal_still_emitted_against_fresh_reasons(tmp_path):
     r = _run_orchestrator(tmp_path)
     assert r.returncode == 0, r.stderr
 
-    state = json.loads(state_path.read_text())
-    reasons = state["current_run"]["partial_reasons"]
+    cr = _read_current_run(state_path)
+    reasons = cr["partial_reasons"]
     assert "stale_current_run_cleared" in reasons, (
         f"stale-clear signal must still fire; got {reasons}"
     )
@@ -186,8 +191,7 @@ def test_stale_current_run_cleared_is_info_only(tmp_path):
     r = _run_orchestrator(tmp_path)
     assert r.returncode == 0, r.stderr
 
-    state = json.loads(state_path.read_text())
-    cr = state["current_run"]
+    cr = _read_current_run(state_path)
     assert cr.get("partial") is False, (
         f"info-only stale_current_run_cleared must not flip partial=True; got {cr}"
     )

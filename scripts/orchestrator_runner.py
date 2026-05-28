@@ -22,6 +22,8 @@ from state_io import (
     load_state_validated,
     load_voice_samples,
     resolve_lens,
+    save_current_run,
+    save_persistent_state,
 )
 
 
@@ -1189,8 +1191,18 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         existing = whats_new.read_text() if whats_new.exists() else ""
         whats_new.write_text(_compose_whats_new(existing, entry))
 
+    # CCE-40: promote current_run.head_sha into last_successful_run.
+    # The merge of the docs-agent PR is what actually promotes this to
+    # main; until then the advance lives only on the docs-agent branch
+    # and on disk locally. If PR open fails, nothing reaches main and
+    # the next run reads the unchanged committed state.
+    state["last_successful_run"] = {
+        "head_sha": state["current_run"]["head_sha"],
+        "completed_at": now,
+    }
     state["current_run"]["pr_number"] = None
-    state_path.write_text(json.dumps(state, indent=2))
+    save_persistent_state(state_path, state)
+    save_current_run(state_path, state)
     if no_pr:
         return 0
     branch = branch_name(now)
@@ -1206,10 +1218,12 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     for reason, info_only in pr_reasons:
         add_partial(state, reason, info_only=info_only)
     if pr_number is None:
-        state_path.write_text(json.dumps(state, indent=2))
+        save_persistent_state(state_path, state)
+        save_current_run(state_path, state)
         return 1
     state["current_run"]["pr_number"] = pr_number
-    state_path.write_text(json.dumps(state, indent=2))
+    save_persistent_state(state_path, state)
+    save_current_run(state_path, state)
 
     # Compose digest and dispatch notifier.
     digest = {
@@ -1244,7 +1258,8 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     if notifier_result is None:
         if not reasons:
             add_partial(state, "notifier_invalid: returned None")
-        state_path.write_text(json.dumps(state, indent=2))
+        save_persistent_state(state_path, state)
+        save_current_run(state_path, state)
     return 0
 
 

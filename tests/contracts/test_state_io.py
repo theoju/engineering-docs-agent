@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import sys
 from pathlib import Path
 
@@ -218,3 +219,46 @@ def test_resolve_lens_dict_form():
     path, opts = resolve_lens(cfg, "archive")
     assert str(path) == "docs/archive"
     assert opts == {"archive_index": True}
+
+
+def test_save_persistent_state_strips_current_run(tmp_path):
+    from state_io import save_persistent_state
+
+    state = {
+        "version": "1",
+        "last_successful_run": {"head_sha": "abc123"},
+        "current_run": {
+            "started_at": "2026-05-28T20:00:00+00:00",
+            "head_sha": "def456",
+        },
+    }
+    p = tmp_path / "state.json"
+    save_persistent_state(p, state)
+    written = json.loads(p.read_text())
+    assert "current_run" not in written
+    assert written["last_successful_run"]["head_sha"] == "abc123"
+    assert written["version"] == "1"
+
+
+def test_save_persistent_state_preserves_other_fields(tmp_path):
+    from state_io import save_persistent_state
+
+    state = {
+        "version": "1",
+        "last_successful_run": {"head_sha": "abc"},
+        "dismissed_gap_flags": {"foo/bar#1": "wontfix"},
+        "cursors": {"some": "data"},
+    }
+    p = tmp_path / "state.json"
+    save_persistent_state(p, state)
+    written = json.loads(p.read_text())
+    assert written == state
+
+
+def test_save_persistent_state_writes_trailing_newline(tmp_path):
+    from state_io import save_persistent_state
+
+    p = tmp_path / "state.json"
+    save_persistent_state(p, {"version": "1"})
+    raw = p.read_text()
+    assert raw.endswith("\n"), f"expected trailing newline, got {raw!r}"

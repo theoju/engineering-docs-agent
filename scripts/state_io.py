@@ -188,6 +188,19 @@ def load_state_validated(path: Path) -> dict[str, Any]:
     return raw
 
 
+_EPHEMERAL_KEYS = ("current_run",)
+
+
+def save_persistent_state(path: Path, state: dict[str, Any]) -> None:
+    """Write only persistent fields of `state` to `path` as JSON.
+
+    Ephemeral fields (current_run) are dropped before writing. The on-disk
+    copy is the source of truth promoted by merging the docs-agent PR.
+    """
+    persistent = {k: v for k, v in state.items() if k not in _EPHEMERAL_KEYS}
+    path.write_text(json.dumps(persistent, indent=2) + "\n")
+
+
 def add_partial(state: dict, reason: str, *, info_only: bool = False) -> None:
     """Append a partial reason to current_run.partial_reasons.
 

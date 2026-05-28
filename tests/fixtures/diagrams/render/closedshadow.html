@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8" />
+<!-- Simulates mkdocs-material 9.x: the Mermaid renderer replaces a
+     `<pre class="mermaid">` with an empty `<div class="mermaid">` whose
+     closed shadow root holds the rendered SVG. The host element's own
+     layout is the only signal the gate can measure. -->
+<pre class="mermaid">flowchart TD; A--&gt;B;</pre>
+<script>
+  window.addEventListener("load", () => {
+    document.querySelectorAll("pre.mermaid").forEach((pre) => {
+      const div = document.createElement("div");
+      div.className = "mermaid";
+      pre.replaceWith(div);
+      const shadow = div.attachShadow({ mode: "closed" });
+      shadow.innerHTML =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" ' +
+        'viewBox="0 0 300 200" aria-roledescription="flowchart">' +
+        '<rect x="10" y="10" width="280" height="180" fill="none" stroke="#000"/>' +
+        "</svg>";
+    });
+  });
+</script>

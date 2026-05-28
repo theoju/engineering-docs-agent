@@ -115,35 +115,60 @@ def ledger_ok(ledger: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 # Mermaid renders asynchronously; wait until every .mermaid element has either
-# produced an <svg> or surfaced an error, rather than sleeping a fixed interval
-# (a flat sleep risks a FALSE count_mismatch on a slow CI runner). A page with no
-# diagram / no loader script never settles and times out -> we then measure as-is.
+# produced an <svg>, surfaced an error, or (for mkdocs-material's closed-shadow
+# render path) emptied its host and grown a non-trivial bounding box. A flat
+# sleep risks a FALSE count_mismatch on a slow CI runner; a page with no diagram
+# / no loader script never settles and times out -> we then measure as-is.
 _RENDER_SETTLED_JS = r"""
 () => {
   const els = Array.from(document.querySelectorAll('.mermaid, pre.mermaid'));
   if (els.length === 0) return true;
-  return els.every(el =>
-    el.querySelector('svg') ||
-    /syntax error/i.test(el.textContent || '') ||
-    el.querySelector('[class*="error"]') !== null
-  );
+  return els.every(el => {
+    if (el.querySelector('svg')) return true;
+    if (el.shadowRoot && el.shadowRoot.querySelector('svg')) return true;
+    if (/syntax error/i.test(el.textContent || '')) return true;
+    if (el.querySelector('[class*="error"]') !== null) return true;
+    // Closed-shadow render: host has been emptied and laid out with non-trivial
+    // geometry. mkdocs-material 9.x attaches a closed shadow root containing the
+    // Mermaid SVG, so we can only see the host's layout, not the SVG itself.
+    const box = el.getBoundingClientRect();
+    if (el.innerHTML.length === 0 && box.height > 10 && box.width > 10) return true;
+    return false;
+  });
 }
 """
 
-# In-page measurement: per .mermaid element, does it carry a real <svg> with
-# non-zero geometry and NO Mermaid error signature? Returns one dict per element.
+# In-page measurement: per .mermaid element, did it render to a real diagram
+# with non-trivial geometry and NO Mermaid error signature? "Render" covers
+# three modes: SVG in the regular DOM, SVG in an open shadow root, and the
+# closed-shadow path mkdocs-material 9.x uses (host emptied, shadow inaccessible,
+# layout forced by the shadow SVG).  Returns one dict per element.
 _MEASURE_JS = r"""
 () => {
   const els = Array.from(document.querySelectorAll('.mermaid, pre.mermaid'));
   return els.map(el => {
-    const svg = el.querySelector('svg');
-    const box = svg ? svg.getBoundingClientRect() : {width: 0, height: 0};
+    // Regular DOM first; fall back to an open shadow root if one exists.
+    // (Closed shadow roots return null from .shadowRoot and are unreachable.)
+    let svg = el.querySelector('svg');
+    if (!svg && el.shadowRoot) svg = el.shadowRoot.querySelector('svg');
+
+    const hostBox = el.getBoundingClientRect();
+    // Closed-shadow heuristic: no reachable SVG, host emptied by the renderer,
+    // host laid out with non-trivial geometry. mkdocs-material 9.x renders
+    // Mermaid this way; the host's own box is the only signal we get.
+    const closedShadowRendered = !svg
+      && el.innerHTML.length === 0
+      && hostBox.height > 10
+      && hostBox.width > 10;
+
+    const box = svg ? svg.getBoundingClientRect() : hostBox;
     const txt = (el.textContent || '');
     const hasError =
       /syntax error/i.test(txt) ||
       el.querySelector('[class*="error"]') !== null ||
       (svg && /error/i.test(svg.getAttribute('aria-roledescription') || ''));
-    return { hasSvg: !!svg, w: box.width, h: box.height, hasError,
+    return { rendered: !!svg || closedShadowRendered,
+             w: box.width, h: box.height, hasError,
              errText: hasError ? txt.trim().slice(0, 120) : "" };
   });
 }
@@ -197,7 +222,7 @@ def _assert_page(page_obj, url: str) -> dict:
     rendered_ok = sum(
         1
         for m in measured
-        if m["hasSvg"] and m["w"] > 0 and m["h"] > 0 and not m["hasError"]
+        if m["rendered"] and m["w"] > 0 and m["h"] > 0 and not m["hasError"]
     )
     error_boxes = [
         m.get("errText") or "mermaid error" for m in measured if m["hasError"]

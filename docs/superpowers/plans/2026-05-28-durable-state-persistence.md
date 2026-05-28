@@ -469,7 +469,19 @@ EOF
 
 ---
 
-## Task 4: Runner advances `last_successful_run` and writes only persistent fields
+## Task 4: Runner advances `last_successful_run`; writes persistent + ephemeral to separate files
+
+> **Scope expanded during SDD (2026-05-28 14:10 PDT).** The initial Task 4 design wrote ONLY persistent fields to disk and held `current_run` in memory. SDD execution exposed 16 pre-existing tests (across `test_state_carry_forward.py`, `test_pipeline_integration.py`, `test_schema_invalid_soft_fail.py`, `test_e2e_main.py`) that observe `current_run` content via on-disk reads of `state.json`. To preserve test observability AND keep `state.json` clean for merge-as-promotion, the runner now writes ephemeral `current_run` to a sibling gitignored file `.engineering-docs-agent/current_run.json` via a new `save_current_run(path, state)` helper.
+>
+> Expanded scope:
+>
+> - **Step 4.0 (NEW):** Add `save_current_run(path, state)` helper to `scripts/state_io.py` + 2 unit tests.
+> - **Step 4.5 (modified):** At each of the 4 runner write sites, call BOTH `save_persistent_state(state_path, state)` AND `save_current_run(state_path, state)`. The helper resolves the sibling path internally as `state_path.parent / "current_run.json"`.
+> - **Step 4.6 (NEW):** Update 16 test sites that read `state["current_run"]…` from `state.json` to read from the sibling `current_run.json` instead.
+> - **Step 4.7 (modified):** Run full suite; expect ~567 passed (565 + 2 new helper tests).
+> - **Step 4.8 (renumbered commit):** single commit covering helper, runner, and test migration.
+>
+> `current_run.json` is added to `.gitignore` in Task 5 (along with the existing removal of `state.json`).
 
 **Files:**
 
@@ -797,7 +809,7 @@ cat > .engineering-docs-agent/state.json <<'EOF'
 EOF
 ```
 
-- [ ] **Step 5.2: Remove the gitignore entries**
+- [ ] **Step 5.2: Update the gitignore entries**
 
 Open `.gitignore`. Find lines 220-221:
 
@@ -806,7 +818,14 @@ Open `.gitignore`. Find lines 220-221:
 .engineering-docs-agent/state.json
 ```
 
-Delete both lines. The next/prior `.engineering-docs-agent/` entries (e.g., for `current_run.json` if any) stay as-is; verify by viewing the surrounding context with `sed -n '215,225p' .gitignore` after the edit.
+Replace with:
+
+```
+# engineering-docs-agent ephemeral run state (gitignored; state.json committed)
+.engineering-docs-agent/current_run.json
+```
+
+The committed `.engineering-docs-agent/state.json` carries persistent fields; `current_run.json` carries ephemeral run state (debugging + test observability — Task 4). Verify with `sed -n '215,225p' .gitignore` after the edit.
 
 - [ ] **Step 5.3: Verify git now sees state.json as a candidate**
 

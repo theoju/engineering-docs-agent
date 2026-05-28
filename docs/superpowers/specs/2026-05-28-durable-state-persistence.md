@@ -31,10 +31,10 @@ Make state persist across nightly runs through git itself, so each cron fire adv
 
 State splits by lifecycle, not by file count:
 
-| Field                                                                       | Lifecycle                         | Storage                                                                      |
-| --------------------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------- |
-| `version`, `last_successful_run.*`, `dismissed_gap_flags`, `cursors`        | persistent (one update per merge) | committed `state.json`                                                       |
-| `current_run.*` (started_at, head_sha, partial, partial_reasons, pr_number) | ephemeral (one run's lifetime)    | in-memory only; optionally written to `DOCS_AGENT_DEBUG_DIR` for diagnostics |
+| Field                                                                       | Lifecycle                         | Storage                                                                                                                                  |
+| --------------------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`, `last_successful_run.*`, `dismissed_gap_flags`, `cursors`        | persistent (one update per merge) | committed `state.json`                                                                                                                   |
+| `current_run.*` (started_at, head_sha, partial, partial_reasons, pr_number) | ephemeral (one run's lifetime)    | gitignored sibling file `.engineering-docs-agent/current_run.json`, written at every state-update for diagnostics and test observability |
 
 Merge-as-promotion is inherent in git:
 
@@ -49,15 +49,16 @@ Merge-as-promotion is inherent in git:
 
 ### Modify
 
-| File                                     | Change                                                                                                                                                                                                                             |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.gitignore`                             | Remove `.engineering-docs-agent/state.json`                                                                                                                                                                                        |
-| `templates/state.schema.json`            | Drop `current_run` from `properties`                                                                                                                                                                                               |
-| `scripts/state_io.py`                    | Add `save_persistent_state(path, state)`. `load_state_validated` is unchanged (see §5.2)                                                                                                                                           |
-| `scripts/orchestrator_runner.py`         | Replace 4 `state_path.write_text(json.dumps(state, indent=2))` sites (lines 1193, 1209, 1212, 1247) with `save_persistent_state(state_path, state)`; insert `last_successful_run` advancement immediately before line 1193's write |
-| `.engineering-docs-agent/state.json`     | Commit at current seed (`bcfc489ac5ccaf2533ad8634b80317d8c9330be8`, `pr_number: 41`) — this is what the local file already contains                                                                                                |
-| `README.md`                              | Update §"Self-hosting (dogfood)": state.json is committed; remove the `cp` step; explain merge-as-promotion in two sentences                                                                                                       |
-| `skills/engineering-docs-agent/SKILL.md` | Update "State transitions" + "PR handling" sections: replace "promotion happens via a follow-up workflow when the PR merges" with the merge-as-promotion model implemented here                                                    |
+| File                                             | Change                                                                                                                                                                                                                                   |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.gitignore`                                     | Remove `.engineering-docs-agent/state.json`; ADD `.engineering-docs-agent/current_run.json` (new gitignored ephemeral file)                                                                                                              |
+| `templates/state.schema.json`                    | Drop `current_run` from `properties`                                                                                                                                                                                                     |
+| `scripts/state_io.py`                            | Add `save_persistent_state(path, state)` AND `save_current_run(path, state)`. `load_state_validated` is unchanged (see §5.2)                                                                                                             |
+| `scripts/orchestrator_runner.py`                 | At each of the 4 state-write sites (lines 1193, 1209, 1212, 1247), call BOTH `save_persistent_state(state_path, state)` AND `save_current_run(state_path, state)`; insert `last_successful_run` advancement immediately before line 1193 |
+| `tests/orchestrator/*` (16 sites across 4 files) | Update `state["current_run"]…` assertions to read from `current_run.json` instead of `state.json`. Affected: `test_state_carry_forward.py`, `test_pipeline_integration.py`, `test_schema_invalid_soft_fail.py`, `test_e2e_main.py`       |
+| `.engineering-docs-agent/state.json`             | Commit at current seed (`bcfc489ac5ccaf2533ad8634b80317d8c9330be8`, `pr_number: 41`) — this is what the local file already contains                                                                                                      |
+| `README.md`                                      | Update §"Self-hosting (dogfood)": state.json is committed; remove the `cp` step; explain merge-as-promotion in two sentences                                                                                                             |
+| `skills/engineering-docs-agent/SKILL.md`         | Update "State transitions" + "PR handling" sections: replace "promotion happens via a follow-up workflow when the PR merges" with the merge-as-promotion model implemented here                                                          |
 
 ### Create
 

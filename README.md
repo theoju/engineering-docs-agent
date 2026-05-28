@@ -47,6 +47,19 @@ The seed `last_successful_run.head_sha` points to the v0.1.0 tag commit, giving 
 
 > Publish-verification is configured against a `deploy.yml` GitHub Actions workflow that is not yet committed; the `--no-pr` flag above keeps the bootstrap dry-run only. Wiring up the workflow + end-to-end publish path is tracked separately.
 
+### Nightly authoring run
+
+The main authoring pipeline (`scripts/orchestrator_runner.py` with no subcommand) runs automatically once daily at 07:00 UTC via `.github/workflows/docs-agent-nightly.yml`. The workflow opens or append-commits to a `docs-agent/YYYY-MM-DD` PR; per spec §8, a partial run still opens the PR with `partial: true` in the body so an operational gap is visible, not silent.
+
+To fire it manually:
+
+```bash
+gh workflow run docs-agent-nightly.yml -f reason="<your reason>"
+gh run watch
+```
+
+The `reason` input is a free-text label surfaced in the run summary alongside the post-run `state.json` snapshot. Auth is via the `CLAUDE_CODE_OAUTH_TOKEN` repo secret (same secret as `release.yml`). One run at a time per repo — concurrent invocations queue rather than race on the same docs-agent branch.
+
 ### Install from local clone
 
 If you're working from a checkout of this repo (e.g., to test changes before publishing), register the local marketplace and install the plugin:

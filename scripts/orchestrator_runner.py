@@ -1400,18 +1400,10 @@ def open_or_append_pr(
         capture_output=True,
         text=True,
     )
+    checkout_argv = ["git", "-C", str(repo_root), "checkout", "-B", branch]
     if fetch.returncode == 0:
-        checkout = subprocess.run(
-            ["git", "-C", str(repo_root), "checkout", "-B", branch, f"origin/{branch}"],
-            capture_output=True,
-            text=True,
-        )
-    else:
-        checkout = subprocess.run(
-            ["git", "-C", str(repo_root), "checkout", "-B", branch],
-            capture_output=True,
-            text=True,
-        )
+        checkout_argv.append(f"origin/{branch}")
+    checkout = subprocess.run(checkout_argv, capture_output=True, text=True)
     if checkout.returncode != 0:
         reasons.append(
             (f"checkout_failed: {checkout.stderr.strip()[:_STDERR_TRUNCATE]}", False)

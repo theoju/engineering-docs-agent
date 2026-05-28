@@ -292,3 +292,19 @@ def test_save_current_run_noop_when_absent(tmp_path):
     assert not sibling.exists(), (
         "save_current_run must not create a file when state has no current_run"
     )
+
+
+def test_save_current_run_clears_stale_sibling(tmp_path):
+    """When in-memory state has no current_run, an existing sibling is removed
+    so on-disk state matches memory (no orphaned ephemeral data)."""
+    from state_io import save_current_run
+
+    state_path = tmp_path / "state.json"
+    sibling = tmp_path / "current_run.json"
+    sibling.write_text(json.dumps({"current_run": {"started_at": "stale"}}) + "\n")
+
+    save_current_run(state_path, {"version": "1"})
+
+    assert not sibling.exists(), (
+        "save_current_run must remove a stale sibling when state has no current_run"
+    )

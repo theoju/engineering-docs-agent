@@ -202,18 +202,18 @@ def save_persistent_state(path: Path, state: dict[str, Any]) -> None:
 
 
 def save_current_run(path: Path, state: dict[str, Any]) -> None:
-    """Write the ephemeral current_run to <path's parent>/current_run.json
-    for diagnostics + test observability.
+    """Sync the ephemeral current_run to <path's parent>/current_run.json.
 
-    The file is gitignored (see .gitignore) and not part of the
-    merge-as-promotion path — only state.json is committed. If `state`
-    has no `current_run` key, this is a no-op (no file is created or
-    cleared); the existing sibling file, if any, is left untouched.
+    The sibling file is gitignored (see .gitignore) and not part of the
+    merge-as-promotion path — only state.json is committed. When `state`
+    carries a `current_run`, write the sibling. When it doesn't, remove
+    any stale sibling so on-disk state matches in-memory state.
     """
+    target = path.parent / "current_run.json"
     cr = state.get("current_run")
     if cr is None:
+        target.unlink(missing_ok=True)
         return
-    target = path.parent / "current_run.json"
     target.write_text(json.dumps({"current_run": cr}, indent=2) + "\n")
 
 

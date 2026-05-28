@@ -59,3 +59,29 @@ def test_assert_page_blank_renders_nothing():
     assert result["http_status"] == 200
     assert result["rendered_ok"] == 0
     assert result["error_boxes"] == []
+
+
+def test_verify_site_passes_for_closed_shadow_render(tmp_path):
+    """CCE-37: mkdocs-material 9.x renders Mermaid into a closed shadow root.
+    `el.querySelector('svg')` can't see in. The gate must treat an emptied
+    `.mermaid` host with non-trivial bounding-box geometry as a successful
+    render. Without this, every Material-built page with a real Mermaid block
+    would surface a false `count_mismatch`.
+    """
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "closedshadow.html").write_text((FIX / "closedshadow.html").read_text())
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "closedshadow.md").write_text((FIX / "src" / "closedshadow.md").read_text())
+    ledger = vd.verify_site(site, src, FIX)
+    assert ledger["failures"] == [], f"unexpected failures: {ledger['failures']}"
+    assert ledger["rendered_diagrams"] == 1
+    assert vd.ledger_ok(ledger) is True
+
+
+def test_assert_page_closed_shadow_render_counts_as_rendered():
+    result = vd._render_one(FIX, "closedshadow.html")
+    assert result["http_status"] == 200
+    assert result["rendered_ok"] == 1, result
+    assert result["error_boxes"] == []

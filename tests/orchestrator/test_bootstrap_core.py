@@ -361,8 +361,8 @@ def test_bootstrap_core_e2e_creates_then_idempotent(tmp_path):
 def _spy_with_body_writer(calls, body_writer, result=({"ok": True}, [])):
     """A fake dispatch_validated that ALSO writes the page body, mimicking
     the production page-author (which uses its Write tool before returning).
-    body_writer(target_path: Path, page: dict, today: str) -> str writes the
-    text to disk; the spy returns the same ok=True payload regardless.
+    ``body_writer(target_path: Path, inputs: dict) -> str`` writes the text to
+    disk; the spy returns the same ok=True payload regardless.
     """
 
     def fake(name, inputs, *, dry_run_dir, cwd=None):
@@ -410,6 +410,10 @@ def _body_ok(target: Path, inputs: dict) -> str:
         "---\n"
         "# Body\n"
     )
+
+
+def _body_no_frontmatter(target: Path, inputs: dict) -> str:
+    return "# Body without a frontmatter block\n\nSome prose.\n"
 
 
 def test_bootstrap_rejects_and_deletes_bad_yaml(tmp_path, monkeypatch, capsys):
@@ -468,6 +472,37 @@ def test_bootstrap_rejects_and_deletes_thin_description(tmp_path, monkeypatch, c
     ledger = _json.loads(capsys.readouterr().out)
     assert ledger["authored"] == []
     assert any("description_quality" in r for r in ledger["reasons"]), ledger
+    assert not (tmp_path / "docs/site-src/core/api.md").exists()
+
+
+def test_bootstrap_rejects_and_deletes_missing_frontmatter(
+    tmp_path, monkeypatch, capsys
+):
+    _host(
+        tmp_path,
+        manifest={
+            "version": 1,
+            "pages": [
+                {
+                    "key": "api",
+                    "title": "Api",
+                    "page": "core/api.md",
+                    "source_files": [],
+                },
+            ],
+        },
+    )
+    calls = []
+    monkeypatch.setattr(
+        runner,
+        "dispatch_validated",
+        _spy_with_body_writer(calls, _body_no_frontmatter),
+    )
+    rc = runner.run_bootstrap_core(tmp_path, dry_run_dir=None, today="2026-05-26")
+    assert rc == 0
+    ledger = _json.loads(capsys.readouterr().out)
+    assert ledger["authored"] == []
+    assert any("frontmatter_missing" in r for r in ledger["reasons"]), ledger
     assert not (tmp_path / "docs/site-src/core/api.md").exists()
 
 
@@ -530,15 +565,17 @@ def test_bootstrap_rerun_retries_only_rejected_pages(tmp_path, monkeypatch, caps
     }
 
     def fake1(name, inputs, *, dry_run_dir, cwd=None):
+        # docs_dir is docs/site-src; everything after it is the manifest page
+        # key (e.g. core/api.md) which is also the key in state["page_to_body"].
+        # Use the suffix directly rather than reconstructing a flat "core/<leaf>"
+        # so this stays correct for any nesting depth.
         rel = (
             Path(inputs["target_path"])
             .relative_to(tmp_path)
             .as_posix()
             .split("docs/site-src/", 1)[-1]
         )
-        body = state["page_to_body"][f"core/{rel.rsplit('/', 1)[-1]}"](
-            Path(inputs["target_path"]), inputs
-        )
+        body = state["page_to_body"][rel](Path(inputs["target_path"]), inputs)
         Path(inputs["target_path"]).parent.mkdir(parents=True, exist_ok=True)
         Path(inputs["target_path"]).write_text(body)
         return ({"ok": True}, [])

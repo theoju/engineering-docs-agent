@@ -1,5 +1,5 @@
 ---
-description: Engineering Docs Agent
+description: A Claude Code plugin that turns merged PRs, Jira issues, and commits into a nightly docs-update PR — seven specialized subagents handle voice-matched authoring, tiered linting, gap detection, and post-merge publish verification, running against any host repo.
 source_files:
   - .claude/hooks/doc_drift.py
   - docs-agent/*
@@ -24,15 +24,15 @@ The plugin runs against **any host repository**. You install it once, run the se
 
 Each subagent is defined in `agents/<name>.md` with YAML frontmatter declaring its tool allowlist and a JSON schema for its output. The orchestrator (`scripts/orchestrator_runner.py`) dispatches them via the Claude CLI.
 
-| Subagent | Job | Returns |
-|---|---|---|
-| `source-collector` | Fetches merged PRs in `(last_sha..HEAD)` and optionally linked Jira issues | `{ prs, jira_issues }` |
-| `pr-summarizer` | Summarizes one PR — what changed, why, which doc targets to hit | `{ what_changed, why, breaking, doc_targets }` |
-| `gap-detector` | Judges whether a PR needs an ADR/spec/plan that doesn't exist yet | `{ needs_spec, reasoning, confidence }` |
-| `page-author` | Writes or edits one doc page with voice few-shot | `{ path, diff_summary }` |
-| `content-validator` | Runs the tiered lint suite on authored pages | `{ passed, failed }` |
-| `publish-verifier` | Polls the host build workflow after merge; fetches live URLs to confirm pages are up | `{ verified, failed }` |
-| `notifier` | Posts a Slack message and/or email digest | `{ slack_ok, email_ok, errors }` |
+| Subagent            | Job                                                                                  | Returns                                        |
+| ------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| `source-collector`  | Fetches merged PRs in `(last_sha..HEAD)` and optionally linked Jira issues           | `{ prs, jira_issues }`                         |
+| `pr-summarizer`     | Summarizes one PR — what changed, why, which doc targets to hit                      | `{ what_changed, why, breaking, doc_targets }` |
+| `gap-detector`      | Judges whether a PR needs an ADR/spec/plan that doesn't exist yet                    | `{ needs_spec, reasoning, confidence }`        |
+| `page-author`       | Writes or edits one doc page with voice few-shot                                     | `{ path, diff_summary }`                       |
+| `content-validator` | Runs the tiered lint suite on authored pages                                         | `{ passed, failed }`                           |
+| `publish-verifier`  | Polls the host build workflow after merge; fetches live URLs to confirm pages are up | `{ verified, failed }`                         |
+| `notifier`          | Posts a Slack message and/or email digest                                            | `{ slack_ok, email_ok, errors }`               |
 
 Subagent outputs are validated against JSON schemas in `agents/schemas/`. Dataclasses in `scripts/contracts.py` provide the typed view used by the orchestrator.
 

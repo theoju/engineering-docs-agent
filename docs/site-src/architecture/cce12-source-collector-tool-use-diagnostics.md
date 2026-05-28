@@ -1,5 +1,5 @@
 ---
-description: CCE-12 Source Collector Tool Use Diagnostics
+description: Stream-json dispatch mode that captures the exact tool-call sequence each subagent executes at runtime, gated by `DOCS_AGENT_DEBUG_DIR` — built to diagnose the 10–20× per-run latency variance in source-collector.
 source_files:
   - "docs/superpowers/measurements/2026-05-20-cce12-run[1-5]-*.{stream.jsonl,meta.json,stdout.txt,stderr.txt,prompt.txt}"
   - scripts/orchestrator_runner.py
@@ -27,13 +27,13 @@ When `debug_dir` is truthy, `dispatch_subagent` switches from `--print` to `--ou
 
 Each dispatch run writes five files to `DOCS_AGENT_DEBUG_DIR`:
 
-| Suffix | Contents |
-|---|---|
-| `.prompt.txt` | Exact prompt passed to `claude -p` |
-| `.stdout.txt` | Canonical JSON extracted from the final assistant turn |
-| `.stderr.txt` | Raw stderr from the `claude` subprocess |
-| `.stream.jsonl` | Full NDJSON event stream (one event per line) |
-| `.meta.json` | Return code, argv, and `tool_use` summary block |
+| Suffix          | Contents                                               |
+| --------------- | ------------------------------------------------------ |
+| `.prompt.txt`   | Exact prompt passed to `claude -p`                     |
+| `.stdout.txt`   | Canonical JSON extracted from the final assistant turn |
+| `.stderr.txt`   | Raw stderr from the `claude` subprocess                |
+| `.stream.jsonl` | Full NDJSON event stream (one event per line)          |
+| `.meta.json`    | Return code, argv, and `tool_use` summary block        |
 
 Files are named `<UTC-timestamp>-<agent-name>.<suffix>` so multiple runs don't clobber each other. The `.stdout.txt` holds the caller-visible canonical JSON — the same text `dispatch_subagent` returns to the orchestrator — so you can diff it against the full stream without knowing which dispatch path produced it.
 

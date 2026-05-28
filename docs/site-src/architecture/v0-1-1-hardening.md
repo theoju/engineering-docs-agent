@@ -1,5 +1,5 @@
 ---
-description: V0 1 1 Hardening
+description: The v0.1.1 stabilization release — tightening cross-stage typed contracts, hardening state and frontmatter I/O for malformed input, rounding out the GitHub client error paths, and completing the Tier-1 lint rule set. No new capabilities; correctness only.
 source_files:
   - scripts/archive_indexes.py
   - scripts/contracts.py
@@ -64,12 +64,12 @@ v0.1.1 is a stabilization release. It tightens the contracts between pipeline st
 
 The Tier-1 lint set is now complete. Four rules ship in this release:
 
-| Script | Rule | What it checks |
-|---|---|---|
-| `scripts/lint/diagrams.py` | `diagram_alt_text` | Every Mermaid or image block has a non-empty alt/caption |
-| `scripts/lint/duplicate_content.py` | `duplicate_sections` | No two pages share an identical H2+ section heading within the same lens |
-| `scripts/lint/framework_build.py` | `framework_build` | The docs framework (MkDocs, Docusaurus) builds without errors against the current source tree |
-| `scripts/lint/reading_grade.py` | `reading_grade` | Body prose stays within the configured Flesch–Kincaid grade range |
+| Script                              | Rule                 | What it checks                                                                                |
+| ----------------------------------- | -------------------- | --------------------------------------------------------------------------------------------- |
+| `scripts/lint/diagrams.py`          | `diagram_alt_text`   | Every Mermaid or image block has a non-empty alt/caption                                      |
+| `scripts/lint/duplicate_content.py` | `duplicate_sections` | No two pages share an identical H2+ section heading within the same lens                      |
+| `scripts/lint/framework_build.py`   | `framework_build`    | The docs framework (MkDocs, Docusaurus) builds without errors against the current source tree |
+| `scripts/lint/reading_grade.py`     | `reading_grade`      | Body prose stays within the configured Flesch–Kincaid grade range                             |
 
 Run all Tier-1 rules in one pass:
 
@@ -88,24 +88,24 @@ The runner returns a non-zero exit code if any enabled rule fires, making it saf
 
 ## Source file index
 
-| File | Role |
-|---|---|
-| `scripts/archive_indexes.py` | Frontmatter parsing, archive index helpers |
-| `scripts/contracts.py` | Typed dataclasses for inter-stage contracts |
-| `scripts/gh_client.py` | GitHub REST API wrapper |
-| `scripts/lint/diagrams.py` | Diagram alt-text lint rule |
-| `scripts/lint/duplicate_content.py` | Duplicate section heading lint rule |
-| `scripts/lint/framework_build.py` | Framework build lint rule |
-| `scripts/lint/lint_runner.py` | Tier-1/2/3 rule runner |
-| `scripts/lint/reading_grade.py` | Reading grade lint rule |
-| `scripts/orchestrator_runner.py` | Seven-stage pipeline orchestrator |
-| `scripts/setup_discover.py` | Host repo layout detection |
-| `scripts/state_io.py` | State file I/O, lens-path validation |
-| `scripts/verify_runner.py` | Post-merge publish verification |
-| `templates/*.schema.json` | Subagent output JSON schemas |
-| `tests/contracts/test_contracts.py` | Contract dataclass unit tests |
-| `tests/contracts/test_state_io.py` | State I/O and frontmatter parse tests |
-| `tests/gh/test_gh_client.py` | GitHub client fixture tests |
-| `tests/orchestrator/test_pipeline_integration.py` | End-to-end dry-run pipeline test |
-| `tests/orchestrator/test_verify_runner.py` | Verify runner edge-case tests |
-| `tests/setup/test_setup_discover.py` | Setup discovery fixture tests |
+| File                                              | Role                                        |
+| ------------------------------------------------- | ------------------------------------------- |
+| `scripts/archive_indexes.py`                      | Frontmatter parsing, archive index helpers  |
+| `scripts/contracts.py`                            | Typed dataclasses for inter-stage contracts |
+| `scripts/gh_client.py`                            | GitHub REST API wrapper                     |
+| `scripts/lint/diagrams.py`                        | Diagram alt-text lint rule                  |
+| `scripts/lint/duplicate_content.py`               | Duplicate section heading lint rule         |
+| `scripts/lint/framework_build.py`                 | Framework build lint rule                   |
+| `scripts/lint/lint_runner.py`                     | Tier-1/2/3 rule runner                      |
+| `scripts/lint/reading_grade.py`                   | Reading grade lint rule                     |
+| `scripts/orchestrator_runner.py`                  | Seven-stage pipeline orchestrator           |
+| `scripts/setup_discover.py`                       | Host repo layout detection                  |
+| `scripts/state_io.py`                             | State file I/O, lens-path validation        |
+| `scripts/verify_runner.py`                        | Post-merge publish verification             |
+| `templates/*.schema.json`                         | Subagent output JSON schemas                |
+| `tests/contracts/test_contracts.py`               | Contract dataclass unit tests               |
+| `tests/contracts/test_state_io.py`                | State I/O and frontmatter parse tests       |
+| `tests/gh/test_gh_client.py`                      | GitHub client fixture tests                 |
+| `tests/orchestrator/test_pipeline_integration.py` | End-to-end dry-run pipeline test            |
+| `tests/orchestrator/test_verify_runner.py`        | Verify runner edge-case tests               |
+| `tests/setup/test_setup_discover.py`              | Setup discovery fixture tests               |

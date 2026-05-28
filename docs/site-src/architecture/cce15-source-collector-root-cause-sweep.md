@@ -1,12 +1,12 @@
 ---
-description: CCE-15 Source Collector Root Cause Sweep
+description: "Two independent silent-failure modes in the source-collector dispatch path and their fixes — phantom schema fields (closed by `additionalProperties: false`) and explanatory-output-style hook injection (closed by `--setting-sources project,local`)."
 source_files:
   - scripts/orchestrator_runner.py
   - tests/orchestrator/test_dispatch_rescue.py
   - tests/orchestrator/test_dispatch_subagent.py
   - tests/orchestrator/test_dispatch_validated.py
   - tests/schemas/test_source_collector_schema.py
-last_reviewed: '2026-05-28'
+last_reviewed: "2026-05-28"
 status: draft
 ---
 
@@ -70,9 +70,9 @@ The parameter defaults to `None` for backward compatibility: all existing `dispa
 
 ## Test coverage map
 
-| Test file | What it pins |
-|---|---|
-| `tests/schemas/test_source_collector_schema.py` | Schema tightening: phantom top-level and per-item fields rejected |
-| `tests/orchestrator/test_dispatch_subagent.py:190` | `--setting-sources project,local` in argv, preceding `-p` |
-| `tests/orchestrator/test_dispatch_rescue.py` | `_rescue_json_object` algorithm + `out_reasons` append |
+| Test file                                           | What it pins                                                           |
+| --------------------------------------------------- | ---------------------------------------------------------------------- |
+| `tests/schemas/test_source_collector_schema.py`     | Schema tightening: phantom top-level and per-item fields rejected      |
+| `tests/orchestrator/test_dispatch_subagent.py:190`  | `--setting-sources project,local` in argv, preceding `-p`              |
+| `tests/orchestrator/test_dispatch_rescue.py`        | `_rescue_json_object` algorithm + `out_reasons` append                 |
 | `tests/orchestrator/test_dispatch_validated.py:105` | Rescue reason flows through `dispatch_validated` into returned reasons |

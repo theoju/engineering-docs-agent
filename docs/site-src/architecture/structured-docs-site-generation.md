@@ -1,5 +1,5 @@
 ---
-description: Structured Docs Site Generation
+description: How the agent produces a navigable docs site by combining a per-run code-to-docs source map, frontmatter-driven archive indexes for ADRs/specs/plans, and a Mermaid render gate — each layer driven by config and detection, never by hardcoded paths.
 source_files:
   - agents/schemas/*.json
   - docs/superpowers/**

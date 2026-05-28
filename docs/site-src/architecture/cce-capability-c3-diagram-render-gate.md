@@ -1,5 +1,5 @@
 ---
-description: CCE Capability C3 — Diagram Render Gate
+description: Build-time render gate that loads each built page in headless Chromium and confirms every declared Mermaid fence rendered to a real SVG with non-zero geometry — the second of two Mermaid validation layers (fence-syntax lint is the first).
 source_files:
   - scripts/lint/diagrams.py
   - scripts/verify_citations.py

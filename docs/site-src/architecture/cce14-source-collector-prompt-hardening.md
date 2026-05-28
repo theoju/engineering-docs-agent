@@ -1,10 +1,10 @@
 ---
-description: CCE-14 Source Collector Prompt Hardening
+description: Investigation of why source-collector output parsing failed in baseline runs, using CCE-12's stream-json diagnostics to isolate two root causes — `_extract_final_assistant_text` returning empty on tool-use-only final turns, and SessionStart-hook prose contamination.
 source_files:
   - scripts/orchestrator_runner.py
   - tests/orchestrator/test_dispatch_debug_capture.py
   - tests/orchestrator/test_dispatch_subagent_stream_json.py
-last_reviewed: '2026-05-28'
+last_reviewed: "2026-05-28"
 status: draft
 ---
 

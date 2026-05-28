@@ -1,10 +1,10 @@
 ---
-description: CCE-10 Source Collector Canonical Shape
+description: The schema and field-by-field contract for the source-collector subagent's output — required `prs` and `jira_issues` top-level fields, optional `error` and `partial` degradation signals, and why downstream stages depend on validation never being skipped.
 source_files:
   - scripts/orchestrator_runner.py
   - tests/agents/test_schema_md_sync.py
   - tests/orchestrator/test_dispatch_subagent_env.py
-last_reviewed: '2026-05-28'
+last_reviewed: "2026-05-28"
 status: draft
 ---
 

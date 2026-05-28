@@ -56,6 +56,31 @@ def parse_frontmatter(text: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def parse_frontmatter_strict(text: str) -> dict:
+    """Like ``parse_frontmatter``, but lets the caller distinguish failure modes.
+
+    - Raises ``yaml.YAMLError`` on parse failure (original exception unwrapped).
+    - Raises ``ValueError('no frontmatter')`` when the document does not start
+      with ``---`` or lacks a closing fence.
+    - Returns the parsed dict on success; an empty frontmatter block returns ``{}``.
+
+    The lenient sibling ``parse_frontmatter`` stays for callers that intentionally
+    want bad input to degrade to an empty dict (whats-new prepend, source_map,
+    archive index collection).
+    """
+    if not text.startswith("---"):
+        raise ValueError("no frontmatter")
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        raise ValueError("no frontmatter")
+    data = yaml.safe_load(parts[1])
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError("frontmatter is not a mapping")
+    return data
+
+
 def parse_title_and_summary(text: str) -> tuple[str, str]:
     """Title from the first '# ' heading; summary from the first non-blank,
     non-heading line after it."""

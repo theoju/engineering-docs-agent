@@ -82,4 +82,6 @@ def test_progress_write_failures_are_swallowed(tmp_path, capsys):
     p.mark_completed("x.md")
     p.finish()
     err = capsys.readouterr().err
-    assert "bootstrap.progress.json" in err
+    # start + begin_page + mark_completed each fail to write — assert all
+    # three were swallowed, not just the first.
+    assert err.count("bootstrap.progress.json") >= 3

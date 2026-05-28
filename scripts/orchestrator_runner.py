@@ -567,13 +567,19 @@ class _BootstrapProgress:
     File is unlinked at end of run; an existing file is itself a signal that
     a run is in progress or crashed mid-flight.
 
+    Assumes a single bootstrap writer per ``repo_root``. The fixed
+    ``.tmp`` suffix means two concurrent processes would race on the same
+    temp path; bootstrap is launched once per nightly run, so this is sound
+    in production. Callers wiring this elsewhere should preserve that
+    invariant.
+
     All write failures are logged to stderr; the bootstrap loop never aborts
     because of progress-file I/O errors.
     """
 
     def __init__(self, repo_root: Path, *, total: int) -> None:
         self._path = repo_root / ".engineering-docs-agent" / "bootstrap.progress.json"
-        self._state: dict = {
+        self._state: dict[str, Any] = {
             "phase": "bootstrap",
             "started_at": None,
             "total": total,
@@ -612,10 +618,9 @@ class _BootstrapProgress:
         self._write()
 
     def mark_skipped(self, rel_posix: str) -> None:
-        # Skipped pages are recorded after begin_page has already advanced
-        # current_index; just record the outcome, don't advance again.
+        # Called after ``begin_page`` has already advanced ``current_index``
+        # and set ``current_page``; the skip outcome is the only new state.
         self._state["skipped_existing"].append(rel_posix)
-        self._state["current_page"] = rel_posix
         self._write()
 
     def mark_failed(self, rel_posix: str, *, reason: str) -> None:
@@ -623,6 +628,12 @@ class _BootstrapProgress:
         self._write()
 
     def finish(self) -> None:
+        """Unlink the progress file at end of run.
+
+        If not called (e.g., the bootstrap process crashes mid-flight), the
+        file remains on disk — that stale presence is the crash signal
+        callers and humans use to detect an interrupted run.
+        """
         try:
             self._path.unlink(missing_ok=True)
         except OSError as e:

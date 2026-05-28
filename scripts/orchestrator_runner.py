@@ -559,6 +559,76 @@ def dispatch_verified(
     return None, reasons + check_reasons
 
 
+class _BootstrapProgress:
+    """Best-effort per-page progress file for ``run_bootstrap_core``.
+
+    Path: ``<repo_root>/.engineering-docs-agent/bootstrap.progress.json``.
+    Write cadence: atomic (temp-file + ``os.replace``) on every transition.
+    File is unlinked at end of run; an existing file is itself a signal that
+    a run is in progress or crashed mid-flight.
+
+    All write failures are logged to stderr; the bootstrap loop never aborts
+    because of progress-file I/O errors.
+    """
+
+    def __init__(self, repo_root: Path, *, total: int) -> None:
+        self._path = repo_root / ".engineering-docs-agent" / "bootstrap.progress.json"
+        self._state: dict = {
+            "phase": "bootstrap",
+            "started_at": None,
+            "total": total,
+            "current_index": 0,
+            "current_page": None,
+            "current_page_started_at": None,
+            "completed": [],
+            "skipped_existing": [],
+            "failed": [],
+        }
+
+    def _write(self) -> None:
+        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
+        try:
+            tmp.write_text(json.dumps(self._state, indent=2))
+            os.replace(tmp, self._path)
+        except OSError as e:
+            print(f"bootstrap.progress.json write failed: {e}", file=sys.stderr)
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def start(self) -> None:
+        self._state["started_at"] = datetime.now(timezone.utc).isoformat()
+        self._write()
+
+    def begin_page(self, rel_posix: str) -> None:
+        self._state["current_index"] += 1
+        self._state["current_page"] = rel_posix
+        self._state["current_page_started_at"] = datetime.now(timezone.utc).isoformat()
+        self._write()
+
+    def mark_completed(self, rel_posix: str) -> None:
+        self._state["completed"].append(rel_posix)
+        self._write()
+
+    def mark_skipped(self, rel_posix: str) -> None:
+        # Skipped pages are recorded after begin_page has already advanced
+        # current_index; just record the outcome, don't advance again.
+        self._state["skipped_existing"].append(rel_posix)
+        self._state["current_page"] = rel_posix
+        self._write()
+
+    def mark_failed(self, rel_posix: str, *, reason: str) -> None:
+        self._state["failed"].append({"path": rel_posix, "reason": reason})
+        self._write()
+
+    def finish(self) -> None:
+        try:
+            self._path.unlink(missing_ok=True)
+        except OSError as e:
+            print(f"bootstrap.progress.json cleanup failed: {e}", file=sys.stderr)
+
+
 def _page_target_is_editable(rel_posix: str, editable_globs: list[str]) -> bool:
     """True if a repo-relative page path may be authored: it matches at least
     one ``agent_editable_paths`` glob, or no globs are configured (permissive).

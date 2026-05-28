@@ -20,6 +20,18 @@ A Claude Code plugin that turns merged PRs, Jira issues, and commits into a nigh
 
 The plugin runs against **any host repository**. You install it once, run the setup skill, and get a working nightly pipeline. This repo is simultaneously the plugin's source and its own dogfood host.
 
+```mermaid
+flowchart TB
+    PR[Merged PR or Jira issue] --> TRIG[Nightly cron<br/>or PR closed event]
+    TRIG --> ORCH[Orchestrator<br/>+ 7 subagents]
+    CFG[host config + state] --> ORCH
+    ORCH -- writes pages --> DOCS[docs/site-src]
+    DOCS --> DOCSPR[docs-agent/YYYY-MM-DD PR]
+    DOCSPR -- merged --> BUILD[Host build workflow] --> SITE[Published docs site]
+    DOCSPR -. publish-verifier polls .-> SITE
+    ORCH --> NOTIF[Slack + email digest]
+```
+
 ## Seven subagents
 
 Each subagent is defined in `agents/<name>.md` with YAML frontmatter declaring its tool allowlist and a JSON schema for its output. The orchestrator (`scripts/orchestrator_runner.py`) dispatches them via the Claude CLI.
@@ -40,16 +52,16 @@ Subagent outputs are validated against JSON schemas in `agents/schemas/`. Datacl
 
 The pipeline runs on a cron schedule and on `pull_request.closed` events (excluding `docs-agent/*` branches to prevent recursion).
 
-```
-source-collector
-  → pr-summarizer × N  (parallel)
-  → aggregate doc_targets per lens
-  → page-author × batches  (parallel across lenses, serial within lens)
-  → content-validator
-  → gap-detector × N  (parallel)
-  → prepend What's New entry + update state.json
-  → open or append-commit to docs-agent/YYYY-MM-DD PR
-  → notifier
+```mermaid
+flowchart TD
+    SC[source-collector] --> PSn[pr-summarizer × N parallel]
+    PSn --> AGG[aggregate doc_targets per lens]
+    AGG --> PAB[page-author batches<br/>parallel across lenses<br/>serial within lens]
+    PAB --> CV[content-validator]
+    CV --> GDn[gap-detector × N parallel]
+    GDn --> WN[prepend What's New<br/>update state.json]
+    WN --> DOCSPR[open or append docs-agent PR]
+    DOCSPR --> NOT[notifier]
 ```
 
 `pr-summarizer` and `gap-detector` fan out in parallel. `page-author` parallelizes across lenses but serializes within a single lens — two authors must not edit the same page concurrently. The PR open, state write, and notifier steps run serially after fan-in.
@@ -60,11 +72,12 @@ The Actions concurrency group `docs-agent-${branch}` cancels any in-progress run
 
 A separate workflow fires when a `docs-agent/*` PR merges. It runs independently of the authoring pipeline so human review time doesn't block the main run.
 
-```
-parse merged PR → changed page paths
-  → poll host build workflow (wait for success or timeout)
-  → publish-verifier (fetch live URLs)
-  → notifier (✅ published or ⚠️ discrepancy)
+```mermaid
+flowchart LR
+    M[docs-agent PR merged] --> P[parse changed page paths]
+    P --> POLL[poll host build workflow<br/>wait for success or timeout]
+    POLL --> V[publish-verifier<br/>fetch live URLs]
+    V --> N[notifier<br/>published or discrepancy]
 ```
 
 ## Configuration

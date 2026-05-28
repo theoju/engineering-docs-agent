@@ -14,6 +14,20 @@ status: draft
 
 The engineering-docs-agent produces a structured, navigable docs site by combining three layers: a per-run source map that links code to docs, archive indexes that make ADRs/specs/plans discoverable, and a diagram-verification pass that catches broken visuals before the PR lands.
 
+```mermaid
+flowchart LR
+    subgraph layers[Site-generation layers]
+        SM[Source map<br/>build_doc_source_map.py]
+        AI[Archive indexes<br/>generate_archive_indexes.py]
+        DG[Diagram verification<br/>verify_docs_diagrams.py]
+    end
+    SM -. narrows scope .-> PA[page-author]
+    PA --> CV[content-validator]
+    CV --> AI
+    AI --> DG
+    DG --> COMMIT[Authoring commit] --> SITE[Published site]
+```
+
 ## Source map
 
 `scripts/build_doc_source_map.py` walks the host repo's source tree and emits a JSON map from source file paths to the doc pages that cover them. The orchestrator loads this map at the start of each run and uses it to narrow the page-author's scope — when a PR touches `backend/connectors/postgres.py`, the map tells the author which existing pages reference that file, so edits land in the right place instead of creating duplicate coverage.

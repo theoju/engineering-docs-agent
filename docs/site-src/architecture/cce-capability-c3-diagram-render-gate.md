@@ -31,6 +31,26 @@ The gate runs in two phases.
 
 A page fails for one of four reasons, checked in order: `page_missing` (HTTP status ≠ 200), `error_box` (Mermaid rendered an error node), `asset_error` (a 4xx/5xx on a same-origin asset), `count_mismatch` (fewer rendered SVGs than declared fences).
 
+```mermaid
+flowchart TB
+    START([verify_diagrams.py invoked]) --> PA{Phase A<br/>self-test handshake}
+    PA -- handshake fails --> SKIP[exit non-zero<br/>refuse to certify]
+    PA -- handshake holds --> SCAN[Phase B<br/>scan source pages<br/>for Mermaid fences]
+    SCAN --> LOOP[for each page:<br/>load in headless Chromium<br/>wait for render to settle<br/>measure SVG geometry]
+    LOOP --> CHECK{failure reasons<br/>first match wins}
+    CHECK -- HTTP not 200 --> F1[page_missing]
+    CHECK -- Mermaid error node --> F2[error_box]
+    CHECK -- same-origin 4xx/5xx --> F3[asset_error]
+    CHECK -- rendered less than expected --> F4[count_mismatch]
+    CHECK -- none --> OK[page ok]
+    F1 --> LEDGER[JSON ledger]
+    F2 --> LEDGER
+    F3 --> LEDGER
+    F4 --> LEDGER
+    OK --> LEDGER
+    LEDGER --> EXIT[exit 0 iff self_test.ok<br/>and no failures]
+```
+
 ## JSON ledger
 
 `verify_site` (and the CLI with `--json`) emits a ledger:

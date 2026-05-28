@@ -8,7 +8,20 @@ this rule is a no-op for them.
 
 from __future__ import annotations
 
+import argparse
+import json
+import sys
+from pathlib import Path
 from typing import Any
+
+import yaml
+
+# Sibling-script import pattern: place the parent scripts/ on sys.path so the
+# in-repo frontmatter_contract and archive_indexes modules resolve. Mirrors
+# frontmatter_schema.py:10.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import archive_indexes  # noqa: E402
+import frontmatter_contract as fc  # noqa: E402
 
 RULE_NAME = "description_quality"
 SEVERITY = "block"
@@ -74,20 +87,6 @@ def check_fm(
 
 # Path-reading shim ---------------------------------------------------------
 
-import argparse
-import json
-import sys
-from pathlib import Path
-
-import yaml
-
-# Sibling-script import pattern: place the parent scripts/ on sys.path so the
-# in-repo frontmatter_contract and archive_indexes modules resolve. Mirrors
-# frontmatter_schema.py:10.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import archive_indexes  # noqa: E402
-import frontmatter_contract as fc  # noqa: E402
-
 
 def load_config(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text()) or {}
@@ -115,6 +114,8 @@ def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
     except ValueError:
         return False, "no frontmatter block"
     title, _ = archive_indexes.parse_title_and_summary(text)
+    # parse_title_and_summary returns "" for no H1; coerce to None so check_fm
+    # skips the equal-to-title comparison rather than comparing against "".
     return check_fm(fm, title=title or None, config=config)
 
 

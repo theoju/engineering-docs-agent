@@ -26,6 +26,12 @@ def _run_inproc(tmp_path: Path, fakes_dir: Path):
     return runner.run(tmp_path, dry_run_dir=fakes_dir, no_pr=True)
 
 
+def _read_current_run(state_path: Path) -> dict:
+    """CCE-40: current_run lives in a sibling file, not state.json."""
+    sibling = state_path.parent / "current_run.json"
+    return json.loads(sibling.read_text())["current_run"]
+
+
 CONFIG_YAML = """
 docs:
   framework: mkdocs
@@ -111,8 +117,8 @@ def test_pipeline_dry_run(tmp_path):
     state = _init_host(tmp_path)
     r = _run(tmp_path, FAKES)
     assert r.returncode == 0, r.stderr
-    updated = json.loads(state.read_text())
-    assert "current_run" in updated
+    cr = _read_current_run(state)
+    assert cr is not None
     whats_new = tmp_path / "docs" / "site-src" / "whats-new.md"
     assert whats_new.exists(), "What's New file should be created"
     content = whats_new.read_text()
@@ -130,9 +136,9 @@ def test_lint_block_unlinks_newly_created_file(tmp_path):
     assert r.returncode == 0, r.stderr
     assert not target.exists(), "blocked create should be unlinked"
 
-    updated = json.loads(state.read_text())
-    reasons = updated["current_run"]["partial_reasons"]
-    assert updated["current_run"]["partial"] is True
+    cr = _read_current_run(state)
+    reasons = cr["partial_reasons"]
+    assert cr["partial"] is True
     assert any("lint_block" in reason for reason in reasons), reasons
 
 
@@ -212,11 +218,9 @@ def test_lint_block_restores_edited_file_from_head(tmp_path):
     assert r.returncode == 0, r.stderr
     assert target.read_text() == original, "blocked edit should be restored from HEAD"
 
-    updated = json.loads(state.read_text())
-    assert updated["current_run"]["partial"] is True
-    assert any(
-        "lint_block" in reason for reason in updated["current_run"]["partial_reasons"]
-    )
+    cr = _read_current_run(state)
+    assert cr["partial"] is True
+    assert any("lint_block" in reason for reason in cr["partial_reasons"])
 
 
 def test_jira_input_forwarded_to_source_collector(tmp_path, monkeypatch):
@@ -340,8 +344,8 @@ def test_unsafe_page_path_filtered_logs_partial(tmp_path):
     # No "etc" dir was created at any level
     assert not (tmp_path / ".." / "etc").exists()
 
-    state = json.loads(state_path.read_text())
-    reasons = state["current_run"]["partial_reasons"]
+    cr = _read_current_run(state_path)
+    reasons = cr["partial_reasons"]
     assert any("unsafe_page_path" in r for r in reasons)
 
 
@@ -508,10 +512,10 @@ def test_stale_current_run_cleared_on_next_run(tmp_path):
     rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
     assert rc == 0
 
-    state = json.loads(state_path.read_text())
-    assert "stale_current_run_cleared" in state["current_run"]["partial_reasons"]
+    cr = _read_current_run(state_path)
+    assert "stale_current_run_cleared" in cr["partial_reasons"]
     # New current_run replaces the old; the old head_sha is gone
-    assert state["current_run"]["head_sha"] != "olddeadbeef"
+    assert cr["head_sha"] != "olddeadbeef"
 
 
 def test_zero_pr_run_does_not_write_whats_new(tmp_path):
@@ -553,8 +557,8 @@ def test_git_push_failure_adds_partial(tmp_path, monkeypatch):
     rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=False)
     assert rc == 1
 
-    state = json.loads(state_path.read_text())
-    reasons = state["current_run"]["partial_reasons"]
+    cr = _read_current_run(state_path)
+    reasons = cr["partial_reasons"]
     assert any("push_failed" in r for r in reasons)
 
 
@@ -568,8 +572,8 @@ def test_invalid_subagent_json_logs_partial_continues(tmp_path):
     rc = runner.run(tmp_path, dry_run_dir=FAKES_BAD_JSON, no_pr=True)
     assert rc == 0
 
-    state = json.loads(state_path.read_text())
-    reasons = state["current_run"]["partial_reasons"]
+    cr = _read_current_run(state_path)
+    reasons = cr["partial_reasons"]
     assert any("pr_summarizer_invalid" in r for r in reasons)
 
 
@@ -673,11 +677,11 @@ def test_source_collector_error_propagates_partial(tmp_path):
     rc = runner.run(tmp_path, dry_run_dir=FAKES_SC_ERROR, no_pr=True)
     assert rc == 0
 
-    state = json.loads(state_path.read_text())
-    reasons = state["current_run"]["partial_reasons"]
+    cr = _read_current_run(state_path)
+    reasons = cr["partial_reasons"]
     assert any("source_collector_error" in r for r in reasons)
     assert any("source_collector_partial" in r for r in reasons)
-    assert state["current_run"]["partial"] is True
+    assert cr["partial"] is True
 
 
 def test_run_surfaces_source_drift_in_whats_new_and_state(tmp_path):
@@ -722,12 +726,12 @@ def test_run_surfaces_source_drift_in_whats_new_and_state(tmp_path):
     )
 
     # --- Run-state assertion ---
-    state = json.loads(state_path.read_text())
+    cr = _read_current_run(state_path)
     expected_drift = [
         {"page": "core/connectors.md", "changed_sources": ["backend/connectors/foo.py"]}
     ]
-    assert state["current_run"]["source_drift"] == expected_drift, (
-        f"source_drift run state mismatch: {state['current_run'].get('source_drift')}"
+    assert cr["source_drift"] == expected_drift, (
+        f"source_drift run state mismatch: {cr.get('source_drift')}"
     )
 
 
@@ -891,7 +895,5 @@ def test_run_surfaces_core_drift_in_whats_new_and_state(tmp_path):
     assert "### Core pages to review (drift)" in whats_new
     assert "- core/connectors.md (source)" in whats_new
 
-    state = json.loads(state_path.read_text())
-    assert state["current_run"]["core_drift"] == [
-        {"page": "core/connectors.md", "reasons": ["source"]}
-    ]
+    cr = _read_current_run(state_path)
+    assert cr["core_drift"] == [{"page": "core/connectors.md", "reasons": ["source"]}]

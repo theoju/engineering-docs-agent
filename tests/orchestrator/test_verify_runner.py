@@ -83,7 +83,8 @@ def _invoke(tmp_path: Path, fakes_dir: Path) -> subprocess.CompletedProcess:
 
 
 def test_verify_runner_failure_does_not_promote(tmp_path):
-    """Failed URLs → rc=1, last_successful_run not written, current_run kept."""
+    """Failed URLs → rc=1, last_successful_run not written, current_run lives in
+    the gitignored sibling (never in committed state.json)."""
     state_path = _init_host(tmp_path)
 
     r = _invoke(tmp_path, FAKES_VERIFY_FAIL)
@@ -93,7 +94,13 @@ def test_verify_runner_failure_does_not_promote(tmp_path):
     assert "last_successful_run" not in state, (
         "verify failure must not promote last_successful_run"
     )
-    assert "current_run" in state, "current_run should be preserved on failure"
+    assert "current_run" not in state, (
+        "current_run is ephemeral and must never land in committed state.json"
+    )
+
+    sibling = state_path.parent / "current_run.json"
+    assert sibling.exists(), "current_run must be preserved in the gitignored sibling"
+    assert "current_run" in json.loads(sibling.read_text())
 
 
 def test_verify_runner_success_promotes(tmp_path):
@@ -109,6 +116,10 @@ def test_verify_runner_success_promotes(tmp_path):
     assert state["last_successful_run"]["head_sha"] == "abc123"
     assert "current_run" not in state, (
         "current_run should be cleared after successful promotion"
+    )
+    sibling = state_path.parent / "current_run.json"
+    assert not sibling.exists(), (
+        "sibling must be removed after successful promotion to match in-memory state"
     )
 
 

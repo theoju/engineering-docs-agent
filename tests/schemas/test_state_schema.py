@@ -23,13 +23,6 @@ def test_full_state_valid():
             "head_sha": "abc",
             "pr_number": 142,
         },
-        "current_run": {
-            "started_at": "2026-05-20T07:00:00Z",
-            "head_sha": "def",
-            "partial": False,
-            "partial_reasons": [],
-            "pr_number": None,
-        },
         "dismissed_gap_flags": {"x/y#1": "dismissed"},
         "cursors": {"jira_last_updated": "2026-05-19T06:58:00Z"},
     }
@@ -41,7 +34,23 @@ def test_missing_version_rejected():
         validate({}, SCHEMA)
 
 
-def test_current_run_requires_started_at():
-    bad = {"version": "1", "current_run": {"head_sha": "x"}}
-    with pytest.raises(ValidationError):
-        validate(bad, SCHEMA)
+def test_schema_accepts_state_without_current_run():
+    state = {
+        "version": "1",
+        "last_successful_run": {
+            "head_sha": "abc",
+            "completed_at": "2026-05-28T00:00:00+00:00",
+        },
+    }
+    validate(state, SCHEMA)
+
+
+def test_schema_permissive_to_legacy_current_run():
+    """Pre-CCE-40 state files may still carry current_run on disk. The
+    schema must not reject them — the runner strips current_run at load."""
+    state = {
+        "version": "1",
+        "last_successful_run": {"head_sha": "abc"},
+        "current_run": {"started_at": "2026-05-28T00:00:00+00:00"},
+    }
+    validate(state, SCHEMA)

@@ -38,9 +38,11 @@ Use the `Agent` tool with `subagent_type=<agent-name>`. Pass inputs as a JSON bl
 
 ## State transitions
 
-- At start: `state.current_run = { started_at: now, head_sha: HEAD, partial: false, partial_reasons: [] }`.
+- At start: `state.current_run = { started_at: now, head_sha: HEAD, partial: false, partial_reasons: [] }` (in-memory only — `current_run` is no longer persisted to `state.json`).
 - On any subagent error: append to `partial_reasons`, set `partial: true`, continue.
-- On PR open/update success: write state but do not promote `current_run` → `last_successful_run` yet. That promotion happens via a follow-up workflow when the PR merges.
+- Before opening the docs-agent PR: promote `current_run.head_sha` → `last_successful_run.head_sha` (with `completed_at` timestamp). The runner writes only persistent fields to `state.json` via `save_persistent_state` and dual-writes `current_run` to the gitignored sibling `current_run.json` via `save_current_run` for diagnostics + test observability.
+- The merge of the docs-agent PR is the promotion mechanism: `state.json` is staged by the runner's existing `git add . && git commit` path, included in the PR, and lands in main on merge. No separate promote workflow.
+- If PR open fails: persistent state still has the advanced `last_successful_run` written locally, but nothing reaches main. The next run reads the unchanged committed state and retries the same window — self-healing.
 
 ## Error handling
 

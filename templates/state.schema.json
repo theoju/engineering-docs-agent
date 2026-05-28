@@ -13,17 +13,6 @@
         "pr_number": { "type": "integer" }
       }
     },
-    "current_run": {
-      "type": "object",
-      "required": ["started_at"],
-      "properties": {
-        "started_at": { "type": "string" },
-        "head_sha": { "type": "string" },
-        "partial": { "type": "boolean" },
-        "partial_reasons": { "type": "array", "items": { "type": "string" } },
-        "pr_number": { "type": ["integer", "null"] }
-      }
-    },
     "dismissed_gap_flags": {
       "type": "object",
       "description": "Operator-set dismissals. Keys are {owner}/{name}#{pr}. Values are dismissal notes (free text).",

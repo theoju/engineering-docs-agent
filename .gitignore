@@ -217,5 +217,5 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# engineering-docs-agent runtime state (seed template: state.example.json)
-.engineering-docs-agent/state.json
+# engineering-docs-agent ephemeral run state (gitignored; state.json committed)
+.engineering-docs-agent/current_run.json

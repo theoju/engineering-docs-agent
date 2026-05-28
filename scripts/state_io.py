@@ -188,6 +188,35 @@ def load_state_validated(path: Path) -> dict[str, Any]:
     return raw
 
 
+_EPHEMERAL_KEYS = ("current_run",)
+
+
+def save_persistent_state(path: Path, state: dict[str, Any]) -> None:
+    """Write only persistent fields of `state` to `path` as JSON.
+
+    Ephemeral fields (current_run) are dropped before writing. The on-disk
+    copy is the source of truth promoted by merging the docs-agent PR.
+    """
+    persistent = {k: v for k, v in state.items() if k not in _EPHEMERAL_KEYS}
+    path.write_text(json.dumps(persistent, indent=2) + "\n")
+
+
+def save_current_run(path: Path, state: dict[str, Any]) -> None:
+    """Sync the ephemeral current_run to <path's parent>/current_run.json.
+
+    The sibling file is gitignored (see .gitignore) and not part of the
+    merge-as-promotion path — only state.json is committed. When `state`
+    carries a `current_run`, write the sibling. When it doesn't, remove
+    any stale sibling so on-disk state matches in-memory state.
+    """
+    target = path.parent / "current_run.json"
+    cr = state.get("current_run")
+    if cr is None:
+        target.unlink(missing_ok=True)
+        return
+    target.write_text(json.dumps({"current_run": cr}, indent=2) + "\n")
+
+
 def add_partial(state: dict, reason: str, *, info_only: bool = False) -> None:
     """Append a partial reason to current_run.partial_reasons.
 

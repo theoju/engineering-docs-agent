@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import sys
 from pathlib import Path
 
@@ -218,3 +219,92 @@ def test_resolve_lens_dict_form():
     path, opts = resolve_lens(cfg, "archive")
     assert str(path) == "docs/archive"
     assert opts == {"archive_index": True}
+
+
+def test_save_persistent_state_strips_current_run(tmp_path):
+    from state_io import save_persistent_state
+
+    state = {
+        "version": "1",
+        "last_successful_run": {"head_sha": "abc123"},
+        "current_run": {
+            "started_at": "2026-05-28T20:00:00+00:00",
+            "head_sha": "def456",
+        },
+    }
+    p = tmp_path / "state.json"
+    save_persistent_state(p, state)
+    written = json.loads(p.read_text())
+    assert "current_run" not in written
+    assert written["last_successful_run"]["head_sha"] == "abc123"
+    assert written["version"] == "1"
+
+
+def test_save_persistent_state_preserves_other_fields(tmp_path):
+    from state_io import save_persistent_state
+
+    state = {
+        "version": "1",
+        "last_successful_run": {"head_sha": "abc"},
+        "dismissed_gap_flags": {"foo/bar#1": "wontfix"},
+        "cursors": {"some": "data"},
+    }
+    p = tmp_path / "state.json"
+    save_persistent_state(p, state)
+    written = json.loads(p.read_text())
+    assert written == state
+
+
+def test_save_persistent_state_writes_trailing_newline(tmp_path):
+    from state_io import save_persistent_state
+
+    p = tmp_path / "state.json"
+    save_persistent_state(p, {"version": "1"})
+    raw = p.read_text()
+    assert raw.endswith("\n"), f"expected trailing newline, got {raw!r}"
+
+
+def test_save_current_run_writes_sibling(tmp_path):
+    from state_io import save_current_run
+
+    state_path = tmp_path / "state.json"
+    state = {
+        "version": "1",
+        "current_run": {
+            "started_at": "2026-05-28T00:00:00+00:00",
+            "partial": False,
+            "partial_reasons": [],
+        },
+    }
+    save_current_run(state_path, state)
+    sibling = tmp_path / "current_run.json"
+    assert sibling.exists(), "save_current_run must write a sibling current_run.json"
+    data = json.loads(sibling.read_text())
+    assert data == {"current_run": state["current_run"]}
+
+
+def test_save_current_run_noop_when_absent(tmp_path):
+    from state_io import save_current_run
+
+    state_path = tmp_path / "state.json"
+    save_current_run(state_path, {"version": "1"})
+    sibling = tmp_path / "current_run.json"
+    assert not sibling.exists(), (
+        "save_current_run must not create a file when state has no current_run"
+    )
+
+
+def test_save_current_run_clears_stale_sibling(tmp_path):
+    """When in-memory state has no current_run, an existing sibling is removed
+    so on-disk state matches memory (no orphaned ephemeral data)."""
+    from state_io import save_current_run
+
+    state_path = tmp_path / "state.json"
+    sibling = tmp_path / "current_run.json"
+    sibling.write_text(json.dumps({"current_run": {"started_at": "stale"}}) + "\n")
+
+    save_current_run(state_path, {"version": "1"})
+
+    assert not sibling.exists(), (
+        "save_current_run must remove a stale sibling when state has no current_run"
+    )

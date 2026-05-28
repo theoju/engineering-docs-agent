@@ -157,3 +157,112 @@ def test_push_succeeds_with_returncode_zero_no_reasons(tmp_path: Path):
         )
     assert pr_number == 7
     assert reasons == []
+
+
+# CCE-42: append-commit on same-hour reruns. The orchestrator must fetch
+# the remote branch before checkout so the local branch tracks the
+# existing remote tip; otherwise `checkout -B` resets to HEAD (main) and
+# the subsequent push is rejected non-fast-forward.
+
+
+def _capturing_subprocess_stub(
+    *,
+    fetch_rc: int,
+    calls_out: list[list[str]],
+    push_rc: int = 0,
+    push_stderr: str = "",
+):
+    """Record argv of every subprocess.run call into calls_out.
+
+    fetch (origin <branch>) returns fetch_rc; everything else rc=0 by default.
+    """
+
+    def _run(argv, **kwargs):
+        calls_out.append(list(argv))
+        if "fetch" in argv:
+            return MagicMock(returncode=fetch_rc, stdout="", stderr="")
+        if "push" in argv:
+            return MagicMock(returncode=push_rc, stdout="", stderr=push_stderr)
+        if "ls-remote" in argv:
+            return MagicMock(returncode=0, stdout="localsha\trefs/heads/x\n", stderr="")
+        if "rev-parse" in argv:
+            return MagicMock(returncode=0, stdout="localsha\n", stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    return _run
+
+
+def test_fetches_remote_branch_before_checkout_when_remote_exists(tmp_path: Path):
+    """When remote branch exists (fetch rc=0), code must:
+    1. Call `git fetch origin <branch>` BEFORE checkout
+    2. Call `git checkout -B <branch> origin/<branch>` (start-point is remote tip)
+    so the subsequent push is fast-forward, not non-fast-forward.
+    Repros CCE-42 same-hour rerun branch collision.
+    """
+    gh = _make_gh_client_stub(pr_number=42)
+    calls: list[list[str]] = []
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_capturing_subprocess_stub(fetch_rc=0, calls_out=calls),
+    ):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/2026-05-28T22",
+            now_iso="2026-05-28T22:47:45+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+
+    fetch_idx = next(
+        (
+            i
+            for i, argv in enumerate(calls)
+            if "fetch" in argv and "docs-agent/2026-05-28T22" in argv
+        ),
+        None,
+    )
+    checkout_idx = next(
+        (i for i, argv in enumerate(calls) if "checkout" in argv and "-B" in argv),
+        None,
+    )
+    assert fetch_idx is not None, (
+        f"expected `git fetch origin <branch>` to be called; argv calls: {calls}"
+    )
+    assert checkout_idx is not None, f"expected a checkout call; got: {calls}"
+    assert fetch_idx < checkout_idx, (
+        f"fetch (idx={fetch_idx}) must come before checkout (idx={checkout_idx}); "
+        f"calls: {calls}"
+    )
+    checkout_argv = calls[checkout_idx]
+    assert "origin/docs-agent/2026-05-28T22" in checkout_argv, (
+        f"expected `checkout -B <branch> origin/<branch>` when remote exists; "
+        f"got argv: {checkout_argv}"
+    )
+
+
+def test_falls_back_to_head_checkout_when_remote_branch_absent(tmp_path: Path):
+    """When fetch fails (rc!=0; remote branch doesn't exist), code falls back
+    to `git checkout -B <branch>` off HEAD — first-of-hour behavior."""
+    gh = _make_gh_client_stub(pr_number=43)
+    calls: list[list[str]] = []
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_capturing_subprocess_stub(fetch_rc=128, calls_out=calls),
+    ):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/2026-05-28T23",
+            now_iso="2026-05-28T23:01:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+
+    checkout_argv = next(argv for argv in calls if "checkout" in argv and "-B" in argv)
+    assert "origin/docs-agent/2026-05-28T23" not in checkout_argv, (
+        f"expected fallback `checkout -B <branch>` off HEAD when fetch fails; "
+        f"got argv with remote ref: {checkout_argv}"
+    )

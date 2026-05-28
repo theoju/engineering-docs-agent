@@ -92,7 +92,11 @@ jobs:
         # writes state. Per spec §8: a partial run opens the PR anyway with
         # partial: true in the body — the workflow itself stays green so the
         # next nightly fire isn't suppressed by a red status.
-        run: python3 scripts/orchestrator_runner.py
+        #
+        # --repo-root is required by argparse; GITHUB_WORKSPACE is always set
+        # by actions/checkout to the absolute path of the checked-out tree,
+        # so no plumbing is needed beyond passing it through.
+        run: python3 scripts/orchestrator_runner.py --repo-root "$GITHUB_WORKSPACE"
 
       - name: Run summary
         if: always()

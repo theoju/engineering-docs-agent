@@ -41,7 +41,41 @@ def test_missing_version_rejected():
         validate({}, SCHEMA)
 
 
-def test_current_run_requires_started_at():
-    bad = {"version": "1", "current_run": {"head_sha": "x"}}
-    with pytest.raises(ValidationError):
-        validate(bad, SCHEMA)
+def test_schema_accepts_state_without_current_run():
+    import json
+    import jsonschema
+    from pathlib import Path
+
+    schema = json.loads(
+        (
+            Path(__file__).parent.parent.parent / "templates" / "state.schema.json"
+        ).read_text()
+    )
+    state = {
+        "version": "1",
+        "last_successful_run": {
+            "head_sha": "abc",
+            "completed_at": "2026-05-28T00:00:00+00:00",
+        },
+    }
+    jsonschema.validate(state, schema)  # raises if invalid
+
+
+def test_schema_permissive_to_legacy_current_run():
+    """Pre-CCE-40 state files may still carry current_run on disk. The
+    schema must not reject them — the runner strips current_run at load."""
+    import json
+    import jsonschema
+    from pathlib import Path
+
+    schema = json.loads(
+        (
+            Path(__file__).parent.parent.parent / "templates" / "state.schema.json"
+        ).read_text()
+    )
+    state = {
+        "version": "1",
+        "last_successful_run": {"head_sha": "abc"},
+        "current_run": {"started_at": "2026-05-28T00:00:00+00:00"},
+    }
+    jsonschema.validate(state, schema)  # must not raise — schema is permissive

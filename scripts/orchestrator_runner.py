@@ -1447,8 +1447,11 @@ def run_bootstrap_core(
         try:
             fm = archive_indexes.parse_frontmatter_strict(target_path.read_text())
         except yaml.YAMLError as e:
+            # str(e) carries line/column from the YAML parser when present
+            # (e.g., yaml.scanner.ScannerError formats to a multi-line trace);
+            # collapse newlines so the ledger stays single-line per reason.
             return False, [
-                f"frontmatter_parse_error: {rel_inner}: {e.__class__.__name__}"
+                f"frontmatter_parse_error: {rel_inner}: {str(e).replace(chr(10), ' | ')}"
             ]
         except ValueError:
             return False, [f"frontmatter_missing: {rel_inner}"]
@@ -1480,6 +1483,10 @@ def run_bootstrap_core(
                 continue
             if target_path.exists():
                 ledger["skipped_existing"].append(str(rel))
+                # begin_page first so current_index advances through every
+                # manifest entry (skipped or authored); mark_skipped's
+                # contract assumes begin_page has already run.
+                progress.begin_page(rel_posix)
                 progress.mark_skipped(rel_posix)
                 continue
             target_path.parent.mkdir(parents=True, exist_ok=True)

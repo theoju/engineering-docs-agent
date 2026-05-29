@@ -330,3 +330,63 @@ def test_helper_returns_true_when_remote_head_sha_matches_ours(tmp_path: Path):
     assert result is True, (
         f"expected helper to return True when remote head_sha matches; got {result}"
     )
+
+
+def test_helper_returns_false_when_remote_head_sha_differs(tmp_path: Path):
+    """When origin/<branch>'s state.json has a DIFFERENT head_sha (S3
+    retry-after-partial or S4 window-grew scenario), the predicate returns
+    False so the runner proceeds and hits the existing checkout_failed
+    handling if the collision occurs."""
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_skip_predicate_subprocess_stub(
+            fetch_rc=0,
+            show_rc=0,
+            remote_head_sha="oldsha000000000000000000000000000000000",
+        ),
+    ):
+        result = orun._remote_already_processed_window(
+            tmp_path,
+            "docs-agent/2026-05-28T23",
+            "newsha111111111111111111111111111111111",
+        )
+    assert result is False, f"expected False on differing remote head_sha; got {result}"
+
+
+def test_helper_returns_false_when_remote_branch_absent(tmp_path: Path):
+    """When `git fetch origin <branch>` fails (rc != 0; branch doesn't
+    exist remotely OR network failure), the predicate returns False so
+    the runner proceeds normally — first-run-of-hour case."""
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_skip_predicate_subprocess_stub(fetch_rc=128),
+    ):
+        result = orun._remote_already_processed_window(
+            tmp_path,
+            "docs-agent/2026-05-28T23",
+            "somehead00000000000000000000000000000000",
+        )
+    assert result is False, f"expected False when fetch fails; got {result}"
+
+
+def test_helper_returns_false_when_remote_state_json_corrupted(tmp_path: Path):
+    """When origin/<branch>'s state.json exists but is not valid JSON
+    (corrupted file, schema drift, partial write), the predicate returns
+    False so the runner proceeds. Never false-skip on parse errors."""
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_skip_predicate_subprocess_stub(
+            fetch_rc=0,
+            show_rc=0,
+            show_stdout_override="{not valid json at all",
+        ),
+    ):
+        result = orun._remote_already_processed_window(
+            tmp_path,
+            "docs-agent/2026-05-28T23",
+            "somehead00000000000000000000000000000000",
+        )
+    assert result is False, f"expected False on corrupted JSON; got {result}"

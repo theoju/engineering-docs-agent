@@ -22,6 +22,8 @@ from state_io import (
     load_state_validated,
     load_voice_samples,
     resolve_lens,
+    save_current_run,
+    save_persistent_state,
 )
 
 
@@ -973,6 +975,21 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             except ValueError:
                 pass
 
+    # CCE-43: same-hour rerun guard. If origin/<docs-agent-branch>'s
+    # committed state.json already advanced last_successful_run.head_sha
+    # to our HEAD, the same window has already been processed. Proceeding
+    # would mutate whats-new.md and state.json in the working tree with
+    # content that differs from origin/<branch>, and the subsequent
+    # checkout in open_or_append_pr would refuse (CCE-42 layer 3).
+    if _remote_already_processed_window(repo_root, branch_name(now), head_sha):
+        print(
+            f"Skipped: origin/{branch_name(now)} already advanced "
+            f"state.head_sha to {head_sha[:8]}; this window already "
+            f"processed in this hour.",
+            file=sys.stdout,
+        )
+        return 0
+
     jira_payload = config.get("sources", {}).get("jira")
     sc_inputs = {
         "last_sha": state.get("last_successful_run", {}).get("head_sha", ""),
@@ -1310,8 +1327,18 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         existing = whats_new.read_text() if whats_new.exists() else ""
         whats_new.write_text(_compose_whats_new(existing, entry))
 
+    # CCE-40: promote current_run.head_sha into last_successful_run.
+    # The merge of the docs-agent PR is what actually promotes this to
+    # main; until then the advance lives only on the docs-agent branch
+    # and on disk locally. If PR open fails, nothing reaches main and
+    # the next run reads the unchanged committed state.
+    state["last_successful_run"] = {
+        "head_sha": state["current_run"]["head_sha"],
+        "completed_at": now,
+    }
     state["current_run"]["pr_number"] = None
-    state_path.write_text(json.dumps(state, indent=2))
+    save_persistent_state(state_path, state)
+    save_current_run(state_path, state)
     if no_pr:
         return 0
     branch = branch_name(now)
@@ -1327,10 +1354,12 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     for reason, info_only in pr_reasons:
         add_partial(state, reason, info_only=info_only)
     if pr_number is None:
-        state_path.write_text(json.dumps(state, indent=2))
+        save_persistent_state(state_path, state)
+        save_current_run(state_path, state)
         return 1
     state["current_run"]["pr_number"] = pr_number
-    state_path.write_text(json.dumps(state, indent=2))
+    save_persistent_state(state_path, state)
+    save_current_run(state_path, state)
 
     # Compose digest and dispatch notifier.
     digest = {
@@ -1365,7 +1394,8 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     if notifier_result is None:
         if not reasons:
             add_partial(state, "notifier_invalid: returned None")
-        state_path.write_text(json.dumps(state, indent=2))
+        save_persistent_state(state_path, state)
+        save_current_run(state_path, state)
     return 0
 
 
@@ -1543,6 +1573,49 @@ def branch_name(now_iso: str) -> str:
     return f"docs-agent/{now_iso[:13]}"
 
 
+def _remote_already_processed_window(
+    repo_root: Path, branch: str, our_head_sha: str
+) -> bool:
+    """True if origin/<branch>'s committed state.json shows it already
+    advanced last_successful_run.head_sha to our_head_sha. In that case the
+    docs-agent branch already holds the run we're about to redo, and
+    proceeding would only collide on whats-new.md / state.json at checkout
+    (the CCE-42 layer-3 failure mode).
+
+    Every failure mode (fetch failure, missing state.json, JSON parse error,
+    schema drift) returns False so the runner proceeds normally — false
+    positives would silently skip real work; false negatives just produce
+    the existing checkout_failed partial reason that operators already know
+    how to resolve.
+    """
+    fetch = subprocess.run(
+        ["git", "-C", str(repo_root), "fetch", "origin", branch],
+        capture_output=True,
+        text=True,
+    )
+    if fetch.returncode != 0:
+        return False
+    show = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "show",
+            f"origin/{branch}:.engineering-docs-agent/state.json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if show.returncode != 0:
+        return False
+    try:
+        remote = json.loads(show.stdout)
+        remote_head = remote.get("last_successful_run", {}).get("head_sha", "")
+    except (json.JSONDecodeError, KeyError, AttributeError):
+        return False
+    return remote_head == our_head_sha
+
+
 def open_or_append_pr(
     repo_root: Path,
     gh: GhClient,
@@ -1559,11 +1632,22 @@ def open_or_append_pr(
     """
     reasons: list[tuple[str, bool]] = []
 
-    checkout = subprocess.run(
-        ["git", "-C", str(repo_root), "checkout", "-B", branch],
+    # CCE-42: fetch the remote branch first so same-hour reruns base their
+    # local branch on the existing remote tip — append-commit semantics per
+    # agents/engineering-docs-agent.md ("If a branch with that name exists
+    # AND has an open PR: git checkout it, add the new commits, git push.
+    # Append-commit, no force-push."). Without this fetch, `git checkout -B`
+    # would reset the local branch to HEAD (main) and the subsequent push
+    # would fail non-fast-forward against any existing remote SHA.
+    fetch = subprocess.run(
+        ["git", "-C", str(repo_root), "fetch", "origin", branch],
         capture_output=True,
         text=True,
     )
+    checkout_argv = ["git", "-C", str(repo_root), "checkout", "-B", branch]
+    if fetch.returncode == 0:
+        checkout_argv.append(f"origin/{branch}")
+    checkout = subprocess.run(checkout_argv, capture_output=True, text=True)
     if checkout.returncode != 0:
         reasons.append(
             (f"checkout_failed: {checkout.stderr.strip()[:_STDERR_TRUNCATE]}", False)

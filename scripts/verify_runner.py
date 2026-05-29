@@ -1,7 +1,7 @@
 """Verify runner. Invoked by the post-merge workflow."""
 
 from __future__ import annotations
-import argparse, json, sys
+import argparse, sys
 from pathlib import Path
 
 # Allow importing from sibling script.
@@ -13,6 +13,8 @@ from state_io import (  # noqa: E402
     StateError,
     load_config_validated,
     load_state_validated,
+    save_current_run,
+    save_persistent_state,
 )
 
 
@@ -114,7 +116,8 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
             state.pop("current_run", None)
         return 0 if verify_succeeded else 1
     finally:
-        state_path.write_text(json.dumps(state, indent=2))
+        save_persistent_state(state_path, state)
+        save_current_run(state_path, state)
 
 
 def main() -> int:

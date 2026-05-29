@@ -44,5 +44,7 @@ def test_full_main_pipeline_dry_run(tmp_path):
     assert r.returncode == 0, r.stderr
     wn = (target / "docs" / "site-src" / "whats-new.md").read_text()
     assert "PR #1" in wn
-    st = json.loads((target / ".engineering-docs-agent" / "state.json").read_text())
-    assert "current_run" in st
+    cr_data = json.loads(
+        (target / ".engineering-docs-agent" / "current_run.json").read_text()
+    )
+    assert "current_run" in cr_data

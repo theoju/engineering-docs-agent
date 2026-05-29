@@ -33,19 +33,33 @@ A Claude Code plugin: nightly docs-PR generator with publish verification and ti
 This repo is configured to run the agent against itself — a reference layout for new host repos:
 
 1. `.engineering-docs-agent/config.yml` — host config (framework, paths, Jira project keys, voice samples, publishing target).
-2. `.engineering-docs-agent/state.example.json` — seed template. Copy to `state.json` on first setup; the runtime file is gitignored so per-run mutations stay local.
-3. `docs/site-src/` — agent-editable area and MkDocs source dir; the `agent_editable_paths` glob (`docs/site-src/**`) restricts writes here, and the same tree publishes to GitHub Pages.
+2. `.engineering-docs-agent/state.json` — committed state. `last_successful_run.head_sha` is the source of truth for the next nightly's window. Each merged `docs-agent/YYYY-MM-DD` PR advances it via normal git merge — no separate promote workflow.
+3. `.engineering-docs-agent/state.example.json` — seed template for fresh host repos. This dogfood host already has a real `state.json`; the example file is preserved for plugin users installing into a new repo.
+4. `.engineering-docs-agent/current_run.json` — gitignored ephemeral run state, written every state-update for diagnostics + test observability. Not part of the docs-agent PR.
+5. `docs/site-src/` — agent-editable area and MkDocs source dir; the `agent_editable_paths` glob (`docs/site-src/**`) restricts writes here, and the same tree publishes to GitHub Pages.
 
-Bootstrap a fresh checkout:
+Run the agent locally against this host:
 
 ```bash
-cp .engineering-docs-agent/state.example.json .engineering-docs-agent/state.json
 python3 scripts/orchestrator_runner.py --repo-root . --no-pr
 ```
 
-The seed `last_successful_run.head_sha` points to the v0.1.0 tag commit, giving source-collector a real diff window over the project's PR history (CCE-1 through CCE-9). For per-subagent raw-stdout diagnostics, set `DOCS_AGENT_DEBUG_DIR=/tmp/cce-debug` before invoking.
+For per-subagent raw-stdout diagnostics, set `DOCS_AGENT_DEBUG_DIR=/tmp/cce-debug` before invoking.
 
 > Publish-verification is configured against a `deploy.yml` GitHub Actions workflow that is not yet committed; the `--no-pr` flag above keeps the bootstrap dry-run only. Wiring up the workflow + end-to-end publish path is tracked separately.
+
+### Nightly authoring run
+
+The main authoring pipeline (`scripts/orchestrator_runner.py` with no subcommand) runs automatically once daily at 07:00 UTC via `.github/workflows/docs-agent-nightly.yml`. The workflow opens or append-commits to a `docs-agent/YYYY-MM-DD` PR; per spec §8, a partial run still opens the PR with `partial: true` in the body so an operational gap is visible, not silent.
+
+To fire it manually:
+
+```bash
+gh workflow run docs-agent-nightly.yml -f reason="<your reason>"
+gh run watch
+```
+
+The `reason` input is a free-text label surfaced in the run summary alongside the post-run `state.json` snapshot. Auth is via the `CLAUDE_CODE_OAUTH_TOKEN` repo secret (same secret as `release.yml`). One run at a time per repo — concurrent invocations queue rather than race on the same docs-agent branch.
 
 ### Install from local clone
 

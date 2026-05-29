@@ -674,3 +674,53 @@ def test_bootstrap_progress_file_records_inflight_state(tmp_path, monkeypatch):
     assert captured[1]["current_index"] == 2
     assert captured[1]["current_page"] == "docs/site-src/core/storage.md"
     # Final state after the run is gone (test above covers it).
+
+
+def test_bootstrap_progress_advances_through_invalid_and_unsafe_entries(
+    tmp_path, monkeypatch
+):
+    """Stage 4 Important: invalid manifest entries and unsafe paths must still
+    advance current_index so the in-flight progress count matches the manifest
+    length. Without the fix, the three early-exit ``continue`` branches in
+    run_bootstrap_core skip ``progress.begin_page()`` and current_index lags
+    behind the actual manifest position seen by the operator."""
+    _host(
+        tmp_path,
+        manifest={
+            "version": 1,
+            "pages": [
+                "not-a-dict",
+                {"page": "../../../outside.md"},
+                {"page": "../../scripts/escape.md"},
+                {
+                    "key": "ok",
+                    "title": "Ok",
+                    "page": "core/ok.md",
+                    "source_files": [],
+                },
+            ],
+        },
+    )
+    captured: list = []
+
+    def fake_capture(name, inputs, *, dry_run_dir, cwd=None):
+        progress_path = tmp_path / ".engineering-docs-agent" / "bootstrap.progress.json"
+        captured.append(_json.loads(progress_path.read_text()))
+        target = Path(inputs["target_path"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_body_ok(target, inputs))
+        return ({"ok": True}, [])
+
+    monkeypatch.setattr(runner, "dispatch_validated", fake_capture)
+    runner.run_bootstrap_core(tmp_path, dry_run_dir=None, today="2026-05-26")
+    assert len(captured) == 1
+    snap = captured[0]
+    # The valid page is the 4th entry; its dispatch sees current_index=4
+    # because the three early-exit branches each advanced the counter past
+    # their invalid/unsafe entry.
+    assert snap["current_index"] == 4
+    assert snap["current_page"] == "docs/site-src/core/ok.md"
+    failed_reasons = [f["reason"] for f in snap["failed"]]
+    assert len(snap["failed"]) == 3
+    assert any("manifest_page_invalid" in r for r in failed_reasons)
+    assert sum("unsafe_page_path" in r for r in failed_reasons) == 2

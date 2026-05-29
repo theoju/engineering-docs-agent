@@ -1497,19 +1497,33 @@ def run_bootstrap_core(
 
     ledger: dict = {"authored": [], "skipped_existing": [], "reasons": []}
     try:
-        for page in pages:
+        for idx, page in enumerate(pages, start=1):
             if not isinstance(page, dict) or "page" not in page:
-                ledger["reasons"].append("manifest_page_invalid")
+                reason = "manifest_page_invalid"
+                ledger["reasons"].append(reason)
+                # Synthetic identifier — the entry has no usable path, so we
+                # tag it by its manifest position so current_index still
+                # advances and the failure shows up in the progress file.
+                placeholder = f"<manifest_entry_{idx}>"
+                progress.begin_page(placeholder)
+                progress.mark_failed(placeholder, reason=reason)
                 continue
             target_path = repo_root / docs_dir / page["page"]
             try:
                 rel = target_path.resolve().relative_to(repo_root.resolve())
             except ValueError:
-                ledger["reasons"].append(f"unsafe_page_path: {page['page']}")
+                reason = f"unsafe_page_path: {page['page']}"
+                ledger["reasons"].append(reason)
+                placeholder = str(page["page"])
+                progress.begin_page(placeholder)
+                progress.mark_failed(placeholder, reason=reason)
                 continue
             rel_posix = rel.as_posix()
             if not _page_target_is_editable(str(rel), editable_globs):
-                ledger["reasons"].append(f"unsafe_page_path: {rel}")
+                reason = f"unsafe_page_path: {rel}"
+                ledger["reasons"].append(reason)
+                progress.begin_page(rel_posix)
+                progress.mark_failed(rel_posix, reason=reason)
                 continue
             if target_path.exists():
                 ledger["skipped_existing"].append(str(rel))

@@ -2,11 +2,13 @@ name: actionlint
 
 on:
   pull_request:
+    # CCE-59: NO paths: filter on pull_request. actionlint is a required
+    # status check; if it doesn't run, GitHub treats the check as "not
+    # yet passing" and blocks merge on every non-workflow PR. Runs ~5s
+    # so the cost of running on every PR is negligible.
     branches: [main]
-    paths:
-      - ".github/workflows/**"
-      - ".github/actionlint.yml"
   push:
+    # post-merge runs on main only when workflows actually change
     branches: [main]
     paths:
       - ".github/workflows/**"

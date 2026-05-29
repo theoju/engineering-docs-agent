@@ -14,19 +14,11 @@ A Claude Code plugin: nightly docs-PR generator with publish verification and ti
 
 ## Install
 
-1. Add this repo as a Claude Code marketplace:
-   ```
-   claude marketplace add engineering-docs-agent <repo-url>
-   ```
-2. Install the plugin:
-   ```
-   claude plugin install engineering-docs-agent
-   ```
-3. In your host repo, run the setup skill:
-   ```
-   claude /engineering-docs-agent-setup
-   ```
-4. Configure GitHub secrets: `CLAUDE_CODE_OAUTH_TOKEN` (required — OAuth token from `claude setup-token`, starts with `sk-ant-oat…`; the Claude CLI reads the OAuth slot, not `ANTHROPIC_API_KEY`), `SLACK_WEBHOOK_URL`, `JIRA_API_TOKEN`, `SMTP_*` as needed.
+1. `claude plugin marketplace add <this-repo>` — register the marketplace from the local path or remote URL.
+2. `claude plugin install engineering-docs-agent@engineering-docs-agent-marketplace` — install the plugin.
+3. `claude /engineering-docs-agent-setup` — run the setup skill from your host repo's root.
+
+For the comprehensive walkthrough (GitHub App registration, all repo secrets, branch protection, validation, per-language host notes, troubleshooting for every partial-mode failure), see [docs/setup-guide.md](docs/setup-guide.md).
 
 ## Self-hosting (dogfood)
 

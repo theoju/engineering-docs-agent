@@ -137,3 +137,50 @@ def test_dispatch_subagent_out_reasons_optional_backward_compatible(monkeypatch)
     # No out_reasons argument: existing signature contract.
     result = runner.dispatch_subagent("source-collector", {}, dry_run_dir=None)
     assert result == {"prs": []}
+
+
+def test_dispatch_subagent_fence_wrapped_no_partial_reason(monkeypatch):
+    """CCE-55: when the subagent wraps its JSON in a ```json``` markdown
+    fence (the most common benign contamination), dispatch_subagent
+    strips the wrap, json.loads succeeds, and out_reasons stays empty.
+    No prose_contamination_rescued partial banner for this class.
+    """
+    fence_wrapped_stdout = '```json\n{"prs": [], "jira_issues": []}\n```'
+    captured: dict = {}
+    monkeypatch.setattr(
+        subprocess, "run", _fake_run_capture(captured, stdout=fence_wrapped_stdout)
+    )
+
+    reasons: list[str] = []
+    result = runner.dispatch_subagent(
+        "source-collector", {}, dry_run_dir=None, out_reasons=reasons
+    )
+
+    assert result == {"prs": [], "jira_issues": []}
+    assert reasons == [], "fence wrap is benign; rescue banner must not fire"
+
+
+def test_dispatch_subagent_prose_with_embedded_fence_still_emits_rescue(monkeypatch):
+    """CCE-55 regression guard: prose surrounding a code fence (i.e.
+    actually anomalous contamination, not a clean wrap) must still flow
+    through _rescue_json_object and emit prose_contamination_rescued.
+    The whole-string fence match doesn't apply when prose is on either
+    side — that's the existing rescue path's responsibility.
+    """
+    anomalous_stdout = (
+        "`★ Insight ─`\nprose preamble\n`─`\n\n"
+        '```json\n{"prs": [], "jira_issues": []}\n```\n'
+        "trailing prose"
+    )
+    captured: dict = {}
+    monkeypatch.setattr(
+        subprocess, "run", _fake_run_capture(captured, stdout=anomalous_stdout)
+    )
+
+    reasons: list[str] = []
+    result = runner.dispatch_subagent(
+        "source-collector", {}, dry_run_dir=None, out_reasons=reasons
+    )
+
+    assert result == {"prs": [], "jira_issues": []}
+    assert reasons == ["prose_contamination_rescued: source-collector"]

@@ -371,6 +371,30 @@ def test_helper_returns_false_when_remote_branch_absent(tmp_path: Path):
     assert result is False, f"expected False when fetch fails; got {result}"
 
 
+def test_helper_returns_false_when_remote_state_json_missing(tmp_path: Path):
+    """When fetch succeeds but `git show origin/<branch>:.engineering-docs-agent/state.json`
+    fails (rc != 0; e.g. a pre-CCE-40 docs-agent branch that doesn't track
+    state.json, or any branch lacking the file), the predicate returns False
+    so the runner proceeds. Covers spec §Failure modes row "Remote branch
+    exists, no state.json"."""
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_skip_predicate_subprocess_stub(
+            fetch_rc=0,
+            show_rc=128,
+        ),
+    ):
+        result = orun._remote_already_processed_window(
+            tmp_path,
+            "docs-agent/2026-05-28T23",
+            "somehead00000000000000000000000000000000",
+        )
+    assert result is False, (
+        f"expected False when state.json missing on remote; got {result}"
+    )
+
+
 def test_helper_returns_false_when_remote_state_json_corrupted(tmp_path: Path):
     """When origin/<branch>'s state.json exists but is not valid JSON
     (corrupted file, schema drift, partial write), the predicate returns

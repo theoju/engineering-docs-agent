@@ -26,7 +26,7 @@ A Claude Code plugin: nightly docs-PR generator with publish verification and ti
    ```
    claude /engineering-docs-agent-setup
    ```
-4. Configure GitHub secrets: `ANTHROPIC_API_KEY`, `SLACK_WEBHOOK_URL`, `JIRA_API_TOKEN`, `SMTP_*` as needed.
+4. Configure GitHub secrets: `CLAUDE_CODE_OAUTH_TOKEN` (required — OAuth token from `claude setup-token`, starts with `sk-ant-oat…`; the Claude CLI reads the OAuth slot, not `ANTHROPIC_API_KEY`), `SLACK_WEBHOOK_URL`, `JIRA_API_TOKEN`, `SMTP_*` as needed.
 
 ## Self-hosting (dogfood)
 

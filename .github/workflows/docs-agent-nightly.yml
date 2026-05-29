@@ -153,6 +153,6 @@ jobs:
             echo "- **HEAD:** \`$(git rev-parse --short HEAD)\`"
             echo "- **State file (post-run):**"
             echo '  ```json'
-            cat .engineering-docs-agent/state.json 2>/dev/null | sed 's/^/  /' || echo "  (no state)"
+            sed 's/^/  /' < .engineering-docs-agent/state.json 2>/dev/null || echo "  (no state)"
             echo '  ```'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -975,428 +975,432 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             except ValueError:
                 pass
 
-    # CCE-43: same-hour rerun guard. If origin/<docs-agent-branch>'s
-    # committed state.json already advanced last_successful_run.head_sha
-    # to our HEAD, the same window has already been processed. Proceeding
-    # would mutate whats-new.md and state.json in the working tree with
-    # content that differs from origin/<branch>, and the subsequent
-    # checkout in open_or_append_pr would refuse (CCE-42 layer 3).
-    if _remote_already_processed_window(repo_root, branch_name(now), head_sha):
-        print(
-            f"Skipped: origin/{branch_name(now)} already advanced "
-            f"state.head_sha to {head_sha[:8]}; this window already "
-            f"processed in this hour.",
-            file=sys.stdout,
-        )
-        return 0
-
-    jira_payload = config.get("sources", {}).get("jira")
-    sc_inputs = {
-        "last_sha": state.get("last_successful_run", {}).get("head_sha", ""),
-        "head_sha": head_sha,
-        "repo": repo,
-        "pr_branch_filter": ["docs-agent/*"],
-    }
-    if jira_payload:
-        sc_inputs["jira"] = jira_payload
-    sources, reasons = dispatch_validated(
-        "source-collector", sc_inputs, dry_run_dir=dry_run_dir, cwd=repo_root
-    )
-    for r in reasons:
-        add_partial(state, r)
-    if sources is None:
-        if not reasons:
-            add_partial(state, "source_collector_invalid: returned None")
-        sources = {"prs": [], "jira_issues": []}
-    else:
-        if sources.get("error"):
-            add_partial(state, f"source_collector_error: {sources['error']}")
-        if sources.get("partial"):
-            add_partial(state, "source_collector_partial: true")
-
-    # CCE-19: orchestrator-side safety net. The source-collector agent's
-    # prompt was observed in 3/5 CCE-16 baseline runs to return PRs whose
-    # merge_sha is outside last_sha..head_sha (agent applies merged_at
-    # lower bound but ignores head_sha as an upper bound). Clip here so
-    # downstream stages never see out-of-window PRs even if the agent
-    # misses Step 1.5's SHA-range filter.
-    clip_reasons: list[str] = []
-    if isinstance(sources.get("prs"), list):
-        sources["prs"] = _clip_prs_to_window(
-            sources["prs"],
-            last_sha=sc_inputs["last_sha"],
-            head_sha=head_sha,
-            repo_root=repo_root,
-            out_reasons=clip_reasons,
-        )
-    for r in clip_reasons:
-        add_partial(state, r)
-
-    prs = sources.get("prs", [])
-    jira_issues = sources.get("jira_issues", []) or []
-    jira_lookup = {issue["key"]: issue for issue in jira_issues}
-
-    summaries = []
-    lens_paths = config.get("docs", {}).get("lens_paths", {}) or {}
-    available_sections_by_lens: dict[str, list[str]] = {}
-    for _ln in lens_paths:
-        try:
-            _lp, _ = resolve_lens(config, _ln)
-            _root = repo_root / _lp
-            available_sections_by_lens[_ln] = (
-                sorted(
-                    p.name
-                    for p in _root.iterdir()
-                    if p.is_dir() and not p.name.startswith(".")
-                )
-                if _root.is_dir()
-                else []
-            )
-        except (KeyError, OSError):
-            available_sections_by_lens[_ln] = []
-    for pr in prs:
-        jira_context = [
-            jira_lookup[k] for k in pr.get("jira_keys", []) if k in jira_lookup
-        ]
-        summary, reasons = dispatch_validated(
-            "pr-summarizer",
-            {
-                "pr": pr,
-                "jira_context": jira_context,
-                "lens_names": list(lens_paths.keys()),
-                "available_sections": available_sections_by_lens,
-            },
-            dry_run_dir=dry_run_dir,
-            cwd=repo_root,
-        )
-        for r in reasons:
-            add_partial(state, r)
-        if summary is None:
-            if not reasons:
-                add_partial(state, f"pr_summarizer_invalid: pr={pr['number']}")
-            continue
-        if summary.get("error"):
-            add_partial(
-                state,
-                f"pr_summarizer_error: pr={pr['number']}: {summary['error']}",
-            )
-            continue
-        # Use the PR's actual number, not summary's echo (which is fixture-static in tests).
-        summary_with_pr = {**summary, "pr_number": pr["number"]}
-        summaries.append(summary_with_pr)
-
-    # Page authoring: batch doc_targets per (lens, page_hint).
-    import frontmatter_contract as fmc
-
-    editable_globs = config.get("docs", {}).get("agent_editable_paths", [])
-    per_target: dict[tuple[str, str], list[dict]] = {}
-    for s in summaries:
-        for t in s.get("doc_targets", []):
-            per_target.setdefault((t["lens"], t["page_hint"]), []).append(s)
-
-    authored: list[str] = []
-    for (lens, hint), batch_summaries in per_target.items():
-        try:
-            lens_path, _opts = resolve_lens(config, lens)
-        except KeyError:
-            add_partial(state, f"unknown_lens: {lens}")
-            continue
-        target_path = repo_root / lens_path / hint
-        try:
-            rel = target_path.resolve().relative_to(repo_root.resolve())
-        except ValueError:
-            add_partial(state, f"unsafe_page_path: {hint}")
-            continue
-        if not _page_target_is_editable(str(rel), editable_globs):
-            add_partial(state, f"unsafe_page_path: {rel}")
-            continue
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        action = "edit" if target_path.exists() else "create"
-        out, reasons = dispatch_validated(
-            "page-author",
-            {
-                "target_path": str(target_path),
-                "action": action,
-                "lens": lens,
-                "summaries": batch_summaries,
-                "voice_samples": voice_samples,
-                "frontmatter_template": fmc.default_frontmatter_dict(
-                    [
-                        pr.get("url")
-                        for s in batch_summaries
-                        for pr in prs
-                        if pr.get("number") == s.get("pr_number")
-                    ]
-                ),
-            },
-            dry_run_dir=dry_run_dir,
-            cwd=repo_root,
-        )
-        for r in reasons:
-            add_partial(state, r)
-        if out is None:
-            if not reasons:
-                add_partial(state, f"page_author_invalid: {rel}")
-            continue
-        if out.get("ok"):
-            authored.append(str(target_path))
-            if dry_run_dir and not target_path.exists():
-                target_path.write_text(
-                    fmc.default_frontmatter_text()
-                    + f"# {hint}\n\nGenerated by docs-agent.\n"
-                )
-
-    # Content validation
-    if authored:
-        validation, reasons = dispatch_validated(
-            "content-validator",
-            {
-                "paths": authored,
-                "config_path": str(cfg_path),
-                "voice_samples": voice_samples,
-            },
-            dry_run_dir=dry_run_dir,
-            cwd=repo_root,
-        )
-        for r in reasons:
-            add_partial(state, r)
-        if validation is None:
-            if not reasons:
-                add_partial(state, "content_validator_invalid: returned None")
-            validation = {"failed": []}
-        for fail in validation.get("failed", []):
-            if fail.get("severity") == "block":
-                fail_path = Path(fail["path"])
-                # Interpret relative paths as repo-relative (some subagent
-                # implementations may strip the repo prefix from echoed paths).
-                if not fail_path.is_absolute():
-                    fail_path = repo_root / fail_path
-                # Verify path is inside repo_root before any destructive op.
-                try:
-                    rel = fail_path.resolve().relative_to(repo_root.resolve())
-                except ValueError:
-                    state["current_run"]["partial"] = True
-                    state["current_run"]["partial_reasons"].append(
-                        f"lint_block_unsafe_path: {fail['path']} (outside repo)"
-                    )
-                    continue
-                # Reject empty / "." paths that would cause git checkout HEAD -- .
-                # to restore the entire working tree.
-                if str(rel) in (".", ""):
-                    state["current_run"]["partial"] = True
-                    state["current_run"]["partial_reasons"].append(
-                        f"lint_block_unsafe_path: empty path"
-                    )
-                    continue
-                # If the file exists in HEAD, restore it (edit case).
-                # If not (create case), remove it.
-                in_head = (
-                    subprocess.run(
-                        [
-                            "git",
-                            "-C",
-                            str(repo_root),
-                            "cat-file",
-                            "-e",
-                            f"HEAD:{fail_path.relative_to(repo_root)}",
-                        ],
-                        capture_output=True,
-                    ).returncode
-                    == 0
-                )
-                if in_head:
-                    subprocess.run(
-                        [
-                            "git",
-                            "-C",
-                            str(repo_root),
-                            "checkout",
-                            "HEAD",
-                            "--",
-                            str(fail_path.relative_to(repo_root)),
-                        ],
-                        check=False,
-                    )
-                else:
-                    fail_path.unlink(missing_ok=True)
-                    cleanup_empty_parents(fail_path, until=repo_root)
-                state["current_run"]["partial"] = True
-                state["current_run"]["partial_reasons"].append(
-                    f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}"
-                )
-
-    # Archive index regeneration
-    import archive_indexes
-
-    for lens in lens_paths:
-        try:
-            lens_path, opts = resolve_lens(config, lens)
-        except KeyError:
-            continue
-        if opts.get("archive_index"):
-            archive_indexes.regenerate(repo_root / lens_path)
-
-    # Source map + drift (M) — best-effort, read-only
     try:
-        drifted_pages = compute_source_drift(repo_root, config, prs)
-    except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
-        drifted_pages = []
-        add_partial(state, f"source_map_failed: {exc}", info_only=True)
-    state["current_run"]["source_drift"] = drifted_pages
+        # CCE-43: same-hour rerun guard. If origin/<docs-agent-branch>'s
+        # committed state.json already advanced last_successful_run.head_sha
+        # to our HEAD, the same window has already been processed. Proceeding
+        # would mutate whats-new.md and state.json in the working tree with
+        # content that differs from origin/<branch>, and the subsequent
+        # checkout in open_or_append_pr would refuse (CCE-42 layer 3).
+        if _remote_already_processed_window(repo_root, branch_name(now), head_sha):
+            print(
+                f"Skipped: origin/{branch_name(now)} already advanced "
+                f"state.head_sha to {head_sha[:8]}; this window already "
+                f"processed in this hour.",
+                file=sys.stdout,
+            )
+            return 0
 
-    # Citation verification + drift (C1) — best-effort; auto-fixes relocated
-    # citations in place (committed with the run's other doc edits).
-    try:
-        citation_ledger = compute_citation_drift(repo_root, config, prs)
-    except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
-        # Inline the empty ledger: if the failure was importing verify_citations
-        # itself, re-importing here would re-raise and defeat the best-effort guard.
-        citation_ledger = {
-            "checked": 0,
-            "ok": 0,
-            "relocated": [],
-            "ambiguous": [],
-            "gone": [],
-            "pages_review_needed": [],
+        jira_payload = config.get("sources", {}).get("jira")
+        sc_inputs = {
+            "last_sha": state.get("last_successful_run", {}).get("head_sha", ""),
+            "head_sha": head_sha,
+            "repo": repo,
+            "pr_branch_filter": ["docs-agent/*"],
         }
-        add_partial(state, f"verify_citations_failed: {exc}", info_only=True)
-    state["current_run"]["citation_drift"] = citation_ledger
-
-    # Canonical-core drift (C2) — flag-only sibling after M/C1. Intersects the
-    # core manifest with the M/C1 drift results; never edits a page or dispatches.
-    try:
-        core_drifted = compute_core_drift(
-            repo_root, config, drifted_pages, citation_ledger
+        if jira_payload:
+            sc_inputs["jira"] = jira_payload
+        sources, reasons = dispatch_validated(
+            "source-collector", sc_inputs, dry_run_dir=dry_run_dir, cwd=repo_root
         )
-    except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
-        core_drifted = []
-        add_partial(state, f"core_drift_failed: {exc}", info_only=True)
-    state["current_run"]["core_drift"] = core_drifted
+        for r in reasons:
+            add_partial(state, r)
+        if sources is None:
+            if not reasons:
+                add_partial(state, "source_collector_invalid: returned None")
+            sources = {"prs": [], "jira_issues": []}
+        else:
+            if sources.get("error"):
+                add_partial(state, f"source_collector_error: {sources['error']}")
+            if sources.get("partial"):
+                add_partial(state, "source_collector_partial: true")
 
-    # Gap detection
-    dismissed = set(state.get("dismissed_gap_flags", {}).keys())
-    gap_verdicts = []
-    for pr in prs:
-        pr_id = f"{repo['owner']}/{repo['name']}#{pr['number']}"
-        if pr_id in dismissed:
-            continue
-        verdict, reasons = dispatch_validated(
-            "gap-detector",
-            {
-                "pr_id": pr_id,
-                "pr": pr,
-                "config": {
-                    "allowlist_paths": config.get("gap_detection", {}).get(
-                        "allowlist_paths", []
-                    ),
-                    "size_filter": config.get("gap_detection", {}).get(
-                        "size_filter", {}
+        # CCE-19: orchestrator-side safety net. The source-collector agent's
+        # prompt was observed in 3/5 CCE-16 baseline runs to return PRs whose
+        # merge_sha is outside last_sha..head_sha (agent applies merged_at
+        # lower bound but ignores head_sha as an upper bound). Clip here so
+        # downstream stages never see out-of-window PRs even if the agent
+        # misses Step 1.5's SHA-range filter.
+        clip_reasons: list[str] = []
+        if isinstance(sources.get("prs"), list):
+            sources["prs"] = _clip_prs_to_window(
+                sources["prs"],
+                last_sha=sc_inputs["last_sha"],
+                head_sha=head_sha,
+                repo_root=repo_root,
+                out_reasons=clip_reasons,
+            )
+        for r in clip_reasons:
+            add_partial(state, r)
+
+        prs = sources.get("prs", [])
+        jira_issues = sources.get("jira_issues", []) or []
+        jira_lookup = {issue["key"]: issue for issue in jira_issues}
+
+        summaries = []
+        lens_paths = config.get("docs", {}).get("lens_paths", {}) or {}
+        available_sections_by_lens: dict[str, list[str]] = {}
+        for _ln in lens_paths:
+            try:
+                _lp, _ = resolve_lens(config, _ln)
+                _root = repo_root / _lp
+                available_sections_by_lens[_ln] = (
+                    sorted(
+                        p.name
+                        for p in _root.iterdir()
+                        if p.is_dir() and not p.name.startswith(".")
+                    )
+                    if _root.is_dir()
+                    else []
+                )
+            except (KeyError, OSError):
+                available_sections_by_lens[_ln] = []
+        for pr in prs:
+            jira_context = [
+                jira_lookup[k] for k in pr.get("jira_keys", []) if k in jira_lookup
+            ]
+            summary, reasons = dispatch_validated(
+                "pr-summarizer",
+                {
+                    "pr": pr,
+                    "jira_context": jira_context,
+                    "lens_names": list(lens_paths.keys()),
+                    "available_sections": available_sections_by_lens,
+                },
+                dry_run_dir=dry_run_dir,
+                cwd=repo_root,
+            )
+            for r in reasons:
+                add_partial(state, r)
+            if summary is None:
+                if not reasons:
+                    add_partial(state, f"pr_summarizer_invalid: pr={pr['number']}")
+                continue
+            if summary.get("error"):
+                add_partial(
+                    state,
+                    f"pr_summarizer_error: pr={pr['number']}: {summary['error']}",
+                )
+                continue
+            # Use the PR's actual number, not summary's echo (which is fixture-static in tests).
+            summary_with_pr = {**summary, "pr_number": pr["number"]}
+            summaries.append(summary_with_pr)
+
+        # Page authoring: batch doc_targets per (lens, page_hint).
+        import frontmatter_contract as fmc
+
+        editable_globs = config.get("docs", {}).get("agent_editable_paths", [])
+        per_target: dict[tuple[str, str], list[dict]] = {}
+        for s in summaries:
+            for t in s.get("doc_targets", []):
+                per_target.setdefault((t["lens"], t["page_hint"]), []).append(s)
+
+        authored: list[str] = []
+        for (lens, hint), batch_summaries in per_target.items():
+            try:
+                lens_path, _opts = resolve_lens(config, lens)
+            except KeyError:
+                add_partial(state, f"unknown_lens: {lens}")
+                continue
+            target_path = repo_root / lens_path / hint
+            try:
+                rel = target_path.resolve().relative_to(repo_root.resolve())
+            except ValueError:
+                add_partial(state, f"unsafe_page_path: {hint}")
+                continue
+            if not _page_target_is_editable(str(rel), editable_globs):
+                add_partial(state, f"unsafe_page_path: {rel}")
+                continue
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            action = "edit" if target_path.exists() else "create"
+            out, reasons = dispatch_validated(
+                "page-author",
+                {
+                    "target_path": str(target_path),
+                    "action": action,
+                    "lens": lens,
+                    "summaries": batch_summaries,
+                    "voice_samples": voice_samples,
+                    "frontmatter_template": fmc.default_frontmatter_dict(
+                        [
+                            pr.get("url")
+                            for s in batch_summaries
+                            for pr in prs
+                            if pr.get("number") == s.get("pr_number")
+                        ]
                     ),
                 },
-                "dismissed_flags": list(dismissed),
+                dry_run_dir=dry_run_dir,
+                cwd=repo_root,
+            )
+            for r in reasons:
+                add_partial(state, r)
+            if out is None:
+                if not reasons:
+                    add_partial(state, f"page_author_invalid: {rel}")
+                continue
+            if out.get("ok"):
+                authored.append(str(target_path))
+                if dry_run_dir and not target_path.exists():
+                    target_path.write_text(
+                        fmc.default_frontmatter_text()
+                        + f"# {hint}\n\nGenerated by docs-agent.\n"
+                    )
+
+        # Content validation
+        if authored:
+            validation, reasons = dispatch_validated(
+                "content-validator",
+                {
+                    "paths": authored,
+                    "config_path": str(cfg_path),
+                    "voice_samples": voice_samples,
+                },
+                dry_run_dir=dry_run_dir,
+                cwd=repo_root,
+            )
+            for r in reasons:
+                add_partial(state, r)
+            if validation is None:
+                if not reasons:
+                    add_partial(state, "content_validator_invalid: returned None")
+                validation = {"failed": []}
+            for fail in validation.get("failed", []):
+                if fail.get("severity") == "block":
+                    fail_path = Path(fail["path"])
+                    # Interpret relative paths as repo-relative (some subagent
+                    # implementations may strip the repo prefix from echoed paths).
+                    if not fail_path.is_absolute():
+                        fail_path = repo_root / fail_path
+                    # Verify path is inside repo_root before any destructive op.
+                    try:
+                        rel = fail_path.resolve().relative_to(repo_root.resolve())
+                    except ValueError:
+                        state["current_run"]["partial"] = True
+                        state["current_run"]["partial_reasons"].append(
+                            f"lint_block_unsafe_path: {fail['path']} (outside repo)"
+                        )
+                        continue
+                    # Reject empty / "." paths that would cause git checkout HEAD -- .
+                    # to restore the entire working tree.
+                    if str(rel) in (".", ""):
+                        state["current_run"]["partial"] = True
+                        state["current_run"]["partial_reasons"].append(
+                            f"lint_block_unsafe_path: empty path"
+                        )
+                        continue
+                    # If the file exists in HEAD, restore it (edit case).
+                    # If not (create case), remove it.
+                    in_head = (
+                        subprocess.run(
+                            [
+                                "git",
+                                "-C",
+                                str(repo_root),
+                                "cat-file",
+                                "-e",
+                                f"HEAD:{fail_path.relative_to(repo_root)}",
+                            ],
+                            capture_output=True,
+                        ).returncode
+                        == 0
+                    )
+                    if in_head:
+                        subprocess.run(
+                            [
+                                "git",
+                                "-C",
+                                str(repo_root),
+                                "checkout",
+                                "HEAD",
+                                "--",
+                                str(fail_path.relative_to(repo_root)),
+                            ],
+                            check=False,
+                        )
+                    else:
+                        fail_path.unlink(missing_ok=True)
+                        cleanup_empty_parents(fail_path, until=repo_root)
+                    state["current_run"]["partial"] = True
+                    state["current_run"]["partial_reasons"].append(
+                        f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}"
+                    )
+
+        # Archive index regeneration
+        import archive_indexes
+
+        for lens in lens_paths:
+            try:
+                lens_path, opts = resolve_lens(config, lens)
+            except KeyError:
+                continue
+            if opts.get("archive_index"):
+                archive_indexes.regenerate(repo_root / lens_path)
+
+        # Source map + drift (M) — best-effort, read-only
+        try:
+            drifted_pages = compute_source_drift(repo_root, config, prs)
+        except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
+            drifted_pages = []
+            add_partial(state, f"source_map_failed: {exc}", info_only=True)
+        state["current_run"]["source_drift"] = drifted_pages
+
+        # Citation verification + drift (C1) — best-effort; auto-fixes relocated
+        # citations in place (committed with the run's other doc edits).
+        try:
+            citation_ledger = compute_citation_drift(repo_root, config, prs)
+        except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
+            # Inline the empty ledger: if the failure was importing verify_citations
+            # itself, re-importing here would re-raise and defeat the best-effort guard.
+            citation_ledger = {
+                "checked": 0,
+                "ok": 0,
+                "relocated": [],
+                "ambiguous": [],
+                "gone": [],
+                "pages_review_needed": [],
+            }
+            add_partial(state, f"verify_citations_failed: {exc}", info_only=True)
+        state["current_run"]["citation_drift"] = citation_ledger
+
+        # Canonical-core drift (C2) — flag-only sibling after M/C1. Intersects the
+        # core manifest with the M/C1 drift results; never edits a page or dispatches.
+        try:
+            core_drifted = compute_core_drift(
+                repo_root, config, drifted_pages, citation_ledger
+            )
+        except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
+            core_drifted = []
+            add_partial(state, f"core_drift_failed: {exc}", info_only=True)
+        state["current_run"]["core_drift"] = core_drifted
+
+        # Gap detection
+        dismissed = set(state.get("dismissed_gap_flags", {}).keys())
+        gap_verdicts = []
+        for pr in prs:
+            pr_id = f"{repo['owner']}/{repo['name']}#{pr['number']}"
+            if pr_id in dismissed:
+                continue
+            verdict, reasons = dispatch_validated(
+                "gap-detector",
+                {
+                    "pr_id": pr_id,
+                    "pr": pr,
+                    "config": {
+                        "allowlist_paths": config.get("gap_detection", {}).get(
+                            "allowlist_paths", []
+                        ),
+                        "size_filter": config.get("gap_detection", {}).get(
+                            "size_filter", {}
+                        ),
+                    },
+                    "dismissed_flags": list(dismissed),
+                },
+                dry_run_dir=dry_run_dir,
+                cwd=repo_root,
+            )
+            for r in reasons:
+                add_partial(state, r)
+            if verdict is None:
+                if not reasons:
+                    add_partial(state, f"gap_detector_invalid: pr_id={pr_id}")
+                continue
+            gap_verdicts.append(verdict)
+
+        # Prepend What's New entry (only if we have PRs to report)
+        if prs:
+            whats_new = repo_root / config["docs"]["whats_new_file"]
+            whats_new.parent.mkdir(parents=True, exist_ok=True)
+            entry_lines = [f"## {now}"]
+            for s in summaries:
+                entry_lines.append(
+                    f"- PR #{s.get('pr_number')}: {s.get('what_changed', '')}"
+                )
+            gaps_flagged = [v for v in gap_verdicts if v.get("needs_spec")]
+            if gaps_flagged:
+                entry_lines.append("### Gaps flagged")
+                for g in gaps_flagged:
+                    entry_lines.append(f"- {g['pr_id']}: {g['reasoning']}")
+            entry_lines.extend(_drift_whats_new_lines(drifted_pages))
+            entry_lines.extend(_citation_drift_whats_new_lines(citation_ledger))
+            entry_lines.extend(_core_drift_whats_new_lines(core_drifted))
+            entry = "\n".join(entry_lines) + "\n\n"
+            existing = whats_new.read_text() if whats_new.exists() else ""
+            whats_new.write_text(_compose_whats_new(existing, entry))
+
+        # CCE-40: promote current_run.head_sha into last_successful_run.
+        # The merge of the docs-agent PR is what actually promotes this to
+        # main; until then the advance lives only on the docs-agent branch
+        # and on disk locally. If PR open fails, nothing reaches main and
+        # the next run reads the unchanged committed state.
+        state["last_successful_run"] = {
+            "head_sha": state["current_run"]["head_sha"],
+            "completed_at": now,
+        }
+        state["current_run"]["pr_number"] = None
+        save_persistent_state(state_path, state)
+        save_current_run(state_path, state)
+        if no_pr:
+            return 0
+        branch = branch_name(now)
+        gh = GhClient(repo_root)
+        pr_number, pr_reasons = open_or_append_pr(
+            repo_root,
+            gh,
+            branch=branch,
+            now_iso=now,
+            partial=state["current_run"]["partial"],
+            partial_reasons=state["current_run"]["partial_reasons"],
+        )
+        for reason, info_only in pr_reasons:
+            add_partial(state, reason, info_only=info_only)
+        if pr_number is None:
+            save_persistent_state(state_path, state)
+            save_current_run(state_path, state)
+            return 1
+        state["current_run"]["pr_number"] = pr_number
+        save_persistent_state(state_path, state)
+        save_current_run(state_path, state)
+
+        # Compose digest and dispatch notifier.
+        digest = {
+            "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
+            "run_summary_bullets": [
+                f"PR #{s.get('pr_number')}: {s.get('what_changed', '')}"
+                for s in summaries
+            ],
+            "gap_flags": [
+                {"pr_id": v["pr_id"], "reasoning": v["reasoning"]}
+                for v in gap_verdicts
+                if v.get("needs_spec")
+            ],
+            "lint_failures": state["current_run"]["partial_reasons"],
+            "partial_reasons": state["current_run"]["partial_reasons"],
+            "source_drift": drifted_pages,
+            "citation_drift": citation_ledger,
+            "core_drift": core_drifted,
+        }
+        notifier_result, reasons = dispatch_validated(
+            "notifier",
+            {
+                "digest": digest,
+                "slack_config": config.get("notifications", {}).get("slack", {}),
+                "email_config": config.get("notifications", {}).get("email", {}),
+                "mode": "run",
             },
             dry_run_dir=dry_run_dir,
             cwd=repo_root,
         )
         for r in reasons:
             add_partial(state, r)
-        if verdict is None:
+        if notifier_result is None:
             if not reasons:
-                add_partial(state, f"gap_detector_invalid: pr_id={pr_id}")
-            continue
-        gap_verdicts.append(verdict)
-
-    # Prepend What's New entry (only if we have PRs to report)
-    if prs:
-        whats_new = repo_root / config["docs"]["whats_new_file"]
-        whats_new.parent.mkdir(parents=True, exist_ok=True)
-        entry_lines = [f"## {now}"]
-        for s in summaries:
-            entry_lines.append(
-                f"- PR #{s.get('pr_number')}: {s.get('what_changed', '')}"
-            )
-        gaps_flagged = [v for v in gap_verdicts if v.get("needs_spec")]
-        if gaps_flagged:
-            entry_lines.append("### Gaps flagged")
-            for g in gaps_flagged:
-                entry_lines.append(f"- {g['pr_id']}: {g['reasoning']}")
-        entry_lines.extend(_drift_whats_new_lines(drifted_pages))
-        entry_lines.extend(_citation_drift_whats_new_lines(citation_ledger))
-        entry_lines.extend(_core_drift_whats_new_lines(core_drifted))
-        entry = "\n".join(entry_lines) + "\n\n"
-        existing = whats_new.read_text() if whats_new.exists() else ""
-        whats_new.write_text(_compose_whats_new(existing, entry))
-
-    # CCE-40: promote current_run.head_sha into last_successful_run.
-    # The merge of the docs-agent PR is what actually promotes this to
-    # main; until then the advance lives only on the docs-agent branch
-    # and on disk locally. If PR open fails, nothing reaches main and
-    # the next run reads the unchanged committed state.
-    state["last_successful_run"] = {
-        "head_sha": state["current_run"]["head_sha"],
-        "completed_at": now,
-    }
-    state["current_run"]["pr_number"] = None
-    save_persistent_state(state_path, state)
-    save_current_run(state_path, state)
-    if no_pr:
+                add_partial(state, "notifier_invalid: returned None")
+            save_persistent_state(state_path, state)
+            save_current_run(state_path, state)
         return 0
-    branch = branch_name(now)
-    gh = GhClient(repo_root)
-    pr_number, pr_reasons = open_or_append_pr(
-        repo_root,
-        gh,
-        branch=branch,
-        now_iso=now,
-        partial=state["current_run"]["partial"],
-        partial_reasons=state["current_run"]["partial_reasons"],
-    )
-    for reason, info_only in pr_reasons:
-        add_partial(state, reason, info_only=info_only)
-    if pr_number is None:
-        save_persistent_state(state_path, state)
-        save_current_run(state_path, state)
-        return 1
-    state["current_run"]["pr_number"] = pr_number
-    save_persistent_state(state_path, state)
-    save_current_run(state_path, state)
-
-    # Compose digest and dispatch notifier.
-    digest = {
-        "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
-        "run_summary_bullets": [
-            f"PR #{s.get('pr_number')}: {s.get('what_changed', '')}" for s in summaries
-        ],
-        "gap_flags": [
-            {"pr_id": v["pr_id"], "reasoning": v["reasoning"]}
-            for v in gap_verdicts
-            if v.get("needs_spec")
-        ],
-        "lint_failures": state["current_run"]["partial_reasons"],
-        "partial_reasons": state["current_run"]["partial_reasons"],
-        "source_drift": drifted_pages,
-        "citation_drift": citation_ledger,
-        "core_drift": core_drifted,
-    }
-    notifier_result, reasons = dispatch_validated(
-        "notifier",
-        {
-            "digest": digest,
-            "slack_config": config.get("notifications", {}).get("slack", {}),
-            "email_config": config.get("notifications", {}).get("email", {}),
-            "mode": "run",
-        },
-        dry_run_dir=dry_run_dir,
-        cwd=repo_root,
-    )
-    for r in reasons:
-        add_partial(state, r)
-    if notifier_result is None:
-        if not reasons:
-            add_partial(state, "notifier_invalid: returned None")
-        save_persistent_state(state_path, state)
-        save_current_run(state_path, state)
-    return 0
+    finally:
+        _write_step_summary(state, repo_root)
 
 
 def run_bootstrap_core(
@@ -1631,6 +1635,53 @@ def _remote_already_processed_window(
     return remote_head == our_head_sha
 
 
+def _format_partial_digest(partial_reasons: list[str]) -> str:
+    """Single-source format for partial_reasons.
+
+    Used by:
+    - PR body composer in open_or_append_pr
+    - GITHUB_STEP_SUMMARY writer in _write_step_summary
+
+    Returns an empty string when partial_reasons is empty so callers
+    can detect the no-reasons case without re-checking the list.
+    """
+    if not partial_reasons:
+        return ""
+    lines = ["WARNING — Partial run", ""]
+    lines.extend(f"- {r}" for r in partial_reasons)
+    return "\n".join(lines)
+
+
+def _write_step_summary(state: dict, repo_root: Path) -> None:
+    """Append the partial-reasons digest to $GITHUB_STEP_SUMMARY.
+
+    No-op when the env var is unset (local runs, unit tests), when
+    state lacks current_run, or when partial_reasons is empty.
+
+    Failure-tolerant: never raises. If the path is unwritable
+    (read-only fs, missing parent), swallows the OSError and returns —
+    the runner's primary job is producing docs, not diagnostics.
+    """
+    summary_path_str = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path_str:
+        return
+    cr = state.get("current_run") or {}
+    reasons = cr.get("partial_reasons") or []
+    if not reasons:
+        return
+    digest = _format_partial_digest(reasons)
+    if not digest:
+        return
+    section = "\n## docs-agent partial_reasons\n\n" + digest + "\n"
+    try:
+        with open(summary_path_str, "a", encoding="utf-8") as fh:
+            fh.write(section)
+    except OSError:
+        # Best-effort. The workflow's `if: always()` state.json cat
+        # step still runs; this digest is additive context.
+        return
+
+
 def open_or_append_pr(
     repo_root: Path,
     gh: GhClient,
@@ -1747,11 +1798,11 @@ def open_or_append_pr(
         return None, reasons
     if existing.value is not None:
         return existing.value, reasons
-    body = (
-        "WARNING — Partial run — " + "; ".join(partial_reasons)
-        if partial
-        else "docs-agent run"
-    )
+    if partial:
+        digest = _format_partial_digest(partial_reasons)
+        body = digest if digest else "docs-agent run"
+    else:
+        body = "docs-agent run"
     created = gh.pr_create(branch, commit_msg, body)
     if not created.ok:
         reasons.append((f"gh_pr_create_failed: {created.error}", False))

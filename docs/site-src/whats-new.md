@@ -8,6 +8,9 @@ synthesized_into: []
 
 # What's New
 
+## 2026-05-28T23:15:56.279744+00:00
+- PR #55: Enables the orchestrator's existing subagent forensic capture mode (DOCS_AGENT_DEBUG_DIR, built in CCE-9 + CCE-12) in the nightly CI workflow and adds an actions/upload-artifact@v4 step with 14-day retention and if: always() so per-subagent forensic files — prompt.txt, stdout.txt, stderr.txt, stream.jsonl, meta.json — survive runner teardown even on failure. No Python source changes; the only modified source file is the nightly workflow YAML. Two new internal spec and plan documents were also added under docs/superpowers/.
+
 ## 2026-05-27
 
 ### Publish the docs site to GitHub Pages

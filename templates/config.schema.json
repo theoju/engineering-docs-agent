@@ -94,6 +94,11 @@
         "site_dir": {
           "type": "string",
           "description": "Built-site directory to publish. Default `site` (MkDocs)."
+        },
+        "ci_provider": {
+          "type": "string",
+          "enum": ["github", "circleci"],
+          "description": "Which CI provider runs the docs publish workflow. Default `github` (no field present). `circleci` is reserved for a future publish-verifier extension; the field is accepted in config today but only `github` is wired through scripts/verify_runner.py."
         }
       }
     },

@@ -153,6 +153,15 @@ jobs:
             echo "- **HEAD:** \`$(git rev-parse --short HEAD)\`"
             echo "- **State file (post-run):**"
             echo '  ```json'
-            cat .engineering-docs-agent/state.json 2>/dev/null | sed 's/^/  /' || echo "  (no state)"
+            if [ -f .engineering-docs-agent/state.json ]; then
+              # CCE-39 follow-up + state-deadcode (#bundle): explicit if-guard so the
+              # "(no state)" fallthrough actually fires when the file is missing. The
+              # earlier 'cat ... 2>/dev/null | sed ... || echo "..."' pattern masked
+              # cat's nonzero exit because pipes hide upstream exit status. jq -e
+              # also exits non-zero on invalid JSON, which is a useful signal.
+              jq -e '.' .engineering-docs-agent/state.json 2>/dev/null | sed 's/^/  /' || echo "  (invalid or empty state)"
+            else
+              echo "  (no state)"
+            fi
             echo '  ```'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -854,6 +854,21 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             except ValueError:
                 pass
 
+    # CCE-43: same-hour rerun guard. If origin/<docs-agent-branch>'s
+    # committed state.json already advanced last_successful_run.head_sha
+    # to our HEAD, the same window has already been processed. Proceeding
+    # would mutate whats-new.md and state.json in the working tree with
+    # content that differs from origin/<branch>, and the subsequent
+    # checkout in open_or_append_pr would refuse (CCE-42 layer 3).
+    if _remote_already_processed_window(repo_root, branch_name(now), head_sha):
+        print(
+            f"Skipped: origin/{branch_name(now)} already advanced "
+            f"state.head_sha to {head_sha[:8]}; this window already "
+            f"processed in this hour.",
+            file=sys.stdout,
+        )
+        return 0
+
     jira_payload = config.get("sources", {}).get("jira")
     sc_inputs = {
         "last_sha": state.get("last_successful_run", {}).get("head_sha", ""),

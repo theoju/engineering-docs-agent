@@ -103,3 +103,86 @@ def test_helper_swallows_oserror_when_path_unwritable(tmp_path: Path, monkeypatc
     }
     # Must not raise.
     orun._write_step_summary(state, tmp_path)
+
+
+def test_run_invokes_write_step_summary_in_finally_on_hard_fail(
+    tmp_path: Path, monkeypatch
+):
+    """Stronger contract: the finally block calls _write_step_summary
+    even when run() propagates an exception from downstream."""
+    import shutil
+    import subprocess as sp
+
+    HOST = Path(__file__).parent.parent / "fixtures" / "e2e_host"
+    FAKES = Path(__file__).parent / "fakes"
+    host = tmp_path / "host"
+    shutil.copytree(HOST, host)
+    sp.run(["git", "-C", str(host), "init", "-q"], check=True)
+    sp.run(["git", "-C", str(host), "config", "user.email", "t@t"], check=True)
+    sp.run(["git", "-C", str(host), "config", "user.name", "t"], check=True)
+    sp.run(["git", "-C", str(host), "add", "."], check=True)
+    sp.run(["git", "-C", str(host), "commit", "-q", "-m", "init"], check=True)
+
+    calls = []
+
+    def fake_write(state, repo_root):
+        calls.append(
+            {
+                "partial_reasons": list(
+                    (state.get("current_run") or {}).get("partial_reasons", [])
+                )
+            }
+        )
+
+    monkeypatch.setattr(orun, "_write_step_summary", fake_write)
+
+    def fake_open(*args, **kwargs):
+        raise RuntimeError("simulated hard-fail mid-PR-open")
+
+    monkeypatch.setattr(orun, "open_or_append_pr", fake_open)
+
+    raised = None
+    try:
+        orun.run(host, dry_run_dir=FAKES, no_pr=False)
+    except RuntimeError as e:
+        raised = e
+
+    assert raised is not None, (
+        "expected the patched open_or_append_pr to propagate its RuntimeError"
+    )
+    assert len(calls) >= 1, (
+        "expected _write_step_summary to be called from run()'s finally; "
+        f"got {len(calls)} calls"
+    )
+
+
+def test_run_invokes_write_step_summary_on_clean_success(tmp_path: Path, monkeypatch):
+    """On a clean success path, the finally block still fires —
+    _write_step_summary itself is the gate on writing nothing for
+    empty partial_reasons."""
+    import shutil
+    import subprocess as sp
+
+    HOST = Path(__file__).parent.parent / "fixtures" / "e2e_host"
+    FAKES = Path(__file__).parent / "fakes"
+    host = tmp_path / "host"
+    shutil.copytree(HOST, host)
+    sp.run(["git", "-C", str(host), "init", "-q"], check=True)
+    sp.run(["git", "-C", str(host), "config", "user.email", "t@t"], check=True)
+    sp.run(["git", "-C", str(host), "config", "user.name", "t"], check=True)
+    sp.run(["git", "-C", str(host), "add", "."], check=True)
+    sp.run(["git", "-C", str(host), "commit", "-q", "-m", "init"], check=True)
+
+    calls = []
+
+    def fake_write(state, repo_root):
+        calls.append(True)
+
+    monkeypatch.setattr(orun, "_write_step_summary", fake_write)
+
+    rc = orun.run(host, dry_run_dir=FAKES, no_pr=True)
+    assert rc == 0, f"expected clean run to exit 0; got {rc}"
+    assert len(calls) >= 1, (
+        f"expected _write_step_summary to fire on clean-success path; "
+        f"got {len(calls)} calls"
+    )

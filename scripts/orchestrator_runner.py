@@ -1631,6 +1631,23 @@ def _remote_already_processed_window(
     return remote_head == our_head_sha
 
 
+def _write_step_summary(state: dict, repo_root: Path) -> None:
+    """Append the partial-reasons digest to $GITHUB_STEP_SUMMARY.
+
+    No-op when the env var is unset (local runs, unit tests), when
+    state lacks current_run, or when partial_reasons is empty.
+
+    Failure-tolerant: never raises. If the path is unwritable
+    (read-only fs, missing parent), swallows the OSError and returns —
+    the runner's primary job is producing docs, not diagnostics.
+    """
+    summary_path_str = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path_str:
+        return
+    # Full digest-write logic lands in Task 4.
+    return
+
+
 def open_or_append_pr(
     repo_root: Path,
     gh: GhClient,

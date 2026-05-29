@@ -18,7 +18,7 @@ A Claude Code plugin: nightly docs-PR generator with publish verification and ti
 2. `claude plugin install engineering-docs-agent@engineering-docs-agent-marketplace` — install the plugin.
 3. `claude /engineering-docs-agent-setup` — run the setup skill from your host repo's root.
 
-For the comprehensive walkthrough (GitHub App registration, all repo secrets, branch protection, validation, per-language host notes, troubleshooting for every partial-mode failure), see [docs/setup-guide.md](docs/setup-guide.md).
+For the comprehensive walkthrough (GitHub App registration, all repo secrets, branch protection, validation, per-language host notes, troubleshooting for every partial-mode failure), see [docs/site-src/setup-guide.md](docs/site-src/setup-guide.md). The same content is published on the docs site at `setup-guide.html`.
 
 ## Self-hosting (dogfood)
 

@@ -35,7 +35,7 @@ Set the following in your repo's Actions secrets:
 The nightly cron fires at the time configured in `config.yml`. To trigger a run manually:
 
 ```
-gh workflow run docs-agent-run.yml
+gh workflow run docs-agent-nightly.yml
 ```
 
 ## Troubleshooting

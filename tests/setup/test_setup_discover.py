@@ -114,6 +114,28 @@ def test_discover_not_publishable_without_framework(tmp_path):
     assert out["pages_publishable"] is False
 
 
+def test_js_docusaurus_fixture_full_discovery():
+    r = subprocess.run(
+        [sys.executable, str(SCRIPT), "--json"],
+        cwd=FIX / "js_docusaurus",
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["framework"] == "docusaurus"
+    assert out["source_dir"] == "docs"
+    assert out["ci"] == "github_actions"
+    assert out["python"]["detected"] is False
+    assert out["toolchain"]["node"] is True
+    assert out["toolchain"]["package_manager"] == "npm"
+    assert out["toolchain"]["docusaurus_dep"] is True
+    assert out["pages_publishable"] is False
+    assert any(
+        w.get("code") == "docusaurus_v0.1_unsupported" for w in out.get("warnings", [])
+    )
+
+
 # --- CCE-57: detect_toolchain (JS/TS host shape) ---
 
 

@@ -112,3 +112,92 @@ def test_discover_not_publishable_without_framework(tmp_path):
 
     out = discover(tmp_path)
     assert out["pages_publishable"] is False
+
+
+# --- CCE-57: detect_toolchain (JS/TS host shape) ---
+
+
+def test_detect_toolchain_bare_dir(tmp_path):
+    import setup_discover
+
+    out = setup_discover.detect_toolchain(tmp_path)
+    assert out == {
+        "node": False,
+        "bun": False,
+        "deno": False,
+        "package_manager": None,
+        "docusaurus_dep": False,
+    }
+
+
+def test_detect_toolchain_node_with_npm_lock(tmp_path):
+    import setup_discover
+
+    (tmp_path / "package.json").write_text('{"name":"x"}')
+    (tmp_path / "package-lock.json").write_text("{}")
+    out = setup_discover.detect_toolchain(tmp_path)
+    assert out["node"] is True
+    assert out["package_manager"] == "npm"
+    assert out["docusaurus_dep"] is False
+
+
+def test_detect_toolchain_bun_lockfile_wins(tmp_path):
+    import setup_discover
+
+    (tmp_path / "package.json").write_text('{"name":"x"}')
+    (tmp_path / "package-lock.json").write_text("{}")
+    (tmp_path / "bun.lockb").write_bytes(b"\x00")
+    out = setup_discover.detect_toolchain(tmp_path)
+    assert out["bun"] is True
+    assert out["package_manager"] == "bun"
+
+
+def test_detect_toolchain_pnpm(tmp_path):
+    import setup_discover
+
+    (tmp_path / "package.json").write_text('{"name":"x"}')
+    (tmp_path / "pnpm-lock.yaml").write_text("lockfileVersion: 9\n")
+    out = setup_discover.detect_toolchain(tmp_path)
+    assert out["package_manager"] == "pnpm"
+
+
+def test_detect_toolchain_docusaurus_dep(tmp_path):
+    import setup_discover
+
+    (tmp_path / "package.json").write_text(
+        '{"name":"x","devDependencies":{"@docusaurus/core":"^3.0.0"}}'
+    )
+    out = setup_discover.detect_toolchain(tmp_path)
+    assert out["docusaurus_dep"] is True
+
+
+def test_detect_toolchain_malformed_package_json_is_quiet(tmp_path):
+    import setup_discover
+
+    (tmp_path / "package.json").write_text("{not json")
+    out = setup_discover.detect_toolchain(tmp_path)
+    assert out["node"] is True
+    assert out["docusaurus_dep"] is False
+
+
+def test_detect_toolchain_deno(tmp_path):
+    import setup_discover
+
+    (tmp_path / "deno.json").write_text("{}")
+    out = setup_discover.detect_toolchain(tmp_path)
+    assert out["deno"] is True
+
+
+def test_discover_surfaces_toolchain_block(tmp_path):
+    import setup_discover
+
+    out = setup_discover.discover(tmp_path)
+    assert "toolchain" in out
+    assert isinstance(out["toolchain"], dict)
+    assert set(out["toolchain"].keys()) == {
+        "node",
+        "bun",
+        "deno",
+        "package_manager",
+        "docusaurus_dep",
+    }

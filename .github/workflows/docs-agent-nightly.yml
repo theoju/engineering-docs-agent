@@ -47,7 +47,12 @@ jobs:
         # block. Token expires after 1h; the job timeout is 60min so the
         # token is always valid for the full run.
         id: app-token
-        uses: actions/create-github-app-token@v1
+        # CCE-54: bumped v1 -> v3 for Node-24 runtime. v1 and v2 both ship on
+        # Node 20, which GitHub deprecates June 2026; v3 is the first major on
+        # Node 24. v3 emits a cosmetic `app-id` deprecation warning (the input
+        # was renamed to `app_id`); the old name still works — follow-up if/when
+        # we want to silence it.
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.DOCS_AGENT_APP_ID }}
           private-key: ${{ secrets.DOCS_AGENT_APP_PRIVATE_KEY }}
@@ -145,7 +150,9 @@ jobs:
         # github.run_id is appended to the artifact name because v4 disallows
         # duplicate names within a single run.
         if: always()
-        uses: actions/upload-artifact@v4
+        # CCE-54: bumped v4 -> v6 for Node-24 runtime. v4 and v5 both ship on
+        # Node 20 (deprecated June 2026); v6 is the first major on Node 24.
+        uses: actions/upload-artifact@v6
         with:
           name: docs-agent-subagent-forensics-${{ github.run_id }}
           path: ${{ runner.temp }}/docs-agent-debug/
@@ -172,6 +179,15 @@ jobs:
             echo "- **HEAD:** \`$(git rev-parse --short HEAD)\`"
             echo "- **State file (post-run):**"
             echo '  ```json'
-            cat .engineering-docs-agent/state.json 2>/dev/null | sed 's/^/  /' || echo "  (no state)"
+            if [ -f .engineering-docs-agent/state.json ]; then
+              # CCE-39 follow-up + state-deadcode (#bundle): explicit if-guard so the
+              # "(no state)" fallthrough actually fires when the file is missing. The
+              # earlier 'cat ... 2>/dev/null | sed ... || echo "..."' pattern masked
+              # cat's nonzero exit because pipes hide upstream exit status. jq -e
+              # also exits non-zero on invalid JSON, which is a useful signal.
+              jq -e '.' .engineering-docs-agent/state.json 2>/dev/null | sed 's/^/  /' || echo "  (invalid or empty state)"
+            else
+              echo "  (no state)"
+            fi
             echo '  ```'
           } >> "$GITHUB_STEP_SUMMARY"

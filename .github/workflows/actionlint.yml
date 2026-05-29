@@ -1,0 +1,34 @@
+name: actionlint
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actionlint.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actionlint.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download actionlint
+        id: get_actionlint
+        # CCE-52: pin to a specific release for reproducibility. The download
+        # script verifies a checksum; bump version + checksum together when
+        # picking up new actionlint releases.
+        run: bash <(curl -sL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+      - name: Run actionlint
+        # Hard gate — non-zero exit code blocks merge. The whole point of this
+        # workflow is to catch what python yaml.safe_load misses (e.g. the
+        # CCE-45 PR #65 -> #66 hot-fix loop).
+        run: ${{ steps.get_actionlint.outputs.executable }} -color

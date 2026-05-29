@@ -1631,6 +1631,23 @@ def _remote_already_processed_window(
     return remote_head == our_head_sha
 
 
+def _format_partial_digest(partial_reasons: list[str]) -> str:
+    """Single-source format for partial_reasons.
+
+    Used by:
+    - PR body composer in open_or_append_pr
+    - GITHUB_STEP_SUMMARY writer in _write_step_summary
+
+    Returns an empty string when partial_reasons is empty so callers
+    can detect the no-reasons case without re-checking the list.
+    """
+    if not partial_reasons:
+        return ""
+    lines = ["WARNING — Partial run", ""]
+    lines.extend(f"- {r}" for r in partial_reasons)
+    return "\n".join(lines)
+
+
 def _write_step_summary(state: dict, repo_root: Path) -> None:
     """Append the partial-reasons digest to $GITHUB_STEP_SUMMARY.
 
@@ -1644,8 +1661,21 @@ def _write_step_summary(state: dict, repo_root: Path) -> None:
     summary_path_str = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path_str:
         return
-    # Full digest-write logic lands in Task 4.
-    return
+    cr = state.get("current_run") or {}
+    reasons = cr.get("partial_reasons") or []
+    if not reasons:
+        return
+    digest = _format_partial_digest(reasons)
+    if not digest:
+        return
+    section = "\n## docs-agent partial_reasons\n\n" + digest + "\n"
+    try:
+        with open(summary_path_str, "a", encoding="utf-8") as fh:
+            fh.write(section)
+    except OSError:
+        # Best-effort. The workflow's `if: always()` state.json cat
+        # step still runs; this digest is additive context.
+        return
 
 
 def open_or_append_pr(

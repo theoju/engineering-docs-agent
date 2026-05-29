@@ -31,6 +31,14 @@ jobs:
     timeout-minutes: 60
     env:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # CCE-53: surface Jira basic-auth credentials into the runner env so
+      # source-collector's optional Jira enrichment path resolves linked
+      # issue summaries instead of skipping with
+      # source_collector_error: jira_auth_missing. See README "Jira
+      # enrichment (optional)" for the same vars in the local-shell path.
+      # secrets.* is valid at job-env scope (resolved at job start).
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
     steps:
       - name: Generate GitHub App installation token
         # CCE-45: see GH_TOKEN comment above. The App (docs-agent-bot,

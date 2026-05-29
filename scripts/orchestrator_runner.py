@@ -982,9 +982,10 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         # would mutate whats-new.md and state.json in the working tree with
         # content that differs from origin/<branch>, and the subsequent
         # checkout in open_or_append_pr would refuse (CCE-42 layer 3).
-        if _remote_already_processed_window(repo_root, branch_name(now), head_sha):
+        skip_branch = branch_name(now)
+        if _remote_already_processed_window(repo_root, skip_branch, head_sha):
             print(
-                f"Skipped: origin/{branch_name(now)} already advanced "
+                f"Skipped: origin/{skip_branch} already advanced "
                 f"state.head_sha to {head_sha[:8]}; this window already "
                 f"processed in this hour.",
                 file=sys.stdout,
@@ -1630,7 +1631,7 @@ def _remote_already_processed_window(
     try:
         remote = json.loads(show.stdout)
         remote_head = remote.get("last_successful_run", {}).get("head_sha", "")
-    except (json.JSONDecodeError, KeyError, AttributeError):
+    except (json.JSONDecodeError, AttributeError):
         return False
     return remote_head == our_head_sha
 

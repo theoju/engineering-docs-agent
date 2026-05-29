@@ -1,0 +1,40 @@
+# Host config template for theoju/advanced-data-import-system (CCE-58).
+# Copy this file to .engineering-docs-agent/config.yml in the host repo,
+# review every field flagged in docs/host-onboarding/advanced-data-import-system.md,
+# then commit.
+
+docs:
+  framework: mkdocs
+  source_dir: docs/site-src
+  whats_new_file: docs/site-src/whats-new.md
+  agent_editable_paths:
+    - "docs/site-src/**"
+  lens_paths:
+    core: docs/site-src/
+
+sources:
+  git:
+    host: github
+  jira:
+    enabled: false # flip to true and set project_keys if linking to Jira
+
+voice:
+  sample_paths:
+    - README.md
+    - CLAUDE.md
+
+lint:
+  tier1: default
+
+publishing:
+  base_url: https://theoju.github.io/advanced-data-import-system/
+  build_workflow: docs-deploy.yml
+  url_map_rule: standard
+  verify_timeout_seconds: 90 # extra slack for hybrid-CI scheduling
+  ci_provider: github # CircleCI gates user PRs but does not publish docs
+
+notifications:
+  slack:
+    enabled: false
+  email:
+    enabled: false

@@ -1372,6 +1372,49 @@ def branch_name(now_iso: str) -> str:
     return f"docs-agent/{now_iso[:13]}"
 
 
+def _remote_already_processed_window(
+    repo_root: Path, branch: str, our_head_sha: str
+) -> bool:
+    """True if origin/<branch>'s committed state.json shows it already
+    advanced last_successful_run.head_sha to our_head_sha. In that case the
+    docs-agent branch already holds the run we're about to redo, and
+    proceeding would only collide on whats-new.md / state.json at checkout
+    (the CCE-42 layer-3 failure mode).
+
+    Every failure mode (fetch failure, missing state.json, JSON parse error,
+    schema drift) returns False so the runner proceeds normally — false
+    positives would silently skip real work; false negatives just produce
+    the existing checkout_failed partial reason that operators already know
+    how to resolve.
+    """
+    fetch = subprocess.run(
+        ["git", "-C", str(repo_root), "fetch", "origin", branch],
+        capture_output=True,
+        text=True,
+    )
+    if fetch.returncode != 0:
+        return False
+    show = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "show",
+            f"origin/{branch}:.engineering-docs-agent/state.json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if show.returncode != 0:
+        return False
+    try:
+        remote = json.loads(show.stdout)
+        remote_head = remote.get("last_successful_run", {}).get("head_sha", "")
+    except (json.JSONDecodeError, KeyError, AttributeError):
+        return False
+    return remote_head == our_head_sha
+
+
 def open_or_append_pr(
     repo_root: Path,
     gh: GhClient,

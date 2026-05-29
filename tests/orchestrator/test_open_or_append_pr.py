@@ -266,3 +266,67 @@ def test_falls_back_to_head_checkout_when_remote_branch_absent(tmp_path: Path):
         f"expected fallback `checkout -B <branch>` off HEAD when fetch fails; "
         f"got argv with remote ref: {checkout_argv}"
     )
+
+
+# CCE-43: skip same-hour reruns that already processed this window. The
+# orchestrator must detect that origin/<branch> already advanced its
+# committed state.json to our HEAD and exit 0 before dispatching
+# subagents, avoiding the working-tree collision documented in CCE-42's
+# smoke-test 2/2 failure (run 26608024227).
+
+
+def _skip_predicate_subprocess_stub(
+    *,
+    fetch_rc: int,
+    show_rc: int = 0,
+    remote_head_sha: str | None = None,
+    show_stdout_override: str | None = None,
+):
+    """Stub git fetch + git show for _remote_already_processed_window tests.
+
+    - fetch (`git fetch origin <branch>`): returns fetch_rc
+    - show (`git show origin/<branch>:.engineering-docs-agent/state.json`):
+      returns show_rc; if remote_head_sha is provided, stdout is a valid
+      state.json with that head_sha; show_stdout_override forces raw stdout.
+    """
+    if show_stdout_override is not None:
+        show_stdout = show_stdout_override
+    elif remote_head_sha is not None:
+        show_stdout = (
+            '{"version": "1", "last_successful_run": '
+            f'{{"head_sha": "{remote_head_sha}", '
+            f'"completed_at": "2026-05-28T23:00:00+00:00"}}}}'
+        )
+    else:
+        show_stdout = ""
+
+    def _run(argv, **kwargs):
+        if "fetch" in argv:
+            return MagicMock(returncode=fetch_rc, stdout="", stderr="")
+        if "show" in argv:
+            return MagicMock(returncode=show_rc, stdout=show_stdout, stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    return _run
+
+
+def test_helper_returns_true_when_remote_head_sha_matches_ours(tmp_path: Path):
+    """When origin/<branch>'s state.json has last_successful_run.head_sha
+    equal to our_head_sha, the predicate returns True (this window is
+    already processed; the runner should skip)."""
+    our_head_sha = "abc123def456abc123def456abc123def456abcd"
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_skip_predicate_subprocess_stub(
+            fetch_rc=0,
+            show_rc=0,
+            remote_head_sha=our_head_sha,
+        ),
+    ):
+        result = orun._remote_already_processed_window(
+            tmp_path, "docs-agent/2026-05-28T23", our_head_sha
+        )
+    assert result is True, (
+        f"expected helper to return True when remote head_sha matches; got {result}"
+    )

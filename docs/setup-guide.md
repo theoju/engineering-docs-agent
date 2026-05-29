@@ -239,8 +239,8 @@ on:
   pull_request:
     # CCE-59: NO paths: filter on pull_request. actionlint is a required
     # status check; if it doesn't run, GitHub treats the check as "not
-    # yet passing" and blocks merge on every non-workflow PR. Runs ~5s,
-    # cheap enough to gate every PR.
+    # yet passing" and blocks merge on every non-workflow PR. Runs ~5s
+    # so the cost of running on every PR is negligible.
     branches: [main]
   push:
     # post-merge runs on main only when workflows actually change
@@ -337,7 +337,7 @@ For a fresh host repo:
 - [ ] `claude plugin marketplace add …`
 - [ ] `claude plugin install engineering-docs-agent@…`
 - [ ] `claude /engineering-docs-agent-setup`
-- [ ] Commit `.engineering-docs-agent/` + workflow YAMLs.
+- [ ] Commit `.engineering-docs-agent/` + `.github/workflows/docs-agent-nightly.yml`.
 - [ ] Install the GitHub App on this repo (Part 2.3).
 - [ ] Set secrets: `CLAUDE_CODE_OAUTH_TOKEN`, `DOCS_AGENT_APP_ID`, `DOCS_AGENT_APP_PRIVATE_KEY`.
 - [ ] (Optional) Set `JIRA_API_TOKEN`, `JIRA_EMAIL` for Jira enrichment.

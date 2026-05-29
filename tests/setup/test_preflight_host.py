@@ -1,0 +1,115 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+SCRIPT = Path(__file__).parent.parent.parent / "scripts" / "preflight_host.py"
+FIX = Path(__file__).parent.parent / "fixtures" / "setup_repos"
+
+
+def test_preflight_json_mode_on_js_docusaurus():
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo-root",
+            str(FIX / "js_docusaurus"),
+            "--format",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert set(out.keys()) >= {
+        "discovery",
+        "proposed_config",
+        "secrets_checklist",
+        "warnings",
+    }
+    assert out["discovery"]["framework"] == "docusaurus"
+    assert out["discovery"]["toolchain"]["docusaurus_dep"] is True
+    names = {s["name"] for s in out["secrets_checklist"]}
+    assert {
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "DOCS_AGENT_APP_ID",
+        "DOCS_AGENT_APP_PRIVATE_KEY",
+    } <= names
+
+
+def test_preflight_text_mode_on_bare_repo():
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo-root",
+            str(FIX / "bare"),
+            "--format",
+            "text",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    text = r.stdout
+    assert "Discovery" in text
+    assert "Secrets checklist" in text
+    assert "framework: None" in text
+
+
+def test_preflight_emits_warning_when_no_framework():
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo-root",
+            str(FIX / "bare"),
+            "--format",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    out = json.loads(r.stdout)
+    codes = {w["code"] for w in out["warnings"]}
+    assert "no_docs_framework" in codes
+
+
+def test_preflight_does_not_write_to_host(tmp_path):
+    (tmp_path / "README.md").write_text("# host")
+    snapshot_before = sorted(p.name for p in tmp_path.iterdir())
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo-root",
+            str(tmp_path),
+            "--format",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    snapshot_after = sorted(p.name for p in tmp_path.iterdir())
+    assert snapshot_before == snapshot_after
+
+
+def test_preflight_missing_repo_root_errors():
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo-root",
+            "/nonexistent/path/that/does/not/exist",
+            "--format",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode != 0
+    assert "does not exist" in r.stderr

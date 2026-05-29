@@ -1,0 +1,9 @@
+{
+  "name": "claude-code-self-assessment-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "devDependencies": {
+    "@docusaurus/core": "^3.0.0",
+    "@docusaurus/preset-classic": "^3.0.0"
+  }
+}

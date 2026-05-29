@@ -86,6 +86,59 @@ def detect_openapi_hint(cwd: Path) -> str | None:
     return None
 
 
+def detect_toolchain(cwd: Path) -> dict:
+    """Detect JavaScript / TypeScript toolchain hints.
+
+    Returns a dict with:
+      - node: package.json present
+      - bun: bun.lockb present
+      - deno: deno.json or deno.jsonc present
+      - package_manager: "npm" | "yarn" | "pnpm" | "bun" | None
+        (lockfile-derived; bun.lockb beats every npm-family lockfile)
+      - docusaurus_dep: any @docusaurus/* in package.json deps/devDeps/peerDeps
+
+    Malformed package.json is tolerated — docusaurus_dep falls back to False.
+    """
+    import json
+
+    node = (cwd / "package.json").exists()
+    bun = (cwd / "bun.lockb").exists()
+    deno = (cwd / "deno.json").exists() or (cwd / "deno.jsonc").exists()
+
+    package_manager: str | None = None
+    if bun:
+        package_manager = "bun"
+    elif (cwd / "pnpm-lock.yaml").exists():
+        package_manager = "pnpm"
+    elif (cwd / "yarn.lock").exists():
+        package_manager = "yarn"
+    elif (cwd / "package-lock.json").exists():
+        package_manager = "npm"
+
+    docusaurus_dep = False
+    if node:
+        pj = cwd / "package.json"
+        try:
+            # 32KB cap — package.json files larger than that are pathological.
+            text = pj.read_text(errors="ignore")[:32_768]
+            data = json.loads(text)
+            for block in ("dependencies", "devDependencies", "peerDependencies"):
+                deps = data.get(block) or {}
+                if any(k.startswith("@docusaurus/") for k in deps):
+                    docusaurus_dep = True
+                    break
+        except (OSError, json.JSONDecodeError, AttributeError):
+            pass
+
+    return {
+        "node": node,
+        "bun": bun,
+        "deno": deno,
+        "package_manager": package_manager,
+        "docusaurus_dep": docusaurus_dep,
+    }
+
+
 def detect_jira_hint(cwd: Path) -> dict | None:
     """Detect Jira hints from CI workflow files or .env.example.
 
@@ -173,6 +226,7 @@ def discover(cwd: Path) -> dict:
         "jira_hint": jira_hint,
         "python": detect_python(cwd),
         "openapi_hint": detect_openapi_hint(cwd),
+        "toolchain": detect_toolchain(cwd),
         "pages_publishable": detect_pages_publishable(framework, ci),
     }
     if warnings:

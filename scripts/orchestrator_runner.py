@@ -1510,7 +1510,9 @@ def run_bootstrap_core(
                 continue
             target_path = repo_root / docs_dir / page["page"]
             try:
-                rel = target_path.resolve().relative_to(repo_root.resolve())
+                rel_posix = (
+                    target_path.resolve().relative_to(repo_root.resolve()).as_posix()
+                )
             except ValueError:
                 reason = f"unsafe_page_path: {page['page']}"
                 ledger["reasons"].append(reason)
@@ -1518,15 +1520,14 @@ def run_bootstrap_core(
                 progress.begin_page(placeholder)
                 progress.mark_failed(placeholder, reason=reason)
                 continue
-            rel_posix = rel.as_posix()
-            if not _page_target_is_editable(str(rel), editable_globs):
-                reason = f"unsafe_page_path: {rel}"
+            if not _page_target_is_editable(rel_posix, editable_globs):
+                reason = f"unsafe_page_path: {rel_posix}"
                 ledger["reasons"].append(reason)
                 progress.begin_page(rel_posix)
                 progress.mark_failed(rel_posix, reason=reason)
                 continue
             if target_path.exists():
-                ledger["skipped_existing"].append(str(rel))
+                ledger["skipped_existing"].append(rel_posix)
                 # begin_page first so current_index advances through every
                 # manifest entry (skipped or authored); mark_skipped's
                 # contract assumes begin_page has already run.
@@ -1559,21 +1560,21 @@ def run_bootstrap_core(
             )
             ledger["reasons"].extend(reasons)
             if out is None:
+                fallback = f"page_author_invalid: {rel_posix}"
                 if not reasons:
-                    ledger["reasons"].append(f"page_author_invalid: {rel}")
-                # Find the matching reason (if any) for the progress file.
+                    ledger["reasons"].append(fallback)
                 progress.mark_failed(
-                    rel_posix, reason=reasons[-1] if reasons else "page_author_invalid"
+                    rel_posix, reason=reasons[-1] if reasons else fallback
                 )
                 continue
             if out.get("ok"):
                 if dry_run_dir and not target_path.exists():
                     _synthesize_core_page(target_path, page, today)
-                ledger["authored"].append(str(rel))
+                ledger["authored"].append(rel_posix)
                 progress.mark_completed(rel_posix)
             else:
                 err = out.get("error") or "page-author returned ok=false"
-                msg = f"page_author_error: {rel}: {err}"
+                msg = f"page_author_error: {rel_posix}: {err}"
                 ledger["reasons"].append(msg)
                 progress.mark_failed(rel_posix, reason=msg)
     finally:

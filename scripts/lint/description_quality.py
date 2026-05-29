@@ -45,9 +45,7 @@ def _resolve_config(config: dict[str, Any]) -> dict[str, Any]:
     overrides = tier1.get(RULE_NAME) or {}
     if not isinstance(overrides, dict):
         return dict(_DEFAULTS)
-    merged = dict(_DEFAULTS)
-    merged.update({k: v for k, v in overrides.items() if k in _DEFAULTS})
-    return merged
+    return {**_DEFAULTS, **{k: v for k, v in overrides.items() if k in _DEFAULTS}}
 
 
 def check_fm(

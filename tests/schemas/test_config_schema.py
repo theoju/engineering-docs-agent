@@ -194,3 +194,69 @@ site:
         sources: [docs/superpowers/specs], repo_url_base: https://h/blob/main/ }
 """)
     validate(cfg, SCHEMA)
+
+
+# CCE-58: publishing.ci_provider is an additive enum so host configs can
+# declare which CI provider runs the docs publish workflow. Only `github`
+# is wired through scripts/verify_runner.py today; `circleci` is reserved
+# for a follow-up sub-ticket. Configs without the field stay valid
+# (default behavior preserved).
+def test_publishing_ci_provider_accepts_github():
+    cfg = yaml.safe_load("""
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: { core: docs/ }
+sources: { git: { host: github } }
+lint: {}
+publishing:
+  base_url: https://x
+  build_workflow: deploy.yml
+  url_map_rule: standard
+  ci_provider: github
+notifications: {}
+""")
+    validate(cfg, SCHEMA)
+
+
+def test_publishing_ci_provider_accepts_circleci():
+    cfg = yaml.safe_load("""
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: { core: docs/ }
+sources: { git: { host: github } }
+lint: {}
+publishing:
+  base_url: https://x
+  build_workflow: deploy.yml
+  url_map_rule: standard
+  ci_provider: circleci
+notifications: {}
+""")
+    validate(cfg, SCHEMA)
+
+
+def test_publishing_ci_provider_rejects_unknown():
+    cfg = yaml.safe_load("""
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: { core: docs/ }
+sources: { git: { host: github } }
+lint: {}
+publishing:
+  base_url: https://x
+  build_workflow: deploy.yml
+  url_map_rule: standard
+  ci_provider: gitlab
+notifications: {}
+""")
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)

@@ -78,6 +78,15 @@ def test_check_fm_respects_forbid_trailing_colon_disabled():
     assert ok, msg
 
 
+def test_check_fm_respects_forbid_equal_to_title_disabled():
+    cfg = {"lint": {"tier1": {"description_quality": {"forbid_equal_to_title": False}}}}
+    fm = {"description": "Source collector"}
+    # min_words still applies — pad to clear the default 6-word floor.
+    fm["description"] = "Source collector that does six full words now."
+    ok, msg = description_quality.check_fm(fm, title="Source collector", config=cfg)
+    assert ok, msg
+
+
 _CONFIG_WITH_AGENT_AUTHORED = """
 docs:
   source_dir: docs/site-src
@@ -174,8 +183,9 @@ def test_cli_emits_json_and_returns_1_on_failure(tmp_path):
 
 
 def test_lint_runner_includes_description_quality_in_tier1_default():
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "lint"))
-    import lint_runner  # noqa: WPS433 — late import after sys.path fix
+    # scripts/lint/ is already on sys.path from the module-level insert at the
+    # top of this file; no second insert needed here.
+    import lint_runner  # noqa: WPS433 — late import keeps the test self-contained
 
     rules = lint_runner.enabled_rules({"lint": {"tier1": "default"}})
     assert "description_quality" in rules

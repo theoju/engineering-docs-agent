@@ -69,8 +69,11 @@ def check_fm(
         return False, "missing or empty description"
     stripped = desc.strip()
 
+    # Check order is cheapest-first: trailing-colon is a single endswith();
+    # equal-to-title needs a strip+lower on the title; min_words splits the
+    # whole description. Common failures reject without doing extra work.
     if cfg["forbid_trailing_colon"] and stripped.endswith(":"):
-        return False, f"forbid_trailing_colon: description ends in ':'"
+        return False, "forbid_trailing_colon: description ends in ':'"
 
     if cfg["forbid_equal_to_title"] and title is not None:
         if stripped.lower() == title.strip().lower():

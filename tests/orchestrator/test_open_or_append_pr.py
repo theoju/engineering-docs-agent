@@ -8,6 +8,7 @@ so 'see logs' in the partial reason is actually backed by logs.
 """
 
 from __future__ import annotations
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -292,10 +293,14 @@ def _skip_predicate_subprocess_stub(
     if show_stdout_override is not None:
         show_stdout = show_stdout_override
     elif remote_head_sha is not None:
-        show_stdout = (
-            '{"version": "1", "last_successful_run": '
-            f'{{"head_sha": "{remote_head_sha}", '
-            f'"completed_at": "2026-05-28T23:00:00+00:00"}}}}'
+        show_stdout = json.dumps(
+            {
+                "version": "1",
+                "last_successful_run": {
+                    "head_sha": remote_head_sha,
+                    "completed_at": "2026-05-28T23:00:00+00:00",
+                },
+            }
         )
     else:
         show_stdout = ""
@@ -305,7 +310,7 @@ def _skip_predicate_subprocess_stub(
             return MagicMock(returncode=fetch_rc, stdout="", stderr="")
         if "show" in argv:
             return MagicMock(returncode=show_rc, stdout=show_stdout, stderr="")
-        return MagicMock(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected argv: {argv!r}")
 
     return _run
 

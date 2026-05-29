@@ -31,11 +31,34 @@ jobs:
     timeout-minutes: 60
     env:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # CCE-45: GH_TOKEN sourced from the GitHub App installation token
+      # generated in the first step (not the default GITHUB_TOKEN). The
+      # default GITHUB_TOKEN suppresses both pull_request and push event
+      # triggers on commits/PRs it makes — a loop-prevention rule that
+      # silently blocks the host repo's pytest/diagram-gate CI from firing
+      # on docs-agent PRs. App-installation tokens are exempt from that
+      # rule, so events fire normally.
+      GH_TOKEN: ${{ steps.app-token.outputs.token }}
     steps:
+      - name: Generate GitHub App installation token
+        # CCE-45: see GH_TOKEN comment above. The App (docs-agent-bot,
+        # installed on this repo only) carries contents:write +
+        # pull-requests:write scopes matching the workflow's permissions
+        # block. Token expires after 1h; the job timeout is 60min so the
+        # token is always valid for the full run.
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.DOCS_AGENT_APP_ID }}
+          private-key: ${{ secrets.DOCS_AGENT_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # full history so state.json window math sees all merges
+          # CCE-45: checkout configures git's credential helper from this
+          # token, so the subsequent `git push` from the runner uses the
+          # App token rather than the default GITHUB_TOKEN.
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Set up Python
         uses: actions/setup-python@v6

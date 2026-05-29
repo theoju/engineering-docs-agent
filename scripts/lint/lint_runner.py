@@ -21,7 +21,8 @@ import yaml
 TIER1_DEFAULT = [
     "frontmatter_schema",
     "internal_links",
-    "markdown_hygiene",
+    "markdown_hygiene_lang",
+    "markdown_hygiene_structure",
     "footnotes",
     "diagrams",
     "framework_build",

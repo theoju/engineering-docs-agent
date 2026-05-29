@@ -1,4 +1,9 @@
-"""Lint rule: markdown_hygiene. Code fences have languages; heading hierarchy is valid."""
+"""Lint rule: markdown_hygiene_lang. Warns when opening code fences omit a language tag.
+
+Cosmetic only — MkDocs still renders untagged fences; the page just loses
+syntax highlighting. Structural defects (unpaired fences, heading jumps)
+are handled by the block-severity sibling rule `markdown_hygiene_structure`.
+"""
 
 from __future__ import annotations
 
@@ -11,10 +16,9 @@ from typing import Any
 
 import yaml
 
-RULE_NAME = "markdown_hygiene"
-SEVERITY = "block"
+RULE_NAME = "markdown_hygiene_lang"
+SEVERITY = "warn"
 FENCE_RE = re.compile(r"^```(\S*)\s*$", re.MULTILINE)
-HEADING_RE = re.compile(r"^(#{1,6})\s+\S", re.MULTILINE)
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -27,18 +31,13 @@ def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
     text = path.read_text()
     problems: list[str] = []
     fences = list(FENCE_RE.finditer(text))
+    # Treat even-indexed fences as openers; odd-indexed as closers.
+    # Structural pairing is the sibling rule's responsibility; here we only
+    # care whether each opener carries a language tag.
     for i in range(0, len(fences), 2):
         lang = fences[i].group(1)
         if not lang:
             problems.append(f"code fence at offset {fences[i].start()} has no language")
-    if len(fences) % 2 != 0:
-        problems.append(f"unpaired code fence (count={len(fences)})")
-    prev_level = 0
-    for m in HEADING_RE.finditer(text):
-        level = len(m.group(1))
-        if prev_level and level > prev_level + 1:
-            problems.append(f"heading hierarchy jumps from h{prev_level} to h{level}")
-        prev_level = level
     if problems:
         return False, "; ".join(problems)
     return True, "ok"

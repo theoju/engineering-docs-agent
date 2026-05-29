@@ -33,10 +33,11 @@ Path B mirrors the existing pattern of one module per severity level. Three Tier
 
 ### Changes
 
-1. **`scripts/lint/markdown_hygiene.py`** becomes the structure-only block-severity rule:
-   - `RULE_NAME = "markdown_hygiene_structure"` (renamed)
+1. **`scripts/lint/markdown_hygiene_structure.py`** (renamed from `markdown_hygiene.py` via `git mv`) is the structure-only block-severity rule:
+   - `RULE_NAME = "markdown_hygiene_structure"`
    - `SEVERITY = "block"` (unchanged)
    - `check_path` drops the no-language-tag detection; keeps unpaired-fence and heading-hierarchy detection.
+   - The matching test file `tests/lint/test_markdown_hygiene.py` is renamed to `tests/lint/test_markdown_hygiene_structure.py` to keep the per-rule filename convention used by every other lint rule.
 2. **New `scripts/lint/markdown_hygiene_lang.py`** is the language-tag warn-severity rule:
    - `RULE_NAME = "markdown_hygiene_lang"`
    - `SEVERITY = "warn"`
@@ -70,7 +71,7 @@ All tests use the fixture-driven dry-run path; the production Claude CLI dispatc
 
 ## Acceptance criteria
 
-1. `scripts/lint/markdown_hygiene.py` `RULE_NAME` is `markdown_hygiene_structure`; `check_path` no longer flags missing-language fences; `SEVERITY` stays `block`.
+1. `scripts/lint/markdown_hygiene_structure.py` (renamed from `markdown_hygiene.py`) has `RULE_NAME = "markdown_hygiene_structure"`; `check_path` no longer flags missing-language fences; `SEVERITY` stays `block`. Test file renamed in lockstep.
 2. `scripts/lint/markdown_hygiene_lang.py` exists with `RULE_NAME = "markdown_hygiene_lang"`, `SEVERITY = "warn"`, and only the missing-language detection.
 3. `scripts/lint/lint_runner.py` `TIER1_DEFAULT` lists both `markdown_hygiene_lang` and `markdown_hygiene_structure`; the old `markdown_hygiene` entry is removed.
 4. `tests/lint/test_markdown_hygiene.py` reflects the structure-only rule and passes.

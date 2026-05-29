@@ -33,7 +33,8 @@ def test_runs_tier1_default(tmp_path):
     rules_run = {result["rule"] for result in out["results"]}
     assert "frontmatter_schema" in rules_run
     assert "internal_links" in rules_run
-    assert "markdown_hygiene" in rules_run
+    assert "markdown_hygiene_lang" in rules_run
+    assert "markdown_hygiene_structure" in rules_run
 
 
 def test_aggregates_failure(tmp_path):

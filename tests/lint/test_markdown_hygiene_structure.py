@@ -3,7 +3,10 @@ import json, subprocess, sys
 from pathlib import Path
 
 SCRIPT = (
-    Path(__file__).parent.parent.parent / "scripts" / "lint" / "markdown_hygiene.py"
+    Path(__file__).parent.parent.parent
+    / "scripts"
+    / "lint"
+    / "markdown_hygiene_structure.py"
 )
 FIX = Path(__file__).parent.parent / "fixtures" / "markdown_hygiene"
 

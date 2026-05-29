@@ -6,7 +6,7 @@ instead of invoking Claude.
 """
 
 from __future__ import annotations
-import argparse, fnmatch, json, os, subprocess, sys
+import argparse, fnmatch, json, os, re, subprocess, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -172,6 +172,36 @@ def _rescue_json_object(text: str) -> dict | None:
                 except json.JSONDecodeError:
                     return None
     return None
+
+
+# CCE-55: whole-string match for the most common LLM contamination —
+# the model wraps its JSON in a markdown code fence despite explicit
+# "no fences" instructions in both the agent contract and the
+# orchestrator's execution-framing prompt. Observed rate on the
+# 2026-05-29 docs-agent-nightly run that produced PR #69: ~19%
+# (3 of 16 schema-bearing dispatches). The fence content is byte-equal
+# to the JSON the model intended, so stripping here lets the strict
+# json.loads in dispatch_subagent succeed without triggering the
+# rescue path's prose_contamination_rescued partial reason.
+_FENCE_RE = re.compile(
+    r"\A\s*```[A-Za-z0-9]*\s*\n(.*)\n```\s*\Z",
+    re.DOTALL,
+)
+
+
+def _strip_code_fence(text: str) -> str:
+    """If text is exactly a markdown code-fence wrap, return the inner
+    content. Otherwise return text unchanged.
+
+    The match is whole-string (\\A ... \\Z). Any prose before or after
+    the fence breaks the match and the original text is returned so the
+    caller falls through to _rescue_json_object for anomalous
+    contamination handling.
+    """
+    m = _FENCE_RE.match(text)
+    if m is None:
+        return text
+    return m.group(1)
 
 
 def _extract_final_assistant_text(events: list[dict]) -> str:

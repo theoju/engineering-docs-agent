@@ -27,6 +27,7 @@ NODE24_FLOOR = {
     "actions/setup-python": 6,
     "actions/configure-pages": 6,
     "actions/deploy-pages": 5,
+    "actions/upload-pages-artifact": 5,
 }
 
 _USES = re.compile(r"uses:\s*(actions/[\w-]+)@v(\d+)")
@@ -60,3 +61,15 @@ def test_pages_deploy_workflows_disable_jekyll():
         if "jekyll" in text.lower().replace(".nojekyll", ""):
             offenders.append(f"{wf.name}: references legacy Jekyll")
     assert not offenders, "\n".join(offenders)
+
+
+def test_upload_pages_artifact_in_node24_floor():
+    """Regression guard: `actions/upload-pages-artifact` must carry a Node-24 floor.
+
+    v4 of this action shipped Node 20 (deprecated June 2026); v5 is the first
+    Node-24 major. The template-validity test (test_workflow_pages_template.py)
+    pins the template to @v5, but without this floor entry a host or this repo
+    could drift to @v4 on this single action and the runtime guard would
+    silently pass — exactly the symmetry gap CCE-34 called out.
+    """
+    assert NODE24_FLOOR.get("actions/upload-pages-artifact") == 5

@@ -1,0 +1,10 @@
+name: ci
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      JIRA_BASE_URL: https://designitright.atlassian.net
+    steps:
+      - uses: actions/checkout@v5
+      - run: echo stub

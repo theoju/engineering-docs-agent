@@ -222,7 +222,7 @@ For branch-protection purposes:
 - `actionlint` should be required if you add the workflow. Post-CCE-59 it fires on every PR (~5s), so it works as a universal gate even on PRs that don't touch workflow files.
 - The docs-agent's own workflows do not need to be gated on user PRs.
 
-This is the path used by `theoju/advanced-data-import-system` (tracked in CCE-58). For a fully worked example with concrete commands, see [`docs/host-onboarding/advanced-data-import-system.md`](../host-onboarding/advanced-data-import-system.md).
+This is the path used by `theoju/advanced-data-import-system` (tracked in CCE-58).
 
 ## Part 5 — Optional add-ons
 

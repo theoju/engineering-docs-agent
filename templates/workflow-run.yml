@@ -28,6 +28,16 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+      - name: Check out engineering-docs-agent plugin
+        # CCE-57: the host repo is not the plugin. Vendor the plugin's
+        # scripts/ directory into the runner workspace at .docs-agent-plugin
+        # so the orchestrator step can invoke it. `ref: main` until the plugin
+        # cuts a versioned release; pin a tag/SHA here when one exists.
+        uses: actions/checkout@v5
+        with:
+          repository: theoju/engineering-docs-agent
+          ref: main
+          path: .docs-agent-plugin
       - name: Install plugin deps
         run: pip install pyyaml jsonschema
       - name: Install Claude Code CLI
@@ -39,4 +49,4 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          python scripts/orchestrator_runner.py --repo-root .
+          python .docs-agent-plugin/scripts/orchestrator_runner.py --repo-root .

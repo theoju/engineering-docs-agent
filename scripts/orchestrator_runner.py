@@ -201,7 +201,11 @@ def _strip_code_fence(text: str) -> str:
     m = _FENCE_RE.match(text)
     if m is None:
         return text
-    return m.group(1)
+    # Strip trailing whitespace inside the fence so the contract is "inner
+    # content as clean JSON-as-string". The greedy DOTALL capture can include
+    # a final newline when the model emits a blank line before the closing
+    # fence (e.g. {"a":1}\n\n```); strip normalizes that out.
+    return m.group(1).strip()
 
 
 def _extract_final_assistant_text(events: list[dict]) -> str:

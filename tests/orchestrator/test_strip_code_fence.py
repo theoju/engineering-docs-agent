@@ -63,6 +63,17 @@ def test_strip_does_not_match_mid_string_backticks():
     assert runner._strip_code_fence(text) == text
 
 
+def test_strip_unwraps_blank_line_before_closing_fence():
+    """CCE-55 review finding: the greedy DOTALL capture group can include
+    a trailing newline when the model emits a blank line between the JSON
+    and the closing fence (```json\\n{...}\\n\\n```). The helper's contract
+    is "inner content as clean JSON-as-string", so the trailing whitespace
+    must be stripped from the returned value.
+    """
+    text = '```json\n{"a": 1}\n\n```'
+    assert runner._strip_code_fence(text) == '{"a": 1}'
+
+
 def test_strip_real_pr69_fixture_round_trips_to_valid_pr_summarizer_json():
     """Integration check: the actual fence-wrapped output captured from
     PR #69's forensics strips cleanly AND the result is valid JSON

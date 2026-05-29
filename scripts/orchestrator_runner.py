@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse, fnmatch, json, os, subprocess, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 import yaml
 
 from gh_client import GhClient
@@ -519,6 +519,127 @@ def dispatch_validated(
         return None, dispatch_reasons + reasons
     # Return raw (not the dataclass) so call sites can keep using dict.get() patterns.
     return raw, dispatch_reasons
+
+
+def dispatch_verified(
+    name: str,
+    inputs: dict,
+    *,
+    dry_run_dir: Path | None,
+    cwd: Path | None = None,
+    post_write_check: Callable[[Path, dict], tuple[bool, list[str]]] | None = None,
+    target_path: Path | None = None,
+    manifest_page: dict | None = None,
+) -> tuple[dict | None, list[str]]:
+    """Dispatch a subagent through ``dispatch_validated``, then run an optional
+    post-write check against the artifact the agent produced.
+
+    On check failure, ``target_path`` is unlinked so the next bootstrap run
+    retries this page (the orchestrator's existing
+    ``if target_path.exists(): skip`` idempotency is the retry mechanism). The
+    augmented reason list is returned alongside ``out=None`` so the caller's
+    ledger receives the rejection.
+
+    ``post_write_check=None`` is a pure pass-through — callers that haven't
+    opted in see no behavior change.
+    """
+    out, reasons = dispatch_validated(name, inputs, dry_run_dir=dry_run_dir, cwd=cwd)
+    if out is None or post_write_check is None:
+        return out, reasons
+    if target_path is None:
+        raise ValueError(
+            "dispatch_verified: target_path is required when post_write_check is set"
+        )
+    ok, check_reasons = post_write_check(target_path, manifest_page or {})
+    if ok:
+        return out, reasons
+    # Reject: delete the artifact and roll up the new reasons.
+    try:
+        target_path.unlink(missing_ok=True)
+    except OSError as e:
+        check_reasons.append(f"unlink_failed: {target_path}: {e}")
+    return None, reasons + check_reasons
+
+
+class _BootstrapProgress:
+    """Best-effort per-page progress file for ``run_bootstrap_core``.
+
+    Path: ``<repo_root>/.engineering-docs-agent/bootstrap.progress.json``.
+    Write cadence: atomic (temp-file + ``os.replace``) on every transition.
+    File is unlinked at end of run; an existing file is itself a signal that
+    a run is in progress or crashed mid-flight.
+
+    Assumes a single bootstrap writer per ``repo_root``. The fixed
+    ``.tmp`` suffix means two concurrent processes would race on the same
+    temp path; bootstrap is launched once per nightly run, so this is sound
+    in production. Callers wiring this elsewhere should preserve that
+    invariant.
+
+    All write failures are logged to stderr; the bootstrap loop never aborts
+    because of progress-file I/O errors.
+    """
+
+    def __init__(self, repo_root: Path, *, total: int) -> None:
+        self._path = repo_root / ".engineering-docs-agent" / "bootstrap.progress.json"
+        self._state: dict[str, Any] = {
+            "phase": "bootstrap",
+            "started_at": None,
+            "total": total,
+            "current_index": 0,
+            "current_page": None,
+            "current_page_started_at": None,
+            "completed": [],
+            "skipped_existing": [],
+            "failed": [],
+        }
+
+    def _write(self) -> None:
+        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
+        try:
+            tmp.write_text(json.dumps(self._state, indent=2))
+            os.replace(tmp, self._path)
+        except OSError as e:
+            print(f"bootstrap.progress.json write failed: {e}", file=sys.stderr)
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def start(self) -> None:
+        self._state["started_at"] = datetime.now(timezone.utc).isoformat()
+        self._write()
+
+    def begin_page(self, rel_posix: str) -> None:
+        self._state["current_index"] += 1
+        self._state["current_page"] = rel_posix
+        self._state["current_page_started_at"] = datetime.now(timezone.utc).isoformat()
+        self._write()
+
+    def mark_completed(self, rel_posix: str) -> None:
+        self._state["completed"].append(rel_posix)
+        self._write()
+
+    def mark_skipped(self, rel_posix: str) -> None:
+        # Called after ``begin_page`` has already advanced ``current_index``
+        # and set ``current_page``; the skip outcome is the only new state.
+        self._state["skipped_existing"].append(rel_posix)
+        self._write()
+
+    def mark_failed(self, rel_posix: str, *, reason: str) -> None:
+        self._state["failed"].append({"path": rel_posix, "reason": reason})
+        self._write()
+
+    def finish(self) -> None:
+        """Unlink the progress file at end of run.
+
+        If not called (e.g., the bootstrap process crashes mid-flight), the
+        file remains on disk — that stale presence is the crash signal
+        callers and humans use to detect an interrupted run.
+        """
+        try:
+            self._path.unlink(missing_ok=True)
+        except OSError as e:
+            print(f"bootstrap.progress.json cleanup failed: {e}", file=sys.stderr)
 
 
 def _page_target_is_editable(rel_posix: str, editable_globs: list[str]) -> bool:
@@ -1287,11 +1408,24 @@ def run_bootstrap_core(
     """C2 bootstrap authoring entry. Reads <docs_dir>/.doc-core-manifest.json and
     authors each declared core page that has no file yet, via the unchanged
     page-author agent. Idempotent (create-missing only), diagram-free, best-effort
-    per page (a dispatch failure records a reason and continues). No-op when there
-    is no config docs_dir, no manifest, or an empty manifest. Returns 0 on
-    success/no-op, 2 on unreadable config. Prints a JSON ledger to stdout.
+    per page (a dispatch failure or post-write verification failure records a
+    reason and continues; the rejected file is deleted so re-run retries it).
+    No-op when there is no config docs_dir, no manifest, or an empty manifest.
+    Returns 0 on success/no-op, 2 on unreadable config. Prints a JSON ledger
+    to stdout.
+
+    Post-write verification (CCE-38): after each dispatch the orchestrator
+    re-parses the frontmatter the agent wrote and runs
+    ``description_quality.check_fm`` against it. Bad YAML, missing frontmatter,
+    or a thin description rejects the page (file deleted, reason recorded).
     """
     import frontmatter_contract as fmc
+    import archive_indexes
+
+    _lint_dir = str(Path(__file__).resolve().parent / "lint")
+    if _lint_dir not in sys.path:
+        sys.path.insert(0, _lint_dir)
+    import description_quality
 
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     if not cfg_path.exists():
@@ -1329,55 +1463,122 @@ def run_bootstrap_core(
     )
     lens = (section or {}).get("key") or "core"
 
-    ledger: dict = {"authored": [], "skipped_existing": [], "reasons": []}
-    for page in pages:
-        if not isinstance(page, dict) or "page" not in page:
-            ledger["reasons"].append("manifest_page_invalid")
-            continue
-        target_path = repo_root / docs_dir / page["page"]
+    def _check(target_path: Path, page: dict) -> tuple[bool, list[str]]:
+        if not target_path.exists():
+            # Dry-run path: _synthesize_core_page writes the body after dispatch
+            # returns. The integration tests cover the synth case separately.
+            return True, []
         try:
-            rel = target_path.resolve().relative_to(repo_root.resolve())
+            rel_inner = (
+                target_path.resolve().relative_to(repo_root.resolve()).as_posix()
+            )
         except ValueError:
-            ledger["reasons"].append(f"unsafe_page_path: {page['page']}")
-            continue
-        if not _page_target_is_editable(str(rel), editable_globs):
-            ledger["reasons"].append(f"unsafe_page_path: {rel}")
-            continue
-        if target_path.exists():
-            ledger["skipped_existing"].append(str(rel))
-            continue
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        out, reasons = dispatch_validated(
-            "page-author",
-            {
-                "target_path": str(target_path),
-                "action": "create",
-                "lens": lens,
-                "summaries": [],
-                "voice_samples": voice_samples,
-                "frontmatter_template": fmc.agent_authored_frontmatter_dict(
-                    description=page.get("title") or page.get("key") or "",
-                    source_files=page.get("source_files") or [],
-                    last_reviewed=today,
-                    status="draft",
-                ),
-                "manifest_page": page,
-            },
-            dry_run_dir=dry_run_dir,
-            cwd=repo_root,
+            rel_inner = target_path.as_posix()
+        try:
+            fm = archive_indexes.parse_frontmatter_strict(target_path.read_text())
+        except yaml.YAMLError as e:
+            # str(e) carries line/column from the YAML parser when present
+            # (e.g., yaml.scanner.ScannerError formats to a multi-line trace);
+            # collapse newlines so the ledger stays single-line per reason.
+            return False, [
+                f"frontmatter_parse_error: {rel_inner}: {str(e).replace(chr(10), ' | ')}"
+            ]
+        except ValueError:
+            return False, [f"frontmatter_missing: {rel_inner}"]
+        ok, msg = description_quality.check_fm(
+            fm, title=page.get("title"), config=config
         )
-        ledger["reasons"].extend(reasons)
-        if out is None:
-            if not reasons:
-                ledger["reasons"].append(f"page_author_invalid: {rel}")
-            continue
-        if out.get("ok"):
-            if dry_run_dir and not target_path.exists():
-                _synthesize_core_page(target_path, page, today)
-            ledger["authored"].append(str(rel))
-        else:
-            err = out.get("error") or "page-author returned ok=false"
-            ledger["reasons"].append(f"page_author_error: {rel}: {err}")
+        if not ok:
+            return False, [f"description_quality: {rel_inner}: {msg}"]
+        return True, []
+
+    progress = _BootstrapProgress(repo_root, total=len(pages))
+    progress.start()
+
+    ledger: dict = {"authored": [], "skipped_existing": [], "reasons": []}
+    try:
+        for idx, page in enumerate(pages, start=1):
+            if not isinstance(page, dict) or "page" not in page:
+                reason = "manifest_page_invalid"
+                ledger["reasons"].append(reason)
+                # Synthetic identifier — the entry has no usable path, so we
+                # tag it by its manifest position so current_index still
+                # advances and the failure shows up in the progress file.
+                placeholder = f"<manifest_entry_{idx}>"
+                progress.begin_page(placeholder)
+                progress.mark_failed(placeholder, reason=reason)
+                continue
+            target_path = repo_root / docs_dir / page["page"]
+            try:
+                rel_posix = (
+                    target_path.resolve().relative_to(repo_root.resolve()).as_posix()
+                )
+            except ValueError:
+                reason = f"unsafe_page_path: {page['page']}"
+                ledger["reasons"].append(reason)
+                placeholder = str(page["page"])
+                progress.begin_page(placeholder)
+                progress.mark_failed(placeholder, reason=reason)
+                continue
+            if not _page_target_is_editable(rel_posix, editable_globs):
+                reason = f"unsafe_page_path: {rel_posix}"
+                ledger["reasons"].append(reason)
+                progress.begin_page(rel_posix)
+                progress.mark_failed(rel_posix, reason=reason)
+                continue
+            if target_path.exists():
+                ledger["skipped_existing"].append(rel_posix)
+                # begin_page first so current_index advances through every
+                # manifest entry (skipped or authored); mark_skipped's
+                # contract assumes begin_page has already run.
+                progress.begin_page(rel_posix)
+                progress.mark_skipped(rel_posix)
+                continue
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            progress.begin_page(rel_posix)
+            out, reasons = dispatch_verified(
+                "page-author",
+                {
+                    "target_path": str(target_path),
+                    "action": "create",
+                    "lens": lens,
+                    "summaries": [],
+                    "voice_samples": voice_samples,
+                    "frontmatter_template": fmc.agent_authored_frontmatter_dict(
+                        description=page.get("title") or page.get("key") or "",
+                        source_files=page.get("source_files") or [],
+                        last_reviewed=today,
+                        status="draft",
+                    ),
+                    "manifest_page": page,
+                },
+                dry_run_dir=dry_run_dir,
+                cwd=repo_root,
+                post_write_check=_check,
+                target_path=target_path,
+                manifest_page=page,
+            )
+            ledger["reasons"].extend(reasons)
+            if out is None:
+                fallback = f"page_author_invalid: {rel_posix}"
+                if not reasons:
+                    ledger["reasons"].append(fallback)
+                progress.mark_failed(
+                    rel_posix, reason=reasons[-1] if reasons else fallback
+                )
+                continue
+            if out.get("ok"):
+                if dry_run_dir and not target_path.exists():
+                    _synthesize_core_page(target_path, page, today)
+                ledger["authored"].append(rel_posix)
+                progress.mark_completed(rel_posix)
+            else:
+                err = out.get("error") or "page-author returned ok=false"
+                msg = f"page_author_error: {rel_posix}: {err}"
+                ledger["reasons"].append(msg)
+                progress.mark_failed(rel_posix, reason=msg)
+    finally:
+        progress.finish()
 
     print(json.dumps(ledger, indent=2))
     return 0

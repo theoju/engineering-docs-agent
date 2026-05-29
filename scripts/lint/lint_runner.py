@@ -26,6 +26,7 @@ TIER1_DEFAULT = [
     "diagrams",
     "framework_build",
     "stub_redirect",
+    "description_quality",
 ]
 
 # Mapping config keys (in tier2/tier3 dicts) → rule script name.

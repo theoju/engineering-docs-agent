@@ -356,3 +356,371 @@ def test_bootstrap_core_e2e_creates_then_idempotent(tmp_path):
         "docs/site-src/core/storage.md",
     ]
     assert ledger["authored"] == []
+
+
+def _spy_with_body_writer(calls, body_writer, result=({"ok": True}, [])):
+    """A fake dispatch_validated that ALSO writes the page body, mimicking
+    the production page-author (which uses its Write tool before returning).
+    ``body_writer(target_path: Path, inputs: dict) -> str`` writes the text to
+    disk; the spy returns the same ok=True payload regardless.
+    """
+
+    def fake(name, inputs, *, dry_run_dir, cwd=None):
+        calls.append({"name": name, "inputs": inputs})
+        target = Path(inputs["target_path"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body_writer(target, inputs))
+        return result
+
+    return fake
+
+
+def _body_with_bad_yaml(target: Path, inputs: dict) -> str:
+    # The CCE-15-style failure: an unescaped colon inside a backticked value.
+    return (
+        "---\n"
+        "description: `additionalProperties: false`\n"
+        "source_files: []\n"
+        "last_reviewed: '2026-05-26'\n"
+        "status: draft\n"
+        "---\n"
+        "# Body\n"
+    )
+
+
+def _body_with_thin_description(target: Path, inputs: dict) -> str:
+    return (
+        "---\n"
+        "description: API\n"
+        "source_files: []\n"
+        "last_reviewed: '2026-05-26'\n"
+        "status: draft\n"
+        "---\n"
+        "# Body\n"
+    )
+
+
+def _body_ok(target: Path, inputs: dict) -> str:
+    return (
+        "---\n"
+        "description: Routes HTTP requests to handlers and serialises responses.\n"
+        "source_files: []\n"
+        "last_reviewed: '2026-05-26'\n"
+        "status: draft\n"
+        "---\n"
+        "# Body\n"
+    )
+
+
+def _body_no_frontmatter(target: Path, inputs: dict) -> str:
+    return "# Body without a frontmatter block\n\nSome prose.\n"
+
+
+def test_bootstrap_rejects_and_deletes_bad_yaml(tmp_path, monkeypatch, capsys):
+    _host(
+        tmp_path,
+        manifest={
+            "version": 1,
+            "pages": [
+                {
+                    "key": "api",
+                    "title": "Api",
+                    "page": "core/api.md",
+                    "source_files": [],
+                },
+            ],
+        },
+    )
+    calls = []
+    monkeypatch.setattr(
+        runner,
+        "dispatch_validated",
+        _spy_with_body_writer(calls, _body_with_bad_yaml),
+    )
+    rc = runner.run_bootstrap_core(tmp_path, dry_run_dir=None, today="2026-05-26")
+    assert rc == 0
+    ledger = _json.loads(capsys.readouterr().out)
+    assert ledger["authored"] == []
+    assert any("frontmatter_parse_error" in r for r in ledger["reasons"]), ledger
+    # The file the spy wrote was deleted so re-run will retry.
+    assert not (tmp_path / "docs/site-src/core/api.md").exists()
+
+
+def test_bootstrap_rejects_and_deletes_thin_description(tmp_path, monkeypatch, capsys):
+    _host(
+        tmp_path,
+        manifest={
+            "version": 1,
+            "pages": [
+                {
+                    "key": "api",
+                    "title": "Api",
+                    "page": "core/api.md",
+                    "source_files": [],
+                },
+            ],
+        },
+    )
+    calls = []
+    monkeypatch.setattr(
+        runner,
+        "dispatch_validated",
+        _spy_with_body_writer(calls, _body_with_thin_description),
+    )
+    rc = runner.run_bootstrap_core(tmp_path, dry_run_dir=None, today="2026-05-26")
+    assert rc == 0
+    ledger = _json.loads(capsys.readouterr().out)
+    assert ledger["authored"] == []
+    assert any("description_quality" in r for r in ledger["reasons"]), ledger
+    assert not (tmp_path / "docs/site-src/core/api.md").exists()
+
+
+def test_bootstrap_rejects_and_deletes_missing_frontmatter(
+    tmp_path, monkeypatch, capsys
+):
+    _host(
+        tmp_path,
+        manifest={
+            "version": 1,
+            "pages": [
+                {
+                    "key": "api",
+                    "title": "Api",
+                    "page": "core/api.md",
+                    "source_files": [],
+                },
+            ],
+        },
+    )
+    calls = []
+    monkeypatch.setattr(
+        runner,
+        "dispatch_validated",
+        _spy_with_body_writer(calls, _body_no_frontmatter),
+    )
+    rc = runner.run_bootstrap_core(tmp_path, dry_run_dir=None, today="2026-05-26")
+    assert rc == 0
+    ledger = _json.loads(capsys.readouterr().out)
+    assert ledger["authored"] == []
+    assert any("frontmatter_missing" in r for r in ledger["reasons"]), ledger
+    assert not (tmp_path / "docs/site-src/core/api.md").exists()
+
+
+def test_bootstrap_accepts_substantial_description(tmp_path, monkeypatch, capsys):
+    _host(
+        tmp_path,
+        manifest={
+            "version": 1,
+            "pages": [
+                {
+                    "key": "api",
+                    "title": "Api",
+                    "page": "core/api.md",
+                    "source_files": [],
+                },
+            ],
+        },
+    )
+    calls = []
+    monkeypatch.setattr(
+        runner,
+        "dispatch_validated",
+        _spy_with_body_writer(calls, _body_ok),
+    )
+    rc = runner.run_bootstrap_core(tmp_path, dry_run_dir=None, today="2026-05-26")
+    assert rc == 0
+    ledger = _json.loads(capsys.readouterr().out)
+    assert ledger["authored"] == ["docs/site-src/core/api.md"]
+    assert not any("description_quality" in r for r in ledger["reasons"])
+    assert (tmp_path / "docs/site-src/core/api.md").exists()
+
+
+def test_bootstrap_rerun_retries_only_rejected_pages(tmp_path, monkeypatch, capsys):
+    _host(
+        tmp_path,
+        manifest={
+            "version": 1,
+            "pages": [
+                {
+                    "key": "api",
+                    "title": "Api",
+                    "page": "core/api.md",
+                    "source_files": [],
+                },
+                {
+                    "key": "storage",
+                    "title": "Storage",
+                    "page": "core/storage.md",
+                    "source_files": [],
+                },
+            ],
+        },
+    )
+    # First run: api gets thin desc, storage gets ok.
+    state = {
+        "page_to_body": {
+            "core/api.md": _body_with_thin_description,
+            "core/storage.md": _body_ok,
+        }
+    }
+
+    def fake1(name, inputs, *, dry_run_dir, cwd=None):
+        # docs_dir is docs/site-src; everything after it is the manifest page
+        # key (e.g. core/api.md) which is also the key in state["page_to_body"].
+        # Use the suffix directly rather than reconstructing a flat "core/<leaf>"
+        # so this stays correct for any nesting depth.
+        rel = (
+            Path(inputs["target_path"])
+            .relative_to(tmp_path)
+            .as_posix()
+            .split("docs/site-src/", 1)[-1]
+        )
+        body = state["page_to_body"][rel](Path(inputs["target_path"]), inputs)
+        Path(inputs["target_path"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(inputs["target_path"]).write_text(body)
+        return ({"ok": True}, [])
+
+    monkeypatch.setattr(runner, "dispatch_validated", fake1)
+    rc = runner.run_bootstrap_core(tmp_path, dry_run_dir=None, today="2026-05-26")
+    assert rc == 0
+    ledger_1 = _json.loads(capsys.readouterr().out)
+    assert ledger_1["authored"] == ["docs/site-src/core/storage.md"]
+    assert any("description_quality" in r for r in ledger_1["reasons"])
+    assert not (tmp_path / "docs/site-src/core/api.md").exists()
+    assert (tmp_path / "docs/site-src/core/storage.md").exists()
+
+    # Second run: api retries with a substantial description; storage is
+    # skipped_existing (idempotency).
+    state["page_to_body"]["core/api.md"] = _body_ok
+    calls2: list = []
+    monkeypatch.setattr(
+        runner, "dispatch_validated", _spy_with_body_writer(calls2, _body_ok)
+    )
+    rc = runner.run_bootstrap_core(tmp_path, dry_run_dir=None, today="2026-05-26")
+    assert rc == 0
+    ledger_2 = _json.loads(capsys.readouterr().out)
+    assert ledger_2["authored"] == ["docs/site-src/core/api.md"]
+    assert ledger_2["skipped_existing"] == ["docs/site-src/core/storage.md"]
+    # Only the previously-rejected page was retried.
+    assert len(calls2) == 1
+    assert calls2[0]["inputs"]["target_path"].endswith("core/api.md")
+
+
+def test_bootstrap_progress_file_is_removed_at_end_of_run(tmp_path, monkeypatch):
+    _host(
+        tmp_path,
+        manifest={
+            "version": 1,
+            "pages": [
+                {
+                    "key": "api",
+                    "title": "Api",
+                    "page": "core/api.md",
+                    "source_files": [],
+                },
+            ],
+        },
+    )
+    calls = []
+    monkeypatch.setattr(
+        runner,
+        "dispatch_validated",
+        _spy_with_body_writer(calls, _body_ok),
+    )
+    runner.run_bootstrap_core(tmp_path, dry_run_dir=None, today="2026-05-26")
+    assert not (
+        tmp_path / ".engineering-docs-agent" / "bootstrap.progress.json"
+    ).exists()
+
+
+def test_bootstrap_progress_file_records_inflight_state(tmp_path, monkeypatch):
+    """During a run, capture the progress file's state at the moment of dispatch
+    so we can assert current_page reflects live state.
+    """
+    _host(
+        tmp_path,
+        manifest={
+            "version": 1,
+            "pages": [
+                {
+                    "key": "api",
+                    "title": "Api",
+                    "page": "core/api.md",
+                    "source_files": [],
+                },
+                {
+                    "key": "storage",
+                    "title": "Storage",
+                    "page": "core/storage.md",
+                    "source_files": [],
+                },
+            ],
+        },
+    )
+    captured: list = []
+
+    def fake_capture(name, inputs, *, dry_run_dir, cwd=None):
+        progress_path = tmp_path / ".engineering-docs-agent" / "bootstrap.progress.json"
+        captured.append(_json.loads(progress_path.read_text()))
+        target = Path(inputs["target_path"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_body_ok(target, inputs))
+        return ({"ok": True}, [])
+
+    monkeypatch.setattr(runner, "dispatch_validated", fake_capture)
+    runner.run_bootstrap_core(tmp_path, dry_run_dir=None, today="2026-05-26")
+    assert captured[0]["current_index"] == 1
+    assert captured[0]["current_page"] == "docs/site-src/core/api.md"
+    assert captured[1]["current_index"] == 2
+    assert captured[1]["current_page"] == "docs/site-src/core/storage.md"
+    # Final state after the run is gone (test above covers it).
+
+
+def test_bootstrap_progress_advances_through_invalid_and_unsafe_entries(
+    tmp_path, monkeypatch
+):
+    """Stage 4 Important: invalid manifest entries and unsafe paths must still
+    advance current_index so the in-flight progress count matches the manifest
+    length. Without the fix, the three early-exit ``continue`` branches in
+    run_bootstrap_core skip ``progress.begin_page()`` and current_index lags
+    behind the actual manifest position seen by the operator."""
+    _host(
+        tmp_path,
+        manifest={
+            "version": 1,
+            "pages": [
+                "not-a-dict",
+                {"page": "../../../outside.md"},
+                {"page": "../../scripts/escape.md"},
+                {
+                    "key": "ok",
+                    "title": "Ok",
+                    "page": "core/ok.md",
+                    "source_files": [],
+                },
+            ],
+        },
+    )
+    captured: list = []
+
+    def fake_capture(name, inputs, *, dry_run_dir, cwd=None):
+        progress_path = tmp_path / ".engineering-docs-agent" / "bootstrap.progress.json"
+        captured.append(_json.loads(progress_path.read_text()))
+        target = Path(inputs["target_path"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_body_ok(target, inputs))
+        return ({"ok": True}, [])
+
+    monkeypatch.setattr(runner, "dispatch_validated", fake_capture)
+    runner.run_bootstrap_core(tmp_path, dry_run_dir=None, today="2026-05-26")
+    assert len(captured) == 1
+    snap = captured[0]
+    # The valid page is the 4th entry; its dispatch sees current_index=4
+    # because the three early-exit branches each advanced the counter past
+    # their invalid/unsafe entry.
+    assert snap["current_index"] == 4
+    assert snap["current_page"] == "docs/site-src/core/ok.md"
+    failed_reasons = [f["reason"] for f in snap["failed"]]
+    assert len(snap["failed"]) == 3
+    assert any("manifest_page_invalid" in r for r in failed_reasons)
+    assert sum("unsafe_page_path" in r for r in failed_reasons) == 2

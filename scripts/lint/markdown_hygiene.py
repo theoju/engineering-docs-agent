@@ -1,4 +1,11 @@
-"""Lint rule: markdown_hygiene. Code fences have languages; heading hierarchy is valid."""
+"""Lint rule: markdown_hygiene_structure. Block-severity structural defects in markdown.
+
+Catches unpaired code fences and heading-hierarchy jumps — both of these
+genuinely break MkDocs render or produce malformed HTML. The cosmetic
+"opening fence missing a language tag" check lives in the sibling
+warn-severity rule `markdown_hygiene_lang.py` so that a missing language
+tag does not cause the orchestrator to drop the entire authored page.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +18,7 @@ from typing import Any
 
 import yaml
 
-RULE_NAME = "markdown_hygiene"
+RULE_NAME = "markdown_hygiene_structure"
 SEVERITY = "block"
 FENCE_RE = re.compile(r"^```(\S*)\s*$", re.MULTILINE)
 HEADING_RE = re.compile(r"^(#{1,6})\s+\S", re.MULTILINE)
@@ -27,10 +34,6 @@ def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
     text = path.read_text()
     problems: list[str] = []
     fences = list(FENCE_RE.finditer(text))
-    for i in range(0, len(fences), 2):
-        lang = fences[i].group(1)
-        if not lang:
-            problems.append(f"code fence at offset {fences[i].start()} has no language")
     if len(fences) % 2 != 0:
         problems.append(f"unpaired code fence (count={len(fences)})")
     prev_level = 0

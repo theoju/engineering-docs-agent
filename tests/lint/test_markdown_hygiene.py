@@ -30,15 +30,19 @@ def test_good(tmp_path):
     cfg.write_text("{}")
     rc, out = _run([FIX / "good.md"], cfg)
     assert rc == 0
-    assert out["rule"] == "markdown_hygiene"
+    assert out["rule"] == "markdown_hygiene_structure"
+    assert out["severity"] == "block"
 
 
-def test_no_lang(tmp_path):
+def test_does_not_flag_missing_lang_tag(tmp_path):
+    # The lang rule handles missing-language fences (warn severity).
+    # The structure rule must NOT flag them, otherwise we re-introduce
+    # the page-drop regression CCE-46 is fixing.
     cfg = tmp_path / "c.yml"
     cfg.write_text("{}")
     rc, out = _run([FIX / "bad_no_lang.md"], cfg)
-    assert rc == 1
-    assert "language" in out["results"][0]["message"].lower()
+    assert rc == 0
+    assert out["rule"] == "markdown_hygiene_structure"
 
 
 def test_hierarchy(tmp_path):
@@ -46,6 +50,8 @@ def test_hierarchy(tmp_path):
     cfg.write_text("{}")
     rc, out = _run([FIX / "bad_hierarchy.md"], cfg)
     assert rc == 1
+    assert out["rule"] == "markdown_hygiene_structure"
+    assert out["severity"] == "block"
     assert "hierarchy" in out["results"][0]["message"].lower()
 
 
@@ -66,4 +72,6 @@ def test_unpaired_fence_detected(tmp_path):
     cfg.write_text("{}")
     rc, out = _run([p], cfg)
     assert rc == 1
+    assert out["rule"] == "markdown_hygiene_structure"
+    assert out["severity"] == "block"
     assert "unpaired" in out["results"][0]["message"].lower()

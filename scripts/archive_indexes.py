@@ -60,8 +60,10 @@ def parse_frontmatter_strict(text: str) -> dict:
     """Like ``parse_frontmatter``, but lets the caller distinguish failure modes.
 
     - Raises ``yaml.YAMLError`` on parse failure (original exception unwrapped).
-    - Raises ``ValueError('no frontmatter')`` when the document does not start
-      with ``---`` or lacks a closing fence.
+    - Raises ``ValueError('no opening fence')`` when the document does not
+      start with ``---``; ``ValueError('no closing fence')`` when the opening
+      fence has no matching close; ``ValueError('frontmatter is not a mapping')``
+      when the YAML parses to a scalar or list rather than a dict.
     - Returns the parsed dict on success; an empty frontmatter block returns ``{}``.
 
     The lenient sibling ``parse_frontmatter`` stays for callers that intentionally
@@ -69,10 +71,10 @@ def parse_frontmatter_strict(text: str) -> dict:
     archive index collection).
     """
     if not text.startswith("---"):
-        raise ValueError("no frontmatter")
+        raise ValueError("no opening fence")
     parts = text.split("---", 2)
     if len(parts) < 3:
-        raise ValueError("no frontmatter")
+        raise ValueError("no closing fence")
     data = yaml.safe_load(parts[1])
     if data is None:
         return {}

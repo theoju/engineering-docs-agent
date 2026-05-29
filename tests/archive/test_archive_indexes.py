@@ -22,16 +22,26 @@ def test_parse_frontmatter_strict_returns_empty_dict_on_empty_block():
 
 
 def test_parse_frontmatter_strict_raises_yaml_error_on_bad_yaml():
-    # The CCE-15-style failure: a bare `: ` inside a backticked value
-    # makes pyyaml treat it as a nested mapping separator.
+    # The CCE-15-style failure: an unquoted YAML scalar containing ``: ``
+    # (colon-space) is parsed as a nested mapping separator. Backticks are
+    # incidental — pyyaml does not treat them specially; the bare ``: ``
+    # inside the value is what triggers the parser to choke.
     text = "---\ndescription: `additionalProperties: false`\n---\n"
     with pytest.raises(yaml.YAMLError):
         archive_indexes.parse_frontmatter_strict(text)
 
 
 def test_parse_frontmatter_strict_raises_value_error_on_no_frontmatter():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="no opening fence"):
         archive_indexes.parse_frontmatter_strict("# No frontmatter here\n")
     # And on truncated frontmatter (missing closing fence).
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="no closing fence"):
         archive_indexes.parse_frontmatter_strict("---\ndescription: x\n# Body\n")
+
+
+def test_parse_frontmatter_strict_raises_value_error_on_non_mapping():
+    # A YAML list at the top level parses successfully but is not a dict —
+    # the strict parser surfaces this rather than coercing to {} so callers
+    # can distinguish it from an empty frontmatter block.
+    with pytest.raises(ValueError, match="not a mapping"):
+        archive_indexes.parse_frontmatter_strict("---\n- one\n- two\n---\n")

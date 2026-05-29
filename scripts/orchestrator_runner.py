@@ -6,7 +6,7 @@ instead of invoking Claude.
 """
 
 from __future__ import annotations
-import argparse, fnmatch, json, os, subprocess, sys
+import argparse, fnmatch, json, os, re, subprocess, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -172,6 +172,40 @@ def _rescue_json_object(text: str) -> dict | None:
                 except json.JSONDecodeError:
                     return None
     return None
+
+
+# CCE-55: whole-string match for the most common LLM contamination —
+# the model wraps its JSON in a markdown code fence despite explicit
+# "no fences" instructions in both the agent contract and the
+# orchestrator's execution-framing prompt. Observed rate on the
+# 2026-05-29 docs-agent-nightly run that produced PR #69: ~19%
+# (3 of 16 schema-bearing dispatches). The fence content is byte-equal
+# to the JSON the model intended, so stripping here lets the strict
+# json.loads in dispatch_subagent succeed without triggering the
+# rescue path's prose_contamination_rescued partial reason.
+_FENCE_RE = re.compile(
+    r"\A\s*```[A-Za-z0-9]*\s*\n(.*)\n```\s*\Z",
+    re.DOTALL,
+)
+
+
+def _strip_code_fence(text: str) -> str:
+    """If text is exactly a markdown code-fence wrap, return the inner
+    content. Otherwise return text unchanged.
+
+    The match is whole-string (\\A ... \\Z). Any prose before or after
+    the fence breaks the match and the original text is returned so the
+    caller falls through to _rescue_json_object for anomalous
+    contamination handling.
+    """
+    m = _FENCE_RE.match(text)
+    if m is None:
+        return text
+    # Strip trailing whitespace inside the fence so the contract is "inner
+    # content as clean JSON-as-string". The greedy DOTALL capture can include
+    # a final newline when the model emits a blank line before the closing
+    # fence (e.g. {"a":1}\n\n```); strip normalizes that out.
+    return m.group(1).strip()
 
 
 def _extract_final_assistant_text(events: list[dict]) -> str:
@@ -470,13 +504,20 @@ def dispatch_subagent(
     canonical_text = canonical_text.strip()
     if not canonical_text:
         return None
+    # CCE-55: strip the markdown code-fence wrap if present. This is a
+    # whole-string match — fence-only inputs strip to clean JSON and
+    # parse without firing the rescue partial banner. Anything that
+    # isn't a pure fence wrap passes through unchanged so the existing
+    # _rescue_json_object path still handles anomalous contamination.
+    parse_text = _strip_code_fence(canonical_text)
     try:
-        return json.loads(canonical_text)
+        return json.loads(parse_text)
     except json.JSONDecodeError:
-        # CCE-15: strict parse failed. Try prose-tolerant rescue. If we
-        # extract a valid object, surface the rescue event via
-        # out_reasons so dispatch_validated can roll it into the
-        # pipeline's partial_reasons summary.
+        # CCE-15: strict parse failed. Try prose-tolerant rescue against
+        # the ORIGINAL canonical_text (not the strip output) — if the
+        # strip didn't change anything, both are identical; if it did,
+        # we still want the rescue to see the full text in case the
+        # contamination is more complex than a simple fence wrap.
         rescued = _rescue_json_object(canonical_text)
         if rescued is not None:
             if out_reasons is not None:

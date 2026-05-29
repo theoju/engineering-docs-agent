@@ -854,6 +854,21 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             except ValueError:
                 pass
 
+    # CCE-43: same-hour rerun guard. If origin/<docs-agent-branch>'s
+    # committed state.json already advanced last_successful_run.head_sha
+    # to our HEAD, the same window has already been processed. Proceeding
+    # would mutate whats-new.md and state.json in the working tree with
+    # content that differs from origin/<branch>, and the subsequent
+    # checkout in open_or_append_pr would refuse (CCE-42 layer 3).
+    if _remote_already_processed_window(repo_root, branch_name(now), head_sha):
+        print(
+            f"Skipped: origin/{branch_name(now)} already advanced "
+            f"state.head_sha to {head_sha[:8]}; this window already "
+            f"processed in this hour.",
+            file=sys.stdout,
+        )
+        return 0
+
     jira_payload = config.get("sources", {}).get("jira")
     sc_inputs = {
         "last_sha": state.get("last_successful_run", {}).get("head_sha", ""),
@@ -1370,6 +1385,49 @@ def run_bootstrap_core(
 
 def branch_name(now_iso: str) -> str:
     return f"docs-agent/{now_iso[:13]}"
+
+
+def _remote_already_processed_window(
+    repo_root: Path, branch: str, our_head_sha: str
+) -> bool:
+    """True if origin/<branch>'s committed state.json shows it already
+    advanced last_successful_run.head_sha to our_head_sha. In that case the
+    docs-agent branch already holds the run we're about to redo, and
+    proceeding would only collide on whats-new.md / state.json at checkout
+    (the CCE-42 layer-3 failure mode).
+
+    Every failure mode (fetch failure, missing state.json, JSON parse error,
+    schema drift) returns False so the runner proceeds normally — false
+    positives would silently skip real work; false negatives just produce
+    the existing checkout_failed partial reason that operators already know
+    how to resolve.
+    """
+    fetch = subprocess.run(
+        ["git", "-C", str(repo_root), "fetch", "origin", branch],
+        capture_output=True,
+        text=True,
+    )
+    if fetch.returncode != 0:
+        return False
+    show = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "show",
+            f"origin/{branch}:.engineering-docs-agent/state.json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if show.returncode != 0:
+        return False
+    try:
+        remote = json.loads(show.stdout)
+        remote_head = remote.get("last_successful_run", {}).get("head_sha", "")
+    except (json.JSONDecodeError, KeyError, AttributeError):
+        return False
+    return remote_head == our_head_sha
 
 
 def open_or_append_pr(

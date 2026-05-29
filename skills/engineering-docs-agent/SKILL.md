@@ -43,6 +43,7 @@ Use the `Agent` tool with `subagent_type=<agent-name>`. Pass inputs as a JSON bl
 - Before opening the docs-agent PR: promote `current_run.head_sha` → `last_successful_run.head_sha` (with `completed_at` timestamp). The runner writes only persistent fields to `state.json` via `save_persistent_state` and dual-writes `current_run` to the gitignored sibling `current_run.json` via `save_current_run` for diagnostics + test observability.
 - The merge of the docs-agent PR is the promotion mechanism: `state.json` is staged by the runner's existing `git add . && git commit` path, included in the PR, and lands in main on merge. No separate promote workflow.
 - If PR open fails: persistent state still has the advanced `last_successful_run` written locally, but nothing reaches main. The next run reads the unchanged committed state and retries the same window — self-healing.
+- CCE-43: if `origin/<docs-agent-branch>`'s committed `state.json` already advanced `last_successful_run.head_sha` to our `HEAD`, exit 0 without dispatching subagents. The window was already processed in this hour (e.g., smoke-test pair, cron + dispatch collision). No state advance, no PR mutation, no notifier digest.
 
 ## Error handling
 
@@ -52,16 +53,17 @@ See spec §8. Specifically: page-author content failing block-severity lint → 
 
 1. Read `.engineering-docs-agent/config.yml` and `.engineering-docs-agent/state.json`. If config is missing, exit with error "no config". If state is missing, treat last_sha as the repo's initial commit.
 2. `head_sha = $(git rev-parse HEAD)`.
-3. Compose inputs for `source-collector`; dispatch. Parse JSON output.
-4. For each PR in parallel (batch in groups of 5 to limit fan-out): dispatch `pr-summarizer`. Collect outputs.
-5. Aggregate doc_targets per lens.
-6. For each lens (parallel) and each target within the lens (serial): dispatch `page-author`. Collect outputs.
-7. Dispatch `content-validator` on the union of authored/edited paths. For each block-failure, undo the page change via git and remove the path from the run's contribution; record the failure in `partial_reasons` and the digest.
-8. For each PR (parallel): dispatch `gap-detector`, skipping those in `dismissed_gap_flags`. Collect verdicts.
-9. Prepend a dated entry to `whats_new_file` summarizing the bullet list (PR summaries + gap flags).
-10. Write `state.json` with `current_run.partial`, `current_run.partial_reasons`, and head_sha.
-11. Open or append-commit to the docs-agent PR (see "PR handling" below).
-12. Compose digest and dispatch `notifier`.
+3. CCE-43: check whether `origin/docs-agent/YYYY-MM-DDTHH`'s committed `state.json` already shows `last_successful_run.head_sha == head_sha`. If so, log a skip message and exit 0 — the window was processed by an earlier run this hour.
+4. Compose inputs for `source-collector`; dispatch. Parse JSON output.
+5. For each PR in parallel (batch in groups of 5 to limit fan-out): dispatch `pr-summarizer`. Collect outputs.
+6. Aggregate doc_targets per lens.
+7. For each lens (parallel) and each target within the lens (serial): dispatch `page-author`. Collect outputs.
+8. Dispatch `content-validator` on the union of authored/edited paths. For each block-failure, undo the page change via git and remove the path from the run's contribution; record the failure in `partial_reasons` and the digest.
+9. For each PR (parallel): dispatch `gap-detector`, skipping those in `dismissed_gap_flags`. Collect verdicts.
+10. Prepend a dated entry to `whats_new_file` summarizing the bullet list (PR summaries + gap flags).
+11. Write `state.json` with `current_run.partial`, `current_run.partial_reasons`, and head_sha.
+12. Open or append-commit to the docs-agent PR (see "PR handling" below).
+13. Compose digest and dispatch `notifier`.
 
 ## PR handling
 

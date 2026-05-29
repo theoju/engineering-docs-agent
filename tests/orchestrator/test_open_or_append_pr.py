@@ -414,3 +414,79 @@ def test_helper_returns_false_when_remote_state_json_corrupted(tmp_path: Path):
             "somehead00000000000000000000000000000000",
         )
     assert result is False, f"expected False on corrupted JSON; got {result}"
+
+
+# CCE-48: PR body switches from "; ".join() to a bulleted list using
+# the shared _format_partial_digest formatter so the step summary and
+# PR body stay format-aligned.
+
+
+def test_partial_pr_body_uses_bulleted_format(tmp_path: Path):
+    """Partial-run PR body is a bulleted list, not '; '-joined."""
+    gh = _make_gh_client_stub(pr_number=42)
+    captured_body = {}
+
+    def capture_create(branch, commit_msg, body):
+        captured_body["body"] = body
+        return MagicMock(ok=True, value=42)
+
+    gh.pr_create.side_effect = capture_create
+
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_make_subprocess_stub(
+            push_rc=0,
+            push_stderr="",
+            lsremote_sha="localsha",
+        ),
+    ):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/test",
+            now_iso="2026-05-28T22:00:00+00:00",
+            partial=True,
+            partial_reasons=["reason_one", "reason_two"],
+        )
+
+    body = captured_body["body"]
+    # Heading must be present.
+    assert "WARNING — Partial run" in body
+    # Each reason is a bullet, not joined by '; '.
+    assert "- reason_one" in body
+    assert "- reason_two" in body
+    # Confirm the old "; "-join shape is GONE.
+    assert "reason_one; reason_two" not in body
+
+
+def test_clean_pr_body_unchanged(tmp_path: Path):
+    """Clean-run PR body remains exactly 'docs-agent run'."""
+    gh = _make_gh_client_stub(pr_number=42)
+    captured_body = {}
+
+    def capture_create(branch, commit_msg, body):
+        captured_body["body"] = body
+        return MagicMock(ok=True, value=42)
+
+    gh.pr_create.side_effect = capture_create
+
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_make_subprocess_stub(
+            push_rc=0,
+            push_stderr="",
+            lsremote_sha="localsha",
+        ),
+    ):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/test",
+            now_iso="2026-05-28T22:00:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+
+    assert captured_body["body"] == "docs-agent run"

@@ -1366,7 +1366,8 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         digest = {
             "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
             "run_summary_bullets": [
-                f"PR #{s.get('pr_number')}: {s.get('what_changed', '')}" for s in summaries
+                f"PR #{s.get('pr_number')}: {s.get('what_changed', '')}"
+                for s in summaries
             ],
             "gap_flags": [
                 {"pr_id": v["pr_id"], "reasoning": v["reasoning"]}
@@ -1797,11 +1798,11 @@ def open_or_append_pr(
         return None, reasons
     if existing.value is not None:
         return existing.value, reasons
-    body = (
-        "WARNING — Partial run — " + "; ".join(partial_reasons)
-        if partial
-        else "docs-agent run"
-    )
+    if partial:
+        digest = _format_partial_digest(partial_reasons)
+        body = digest if digest else "docs-agent run"
+    else:
+        body = "docs-agent run"
     created = gh.pr_create(branch, commit_msg, body)
     if not created.ok:
         reasons.append((f"gh_pr_create_failed: {created.error}", False))

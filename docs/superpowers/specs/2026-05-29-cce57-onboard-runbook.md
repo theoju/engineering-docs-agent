@@ -2,7 +2,7 @@
 
 This runbook executes the user-gated steps that the plugin-side prep (CCE-57 PR) cannot do for you. Follow it top-to-bottom. Each step lists what to run, what to expect, and what to do if it fails.
 
-You will need: admin access to the target repo, the OAuth + App credentials from `docs/setup-guide.md` Part 1, and ~30 minutes uninterrupted.
+You will need: admin access to the target repo, the OAuth + App credentials from `docs/site-src/setup-guide.md` Part 1, and ~30 minutes uninterrupted.
 
 ## Prerequisites
 
@@ -46,7 +46,7 @@ claude plugin install engineering-docs-agent@engineering-docs-agent-marketplace
 
 **Expected:** install succeeds; `~/.claude/plugins/` contains the plugin.
 
-**If it fails:** see `docs/setup-guide.md` Part 2.1.
+**If it fails:** see `docs/site-src/setup-guide.md` Part 2.1.
 
 ## Step 4 — Run the setup skill
 
@@ -70,17 +70,17 @@ The skill prints discovered values (same as Step 2) and asks a small number of q
 
 The workflow file MUST contain a step named `Check out engineering-docs-agent plugin` (CCE-57 fix). If it does not, the skill is running from an old plugin version — re-run Step 3.
 
-**If it fails:** see `docs/setup-guide.md` Part 2.2.
+**If it fails:** see `docs/site-src/setup-guide.md` Part 2.2.
 
 ## Step 5 — Register / reuse the GitHub App
 
-Follow `docs/setup-guide.md` Part 1.2 to register the App if you don't already have one for this account. If you onboarded `theoju/engineering-docs-agent` previously, reuse the same App — no need to register a second one.
+Follow `docs/site-src/setup-guide.md` Part 1.2 to register the App if you don't already have one for this account. If you onboarded `theoju/engineering-docs-agent` previously, reuse the same App — no need to register a second one.
 
 **Expected:** you have an App ID, a `.pem` private key file, and the App showing in `https://github.com/settings/apps`.
 
 ## Step 6 — Install the App on `claude-code-self-assessment`
 
-Follow `docs/setup-guide.md` Part 2.3 — install the App, scope to this single repo.
+Follow `docs/site-src/setup-guide.md` Part 2.3 — install the App, scope to this single repo.
 
 **Verify:** `https://github.com/theoju/claude-code-self-assessment/settings/installations` shows your App.
 
@@ -100,7 +100,7 @@ The three blocking secrets are:
 
 Optional but recommended for Jira enrichment:
 
-- `JIRA_API_TOKEN` — see `docs/setup-guide.md` Part 1.3.
+- `JIRA_API_TOKEN` — see `docs/site-src/setup-guide.md` Part 1.3.
 - `JIRA_EMAIL` — the Atlassian account email associated with the Jira token.
 
 **Expected:** the Secrets list shows all of the entries you set.
@@ -124,19 +124,19 @@ gh workflow run docs-agent-nightly.yml \
 gh run watch -R theoju/claude-code-self-assessment
 ```
 
-**Expected (per `docs/setup-guide.md` Part 3.2):**
+**Expected (per `docs/site-src/setup-guide.md` Part 3.2):**
 
 - A `docs-agent/<YYYY-MM-DD>T<HH>` branch appears.
 - A docs-agent PR is open against `main`, authored by the App identity.
 - `partial_reasons` block in the PR body lists `no_docs_framework` (expected — Docusaurus site not scaffolded yet) but does not list `jira_auth_missing` (proves Jira secrets wired correctly).
 
-**If it fails:** check the workflow run log; cross-reference against `docs/setup-guide.md` Part 6 (Troubleshooting). The most common first-run failure is a typo in `DOCS_AGENT_APP_PRIVATE_KEY` (forgot to include the BEGIN/END lines).
+**If it fails:** check the workflow run log; cross-reference against `docs/site-src/setup-guide.md` Part 6 (Troubleshooting). The most common first-run failure is a typo in `DOCS_AGENT_APP_PRIVATE_KEY` (forgot to include the BEGIN/END lines).
 
 ## Optional next steps (after smoke test passes)
 
 - **Scaffold Docusaurus** in the target (`npx create-docusaurus@latest`). After committing, re-run preflight — `no_docs_framework` warning should disappear and the next nightly will produce real content.
-- **Branch protection** (`docs/setup-guide.md` Part 2.5). The host's test-check name will be Node-shaped (e.g. `test (node 20)`), not `pytest (3.11)`. Adjust accordingly.
-- **actionlint workflow** (`docs/setup-guide.md` Part 5) — recommended for every host.
+- **Branch protection** (`docs/site-src/setup-guide.md` Part 2.5). The host's test-check name will be Node-shaped (e.g. `test (node 20)`), not `pytest (3.11)`. Adjust accordingly.
+- **actionlint workflow** (`docs/site-src/setup-guide.md` Part 5) — recommended for every host.
 
 ## Done
 

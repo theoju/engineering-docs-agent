@@ -76,9 +76,28 @@ jobs:
           npm install -g @anthropic-ai/claude-code
           which claude || (echo "claude CLI not installed" && exit 1)
 
-      - name: Assert OAuth token is configured
+      - name: Assert OAuth token is configured and well-formed
         # Same actionable-failure pattern as release.yml.
-        run: '[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || (echo "CLAUDE_CODE_OAUTH_TOKEN secret not configured" && exit 1)'
+        # CCE-49: three layered checks, cheapest first, each prints which failed:
+        #   1. Non-empty (catches missing secret / wrong workflow-key wiring)
+        #   2. sk-ant-oat prefix (catches sk-ant-api console keys or other paste errors)
+        #   3. Length floor (catches truncation)
+        # An expired OAuth token still passes regex/length and only fails at
+        # dispatch time — that's CCE-49's "out of scope, separate ticket" territory.
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is empty or unset. Did you set the repo secret? See README \"Configuring secrets\"."
+            exit 1
+          fi
+          case "$CLAUDE_CODE_OAUTH_TOKEN" in
+            sk-ant-oat*) ;;
+            sk-ant-api*) echo "::error::CLAUDE_CODE_OAUTH_TOKEN looks like a console API key (sk-ant-api...). The Claude CLI reads the OAuth slot (sk-ant-oat...). Run 'claude setup-token' and paste that value."; exit 1 ;;
+            *) echo "::error::CLAUDE_CODE_OAUTH_TOKEN does not start with 'sk-ant-oat'. Got prefix: ${CLAUDE_CODE_OAUTH_TOKEN:0:10}... Run 'claude setup-token' to generate a valid OAuth token."; exit 1 ;;
+          esac
+          if [ ${#CLAUDE_CODE_OAUTH_TOKEN} -lt 32 ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is suspiciously short (${#CLAUDE_CODE_OAUTH_TOKEN} chars; real tokens are >100). Likely truncated paste. Re-copy from 'claude setup-token'."
+            exit 1
+          fi
 
       - name: Configure git identity
         # The runner does `git commit` itself; without an identity it errors

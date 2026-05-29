@@ -24,7 +24,7 @@ This will:
 
 Set the following in your repo's Actions secrets:
 
-- `ANTHROPIC_API_KEY` (required)
+- `CLAUDE_CODE_OAUTH_TOKEN` (required) — OAuth token from `claude setup-token` (starts with `sk-ant-oat…`). Distinct from console API keys (`sk-ant-api…`); the Claude CLI reads the OAuth slot, not `ANTHROPIC_API_KEY`.
 - `GITHUB_TOKEN` (provided automatically)
 - `JIRA_API_TOKEN` (if Jira opt-in)
 - `SLACK_WEBHOOK_URL` (if Slack notifications enabled)

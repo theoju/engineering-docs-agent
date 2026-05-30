@@ -60,7 +60,10 @@ def test_preflight_text_mode_on_bare_repo():
     assert "framework: None" in text
 
 
-def test_preflight_emits_warning_when_no_framework():
+def test_preflight_emits_framework_none_info_for_bare_host():
+    """Bare host (no mkdocs.yml, no docusaurus.config.*) gets an info-
+    level notice, NOT a block-severity warning. The notice's code is
+    `framework_none`. The old `no_docs_framework` warning is gone."""
     r = subprocess.run(
         [
             sys.executable,
@@ -73,9 +76,17 @@ def test_preflight_emits_warning_when_no_framework():
         capture_output=True,
         text=True,
     )
+    assert r.returncode == 0, r.stderr
     out = json.loads(r.stdout)
     codes = {w["code"] for w in out["warnings"]}
-    assert "no_docs_framework" in codes
+    assert "framework_none" in codes
+    assert "no_docs_framework" not in codes
+    framework_none = next(w for w in out["warnings"] if w["code"] == "framework_none")
+    assert framework_none.get("severity") == "info"
+    # Message names both detection points and the upgrade hint.
+    msg = framework_none["message"]
+    assert "mkdocs.yml" in msg
+    assert "docusaurus" in msg.lower()
 
 
 def test_preflight_does_not_write_to_host(tmp_path):

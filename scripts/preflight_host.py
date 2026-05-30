@@ -96,11 +96,15 @@ def compute_warnings(discovery: dict) -> list[dict]:
     if not discovery.get("framework"):
         warnings.append(
             {
-                "code": "no_docs_framework",
+                "code": "framework_none",
+                "severity": "info",
                 "message": (
                     "No mkdocs.yml or docusaurus.config.* found at the repo root. "
-                    "Scaffold a docs site (mkdocs init, or "
-                    "`npx create-docusaurus@latest`) before running the setup skill."
+                    "Config will write framework: none. The framework_build lint "
+                    "rule and the publish-verifier skip cleanly; PR summaries, "
+                    "page authoring, and what's-new updates run normally. "
+                    "If you want strict build-time link checking, scaffold mkdocs "
+                    "(`mkdocs init`) and re-run preflight."
                 ),
             }
         )

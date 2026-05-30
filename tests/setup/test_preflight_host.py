@@ -113,3 +113,22 @@ def test_preflight_missing_repo_root_errors():
     )
     assert r.returncode != 0
     assert "does not exist" in r.stderr
+
+
+def test_preflight_proposed_config_writes_framework_none_for_bare_host():
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo-root",
+            str(FIX / "bare"),
+            "--format",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    # Was silently coerced to "mkdocs" before CCE-64; now explicit "none".
+    assert out["proposed_config"]["docs"]["framework"] == "none"

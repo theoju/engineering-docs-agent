@@ -38,7 +38,7 @@ def proposed_config(discovery: dict) -> dict:
     jira_hint = discovery.get("jira_hint") or {}
     return {
         "docs": {
-            "framework": framework or "mkdocs",
+            "framework": framework or "none",
             "source_dir": source_dir,
             "whats_new_file": f"{source_dir}/whats-new.md",
             "agent_editable_paths": [f"{source_dir}/**"],

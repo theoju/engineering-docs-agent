@@ -260,3 +260,42 @@ notifications: {}
 """)
     with pytest.raises(ValidationError):
         validate(cfg, SCHEMA)
+
+
+def test_framework_none_accepted():
+    cfg = yaml.safe_load("""
+docs:
+  framework: none
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: { core: docs/ }
+sources: { git: { host: github } }
+lint: { tier1: default }
+publishing:
+  base_url: null
+  build_workflow: null
+  url_map_rule: standard
+notifications: {}
+""")
+    validate(cfg, SCHEMA)
+
+
+def test_framework_hugo_rejected():
+    cfg = yaml.safe_load("""
+docs:
+  framework: hugo
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: {}
+sources: { git: { host: github } }
+lint: {}
+publishing:
+  base_url: https://x
+  build_workflow: deploy.yml
+  url_map_rule: standard
+notifications: {}
+""")
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)

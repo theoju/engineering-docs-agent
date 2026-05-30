@@ -1,8 +1,16 @@
+---
+status: draft
+sources:
+  - https://github.com/theoju/engineering-docs-agent/pull/79
+  - https://github.com/theoju/engineering-docs-agent/pull/77
+synthesized_into: []
+---
+
 # Setup Guide
 
 End-to-end walkthrough: from zero to a working `engineering-docs-agent` nightly docs-PR pipeline on a new host repo.
 
-This guide replaces the older minimal setup notes. If you're returning after the rewrite, the structure now splits global (per-user, one-time) setup from per-host (per-repo) setup, and the troubleshooting section covers every partial-mode failure shipped through CCE-45/49/52/53.
+This guide replaces the older minimal setup notes. If you're returning after the rewrite, the structure now splits global (per-user, one-time) setup from per-host (per-repo) setup, and the troubleshooting section covers every partial-mode failure shipped through CCE-45/49/52/53/55.
 
 ## Quick map
 

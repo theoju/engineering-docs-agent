@@ -81,6 +81,7 @@
     },
     "publishing": {
       "type": "object",
+      "$comment": "CCE-64: base_url and build_workflow accept null to support framework=none hosts (preflight emits null for both). The schema does NOT currently enforce that null is paired with framework=none; a hand-edited {framework: mkdocs, base_url: null} would pass validation but break the publish-verifier. Add a JSON Schema if/then/else guard when a second non-mkdocs framework with publish support ships.",
       "required": ["base_url", "build_workflow", "url_map_rule"],
       "properties": {
         "base_url": { "type": ["string", "null"] },

@@ -94,6 +94,10 @@ def secrets_from_workflow(workflow_text: str) -> list[dict]:
 def compute_warnings(discovery: dict) -> list[dict]:
     warnings = list(discovery.get("warnings", []))
     if not discovery.get("framework"):
+        # severity: "info" | "warn" | "block" — informal convention shared with
+        # lint result severity (see orchestrator_runner). Absent severity is
+        # treated as block by default for backward compatibility with the
+        # pre-CCE-64 warning shape.
         warnings.append(
             {
                 "code": "framework_none",

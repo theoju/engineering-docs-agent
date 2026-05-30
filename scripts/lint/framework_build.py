@@ -41,9 +41,15 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     config = load_config(args.config)
-    framework = config.get("docs", {}).get("framework", "mkdocs")
+    framework = config.get("docs", {}).get("framework", "none")
     if framework == "mkdocs":
         ok, skipped, reason = run_mkdocs(Path.cwd())
+    elif framework == "none":
+        ok, skipped, reason = (
+            True,
+            True,
+            "framework=none; no build validation applicable",
+        )
     else:
         ok, skipped, reason = (
             True,

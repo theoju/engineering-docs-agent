@@ -92,3 +92,59 @@ def test_framework_build_result_distinguishes_skip(tmp_path, monkeypatch, capsys
     assert result["ok"] is True
     assert result.get("skipped") is True
     assert "mkdocs.yml" in result.get("reason", "")
+
+
+def test_framework_none_skipped_with_reason(tmp_path):
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("docs:\n  framework: none\n  source_dir: docs\n")
+    fake = tmp_path / "fake.md"
+    fake.write_text("# x")
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--config",
+            str(cfg),
+            "--paths",
+            str(fake),
+            "--json",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    result = out["results"][0]
+    assert result["ok"] is True
+    assert result["skipped"] is True
+    assert result["reason"] == "framework=none; no build validation applicable"
+
+
+def test_framework_default_is_none_when_missing(tmp_path):
+    # When docs.framework is omitted, the lint rule must treat it as 'none'
+    # (not silently coerce to 'mkdocs' as before).
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("docs:\n  source_dir: docs\n")
+    fake = tmp_path / "fake.md"
+    fake.write_text("# x")
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--config",
+            str(cfg),
+            "--paths",
+            str(fake),
+            "--json",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    result = out["results"][0]
+    assert result["ok"] is True
+    assert result["skipped"] is True
+    assert "framework=none" in result["reason"]

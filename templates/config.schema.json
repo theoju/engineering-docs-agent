@@ -16,8 +16,8 @@
       "properties": {
         "framework": {
           "type": "string",
-          "enum": ["mkdocs", "docusaurus"],
-          "description": "Docusaurus support is partial in v0.1; build validation skipped."
+          "enum": ["mkdocs", "docusaurus", "none"],
+          "description": "SSG framework for the host's docs site. Use 'none' when the host has no SSG and renders raw markdown via GitHub or another mechanism. Docusaurus support is partial in v0.1; build validation is skipped for 'docusaurus' and 'none'."
         },
         "source_dir": { "type": "string" },
         "whats_new_file": { "type": "string" },
@@ -81,10 +81,11 @@
     },
     "publishing": {
       "type": "object",
+      "$comment": "CCE-64: base_url and build_workflow accept null to support framework=none hosts (preflight emits null for both). The schema does NOT currently enforce that null is paired with framework=none; a hand-edited {framework: mkdocs, base_url: null} would pass validation but break the publish-verifier. Add a JSON Schema if/then/else guard when a second non-mkdocs framework with publish support ships.",
       "required": ["base_url", "build_workflow", "url_map_rule"],
       "properties": {
-        "base_url": { "type": "string" },
-        "build_workflow": { "type": "string" },
+        "base_url": { "type": ["string", "null"] },
+        "build_workflow": { "type": ["string", "null"] },
         "url_map_rule": { "type": "string" },
         "verify_timeout_seconds": { "type": "integer" },
         "build_command": {

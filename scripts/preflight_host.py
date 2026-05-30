@@ -38,7 +38,7 @@ def proposed_config(discovery: dict) -> dict:
     jira_hint = discovery.get("jira_hint") or {}
     return {
         "docs": {
-            "framework": framework or "mkdocs",
+            "framework": framework or "none",
             "source_dir": source_dir,
             "whats_new_file": f"{source_dir}/whats-new.md",
             "agent_editable_paths": [f"{source_dir}/**"],
@@ -94,13 +94,21 @@ def secrets_from_workflow(workflow_text: str) -> list[dict]:
 def compute_warnings(discovery: dict) -> list[dict]:
     warnings = list(discovery.get("warnings", []))
     if not discovery.get("framework"):
+        # severity: "info" | "warn" | "block" — informal convention shared with
+        # lint result severity (see orchestrator_runner). Absent severity is
+        # treated as block by default for backward compatibility with the
+        # pre-CCE-64 warning shape.
         warnings.append(
             {
-                "code": "no_docs_framework",
+                "code": "framework_none",
+                "severity": "info",
                 "message": (
                     "No mkdocs.yml or docusaurus.config.* found at the repo root. "
-                    "Scaffold a docs site (mkdocs init, or "
-                    "`npx create-docusaurus@latest`) before running the setup skill."
+                    "Config will write framework: none. The framework_build lint "
+                    "rule and the publish-verifier skip cleanly; PR summaries, "
+                    "page authoring, and what's-new updates run normally. "
+                    "If you want strict build-time link checking, scaffold mkdocs "
+                    "(`mkdocs init`) and re-run preflight."
                 ),
             }
         )

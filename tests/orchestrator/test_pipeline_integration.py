@@ -933,3 +933,34 @@ def test_content_validator_dispatch_includes_plugin_root(tmp_path, monkeypatch):
     assert lint_runner.exists(), (
         f"plugin_root does not resolve to a real lint_runner.py: {lint_runner}"
     )
+
+
+def test_content_validator_payload_plugin_root_is_str_not_path(tmp_path, monkeypatch):
+    """CCE-67: plugin_root must be passed as str, not Path, to remain
+    JSON-serializable. Path objects round-trip through the dispatcher's JSON
+    serialization differently across platforms (POSIX vs Windows)."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    captured: list[dict] = []
+    real_dispatch = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
+        if name == "content-validator":
+            captured.append(dict(inputs))
+        return real_dispatch(
+            name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons
+        )
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+
+    _init_host(tmp_path)
+    runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+
+    assert captured
+    plugin_root_value = captured[0]["plugin_root"]
+    assert isinstance(plugin_root_value, str), (
+        f"plugin_root must be a str for JSON, got {type(plugin_root_value).__name__}"
+    )

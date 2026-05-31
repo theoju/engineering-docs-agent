@@ -897,3 +897,39 @@ def test_run_surfaces_core_drift_in_whats_new_and_state(tmp_path):
 
     cr = _read_current_run(state_path)
     assert cr["core_drift"] == [{"page": "core/connectors.md", "reasons": ["source"]}]
+
+
+def test_content_validator_dispatch_includes_plugin_root(tmp_path, monkeypatch):
+    """CCE-67: orchestrator must pass plugin_root in content-validator inputs
+    so the subagent can locate scripts/lint/lint_runner.py at the absolute
+    plugin path (the plugin is vendored at .docs-agent-plugin/ in CI, not the
+    host repo root)."""
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    captured: list[dict] = []
+    real_dispatch = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
+        if name == "content-validator":
+            captured.append(dict(inputs))
+        return real_dispatch(
+            name, inputs, dry_run_dir=dry_run_dir, out_reasons=out_reasons
+        )
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+
+    _init_host(tmp_path)
+    runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+
+    assert captured, "expected at least one content-validator dispatch"
+    payload = captured[0]
+    assert "plugin_root" in payload, "content-validator payload missing plugin_root"
+    plugin_root = Path(payload["plugin_root"])
+    assert plugin_root.is_absolute(), f"plugin_root must be absolute, got {plugin_root}"
+    lint_runner = plugin_root / "scripts" / "lint" / "lint_runner.py"
+    assert lint_runner.exists(), (
+        f"plugin_root does not resolve to a real lint_runner.py: {lint_runner}"
+    )

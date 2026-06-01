@@ -11,7 +11,7 @@ tools:
 
 ## Job
 
-Run `scripts/lint/lint_runner.py` on the given paths with the host config,
+Run `<plugin_root>/scripts/lint/lint_runner.py` on the given paths with the host config,
 then run any LLM-based semantic checks not implementable as scripts
 (voice_consistency from spec §6.2). Aggregate into one structured result.
 
@@ -20,6 +20,7 @@ then run any LLM-based semantic checks not implementable as scripts
 - `paths`: list of file paths the orchestrator just authored/edited
 - `config_path`: path to the host's `.engineering-docs-agent/config.yml`
 - `voice_samples`: voice sample bundle (only used if `voice_consistency` is enabled in tier 2)
+- `plugin_root`: absolute path to the engineering-docs-agent plugin checkout. The lint runner lives at `<plugin_root>/scripts/lint/lint_runner.py`. The plugin is vendored separately from the host repo (e.g. at `.docs-agent-plugin/` in CI), so this path is not host-relative.
 
 ## Output schema (canonical)
 
@@ -75,11 +76,12 @@ The canonical schema is in §Output schema above. The shape described here is th
 
 ## Procedure
 
-1. Run `python scripts/lint/lint_runner.py --config <config_path> --paths <paths...> --json`.
+1. Run `python <plugin_root>/scripts/lint/lint_runner.py --config <config_path> --paths <paths...> --json`.
+   Substitute the literal value of `plugin_root` from the input — do not assume the runner is on `$PATH` or at a relative path. Quote the plugin_root path if it contains spaces.
 2. Parse aggregated output. For each per-rule result, extract pass/fail per path with severity.
 3. If `voice_consistency` is enabled in config and not implemented as a script, perform LLM check: for each path, compare prose against voice_samples; flag mismatch as `severity: block`, message describing the mismatch.
 4. Build the structured response with two lists.
 
 ## Failure handling
 
-If `lint_runner.py` exits non-zero AND output is unparseable, return `{failed: [{path: "*", rule: "lint_runner", message: "runner crashed: <stderr>", severity: "block"}]}`.
+If `lint_runner.py` exits non-zero AND output is unparseable, return `{failed: [{path: "*", rule: "lint_runner", message: "runner crashed at <plugin_root>/scripts/lint/lint_runner.py: <stderr>", severity: "block"}]}`.

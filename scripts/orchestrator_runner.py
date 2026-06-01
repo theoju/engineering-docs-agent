@@ -1197,6 +1197,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                     "paths": authored,
                     "config_path": str(cfg_path),
                     "voice_samples": voice_samples,
+                    "plugin_root": str(_PLUGIN_ROOT),
                 },
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,

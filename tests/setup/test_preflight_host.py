@@ -28,6 +28,7 @@ def test_preflight_json_mode_on_js_docusaurus():
         "discovery",
         "proposed_config",
         "secrets_checklist",
+        "variables_checklist",
         "warnings",
     }
     assert out["discovery"]["framework"] == "docusaurus"
@@ -69,6 +70,7 @@ def test_preflight_text_mode_on_bare_repo():
     text = r.stdout
     assert "Discovery" in text
     assert "Secrets checklist" in text
+    assert "Variables checklist" in text  # CCE-66: parallel block to Secrets
     assert "framework: None" in text
 
 

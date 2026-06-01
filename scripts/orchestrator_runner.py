@@ -1725,6 +1725,32 @@ def _write_step_summary(state: dict, repo_root: Path) -> None:
         return
 
 
+def _stage_docs_run_changes(repo_root: Path) -> tuple[int, str]:
+    """Stage all run-emitted changes in `repo_root`, excluding the vendored
+    plugin checkout at `.docs-agent-plugin/`.
+
+    The host's workflow checks out the plugin into `.docs-agent-plugin/`
+    via actions/checkout (see templates/workflow-run.yml). Without an
+    explicit exclusion, `git add .` would register the nested checkout as
+    a submodule gitlink (mode 160000) in the host's docs-agent PR — CCE-70.
+    """
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "add",
+            ".",
+            "--",
+            ":!.docs-agent-plugin",
+            ":!.docs-agent-plugin/**",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode, result.stderr.strip()
+
+
 def open_or_append_pr(
     repo_root: Path,
     gh: GhClient,
@@ -1763,13 +1789,9 @@ def open_or_append_pr(
         )
         return None, reasons
 
-    add = subprocess.run(
-        ["git", "-C", str(repo_root), "add", "."], capture_output=True, text=True
-    )
-    if add.returncode != 0:
-        reasons.append(
-            (f"git_add_failed: {add.stderr.strip()[:_STDERR_TRUNCATE]}", False)
-        )
+    add_rc, add_stderr = _stage_docs_run_changes(repo_root)
+    if add_rc != 0:
+        reasons.append((f"git_add_failed: {add_stderr[:_STDERR_TRUNCATE]}", False))
         return None, reasons
 
     commit_msg = f"docs(agent): run {now_iso}"

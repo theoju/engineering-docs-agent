@@ -1744,25 +1744,73 @@ def _stage_docs_run_changes(repo_root: Path) -> tuple[int, str]:
     plugin checkout at `.docs-agent-plugin/`.
 
     The host's workflow checks out the plugin into `.docs-agent-plugin/`
-    via actions/checkout (see templates/workflow-run.yml). Without an
-    explicit exclusion, `git add .` would register the nested checkout as
-    a submodule gitlink (mode 160000) in the host's docs-agent PR — CCE-70.
+    via actions/checkout (see templates/workflow-run.yml). Two host layouts
+    are handled uniformly here:
+
+    - Hosts where `.docs-agent-plugin/` is NOT gitignored: `git add -A .`
+      stages the nested actions/checkout as a submodule gitlink (mode
+      160000). The follow-up `git restore --staged` reverts the index
+      entry to match HEAD (which has nothing at this path) — CCE-70.
+    - Hosts where `.docs-agent-plugin/` IS gitignored (e.g. ADIS): git's
+      tree walk silently skips it during `git add -A`; the diff check
+      finds nothing staged under that path, so the restore step is
+      skipped — CCE-75.
+
+    `git restore --staged` (rather than `git rm --cached`) is used so
+    that if a host has unrelated tracked content at `.docs-agent-plugin/`
+    — a real submodule registration in `.gitmodules`, or files committed
+    before the plugin was adopted — restore preserves them (it reverts
+    the index to match HEAD, not deletes from the index).
+
+    The prior implementation used a negative pathspec
+    (`:!.docs-agent-plugin`), which collided with host `.gitignore`
+    entries: naming a path in a pathspec promotes it to "explicitly
+    mentioned", which triggers git's gitignore-aware safety check —
+    failing with `paths are ignored by one of your .gitignore files`.
     """
-    result = subprocess.run(
+    add = subprocess.run(
+        ["git", "-C", str(repo_root), "add", "-A", "."],
+        capture_output=True,
+        text=True,
+    )
+    if add.returncode != 0:
+        return add.returncode, add.stderr.strip()
+
+    diff = subprocess.run(
         [
             "git",
             "-C",
             str(repo_root),
-            "add",
-            ".",
+            "diff",
+            "--cached",
+            "--name-only",
             "--",
-            ":!.docs-agent-plugin",
-            ":!.docs-agent-plugin/**",
+            ".docs-agent-plugin",
         ],
         capture_output=True,
         text=True,
     )
-    return result.returncode, result.stderr.strip()
+    if diff.returncode != 0:
+        return diff.returncode, diff.stderr.strip()
+    if not diff.stdout.strip():
+        return 0, ""
+
+    restore = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "restore",
+            "--staged",
+            "--",
+            ".docs-agent-plugin",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if restore.returncode != 0:
+        return restore.returncode, restore.stderr.strip()
+    return 0, ""
 
 
 _CREDENTIAL_URL_RE = re.compile(r"(https?://)[^@/\s]*@")

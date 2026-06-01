@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/66
+  - https://github.com/theoju/engineering-docs-agent/pull/91
 synthesized_into: []
 ---
 
@@ -14,6 +15,20 @@ The nightly authoring pipeline runs automatically at 07:07 UTC via `.github/work
 The default `GITHUB_TOKEN` GitHub injects into every workflow run is subject to a loop-prevention rule: any commit or PR it authors suppresses both `pull_request` and `push` event triggers. That means every PR the docs-agent opens would sit inert — your pytest and diagram-gate workflows never fire, and you'd need a manual empty-commit push to wake them up.
 
 The workflow mints a GitHub App installation token instead (`actions/create-github-app-token@v3`, step id `app-token`). App-installation tokens are exempt from the suppression rule, so CI fires normally on docs-agent PRs.
+
+The token-generation step uses the `client-id:` input — **not** the deprecated `app-id:` input that the action supported in earlier versions:
+
+```yaml
+# .github/workflows/docs-agent-nightly.yml
+- name: Generate GitHub App token
+  id: app-token
+  uses: actions/create-github-app-token@v3
+  with:
+    client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}
+    private-key: ${{ secrets.DOCS_AGENT_APP_PRIVATE_KEY }}
+```
+
+Using `app-id:` will fail once GitHub removes the compatibility shim. The guard test `tests/ci/test_workflow_auth_tier.py` asserts that the workflow file contains `client-id:` (not `app-id:`), preventing regression.
 
 Two credentials back this up — one Variable, one Secret:
 

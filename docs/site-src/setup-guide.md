@@ -1,3 +1,12 @@
+---
+status: draft
+sources:
+  - https://github.com/theoju/engineering-docs-agent/pull/91
+  - https://github.com/theoju/engineering-docs-agent/pull/79
+  - https://github.com/theoju/engineering-docs-agent/pull/77
+synthesized_into: []
+---
+
 # Setup Guide
 
 End-to-end walkthrough: from zero to a working `engineering-docs-agent` nightly docs-PR pipeline on a new host repo.
@@ -336,7 +345,7 @@ For a fresh host repo:
 - [ ] Run `claude setup-token`, copy the OAuth token.
 - [ ] Register the GitHub App (Part 1.2).
 - [ ] Download the App's private key (`.pem` file).
-- [ ] Note the App ID.
+- [ ] Note the App Client ID (shown on the App's General page; format: `Iv1.xxx` or `Iv23li...`).
 - [ ] (Optional) Generate an Atlassian API token.
 
 **Per host (Part 2 + Part 5):**
@@ -374,3 +383,5 @@ Key tickets that shaped this guide:
 - **CCE-56**: This guide.
 - **CCE-57, CCE-58**: Onboarding the next two hosts (exercises this guide; surfaces gaps).
 - **CCE-59**: Remove `pull_request paths:` filter on the actionlint workflow so it runs on every PR (unblocks the required-check + path-filter footgun).
+- **CCE-60**: Move the CCE-56 setup guide from `docs/setup-guide.md` into the mkdocs `docs_dir` (`docs/site-src/`) so it is actually published.
+- **CCE-66**: Migrate the nightly CI workflow from deprecated `app-id` to `client-id` on `actions/create-github-app-token@v3`; reclassify `JIRA_EMAIL` from Repository Secret to Repository Variable (non-sensitive, improves debuggability).

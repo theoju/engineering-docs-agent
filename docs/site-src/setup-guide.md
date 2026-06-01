@@ -59,7 +59,7 @@ You register the App once. You then install it on each host repo individually (P
 8. **Where can this App be installed?**: Only on this account.
 9. Click **Create GitHub App**.
 10. On the App's General page, scroll to **Private keys** → click **Generate a private key**. A `.pem` file downloads. Keep it safe.
-11. Note the **App ID** at the top of the General page. You'll need it as `DOCS_AGENT_APP_ID` in each host.
+11. Note the **Client ID** at the top of the General page (format: `Iv1.xxxxxxxxxxxxxxxx`). You'll need it as the `DOCS_AGENT_APP_CLIENT_ID` repo Variable in each host. The numeric App ID is no longer used — `actions/create-github-app-token@v3` authenticates via the Client ID.
 
 ### 1.3 (Optional) Atlassian API token
 
@@ -67,7 +67,7 @@ Skip if you don't use Jira. If you do, the source-collector subagent enriches PR
 
 1. Open https://id.atlassian.com/manage-profile/security/api-tokens
 2. Click **Create API token** and name it `engineering-docs-agent`.
-3. Copy the token. You'll paste it into each host as `JIRA_API_TOKEN`. Your account email goes in `JIRA_EMAIL`.
+3. Copy the token. You'll paste it into each host as the `JIRA_API_TOKEN` Secret. Your account email goes in the `JIRA_EMAIL` repo Variable (Variable, not Secret — emails are not sensitive and Variables show up plainly in logs for debugging).
 
 ## Part 2 — Per-host setup
 
@@ -121,21 +121,28 @@ This is the per-repo install of the App you registered in Part 1.2.
 5. Click **Install**.
 6. Verify: https://github.com/<owner>/<repo>/settings/installations should show your App.
 
-You don't need to copy the installation ID — `actions/create-github-app-token@v3` derives it at runtime from the App ID, private key, and repo name.
+You don't need to copy the installation ID — `actions/create-github-app-token@v3` derives it at runtime from the App Client ID (`Iv1.xxx`), private key, and repo name.
 
-### 2.4 Configure repo secrets
+### 2.4 Configure repo secrets and variables
 
-Open the host repo's **Settings → Secrets and variables → Actions → New repository secret** and add each of the following:
+Open the host repo's **Settings → Secrets and variables → Actions**. You'll add some entries on the **Secrets** tab and others on the **Variables** tab — sensitive values (tokens, private keys) go in Secrets; non-sensitive identifiers (Client IDs, emails) go in Variables so they're visible in workflow logs for easier debugging.
 
-| Secret                                      | What it is                                                                                                              | Where to get it        | Required?                   |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------- | --------------------------- |
-| `CLAUDE_CODE_OAUTH_TOKEN`                   | The Claude CLI OAuth token (starts with `sk-ant-oat`)                                                                   | Part 1.1               | **Yes**                     |
-| `DOCS_AGENT_APP_ID`                         | The GitHub App's numeric App ID                                                                                         | Part 1.2 step 11       | **Yes**                     |
-| `DOCS_AGENT_APP_PRIVATE_KEY`                | The contents of the `.pem` file downloaded in Part 1.2 step 10 (entire file, including the `-----BEGIN/END-----` lines) | Part 1.2 step 10       | **Yes**                     |
-| `JIRA_API_TOKEN`                            | Atlassian Cloud API token                                                                                               | Part 1.3               | Only if Jira enrichment     |
-| `JIRA_EMAIL`                                | The email associated with the Jira token                                                                                | Your Atlassian account | Only if Jira enrichment     |
-| `SLACK_WEBHOOK_URL`                         | Slack incoming-webhook URL                                                                                              | Your Slack workspace   | Only if Slack notifications |
-| `SMTP_SERVER`, `SMTP_USER`, `SMTP_PASSWORD` | SMTP creds                                                                                                              | Your email provider    | Only if email notifications |
+**Secrets** (Settings → Secrets and variables → Actions → **Secrets** tab → New repository secret):
+
+| Secret                                      | What it is                                                                                                              | Where to get it      | Required?                   |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN`                   | The Claude CLI OAuth token (starts with `sk-ant-oat`)                                                                   | Part 1.1             | **Yes**                     |
+| `DOCS_AGENT_APP_PRIVATE_KEY`                | The contents of the `.pem` file downloaded in Part 1.2 step 10 (entire file, including the `-----BEGIN/END-----` lines) | Part 1.2 step 10     | **Yes**                     |
+| `JIRA_API_TOKEN`                            | Atlassian Cloud API token                                                                                               | Part 1.3             | Only if Jira enrichment     |
+| `SLACK_WEBHOOK_URL`                         | Slack incoming-webhook URL                                                                                              | Your Slack workspace | Only if Slack notifications |
+| `SMTP_SERVER`, `SMTP_USER`, `SMTP_PASSWORD` | SMTP creds                                                                                                              | Your email provider  | Only if email notifications |
+
+**Variables** (Settings → Secrets and variables → Actions → **Variables** tab → New repository variable):
+
+| Variable                   | What it is                                                        | Where to get it        | Required?               |
+| -------------------------- | ----------------------------------------------------------------- | ---------------------- | ----------------------- |
+| `DOCS_AGENT_APP_CLIENT_ID` | The GitHub App's OAuth Client ID (format: `Iv1.xxxxxxxxxxxxxxxx`) | Part 1.2 step 11       | **Yes**                 |
+| `JIRA_EMAIL`               | The email associated with the Jira token                          | Your Atlassian account | Only if Jira enrichment |
 
 Without `JIRA_API_TOKEN` + `JIRA_EMAIL`, the source-collector skips Jira enrichment cleanly and the run is marked partial with `source_collector_error: jira_auth_missing`. The PR still opens — partial-mode is the operational-visibility surface, not a hard failure.
 
@@ -290,7 +297,7 @@ Set `JIRA_API_TOKEN` + `JIRA_EMAIL` (Part 2.4) and enable `sources.jira.enabled:
 
 Root cause: the workflow is using the default `GITHUB_TOKEN` for `git push` / `gh pr create`. Default `GITHUB_TOKEN` suppresses both `pull_request` and `push` event triggers on commits it makes (documented loop-prevention).
 
-**Fix:** wire the GitHub App token through (CCE-45). The workflow's first step should mint the token via `actions/create-github-app-token@v3`, and the checkout step's `token:` input + the orchestrator step's `GH_TOKEN` env should both reference `${{ steps.app-token.outputs.token }}`. See the dogfood workflow at `.github/workflows/docs-agent-nightly.yml` for a working example.
+**Fix:** wire the GitHub App token through (CCE-45). The workflow's first step should mint the token via `actions/create-github-app-token@v3`, and the checkout step's `token:` input + the orchestrator step's `GH_TOKEN` env should both reference `${{ steps.app-token.outputs.token }}`. See the dogfood workflow at `.github/workflows/docs-agent-nightly.yml` for a working example. The canonical example uses `client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}` (Variable, not Secret) — the Client ID is non-sensitive and lives in repo Variables.
 
 ### Symptom: workflow_dispatch returns HTTP 422 "Unrecognized named-value"
 
@@ -339,8 +346,8 @@ For a fresh host repo:
 - [ ] `claude /engineering-docs-agent-setup`
 - [ ] Commit `.engineering-docs-agent/` + `.github/workflows/docs-agent-nightly.yml`.
 - [ ] Install the GitHub App on this repo (Part 2.3).
-- [ ] Set secrets: `CLAUDE_CODE_OAUTH_TOKEN`, `DOCS_AGENT_APP_ID`, `DOCS_AGENT_APP_PRIVATE_KEY`.
-- [ ] (Optional) Set `JIRA_API_TOKEN`, `JIRA_EMAIL` for Jira enrichment.
+- [ ] Set secrets: `CLAUDE_CODE_OAUTH_TOKEN`, `DOCS_AGENT_APP_PRIVATE_KEY`. Set variables: `DOCS_AGENT_APP_CLIENT_ID`.
+- [ ] (Optional) Set secret `JIRA_API_TOKEN` and variable `JIRA_EMAIL` for Jira enrichment.
 - [ ] (Optional) Set `SLACK_WEBHOOK_URL` / SMTP for notifications.
 - [ ] Configure branch protection: pytest checks + actionlint (Part 2.5).
 - [ ] (Recommended) Add `.github/workflows/actionlint.yml` (Part 5).

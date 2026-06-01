@@ -102,7 +102,7 @@ Expected: returns the App installation JSON (not 404).
 
 ```bash
 gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo theoju/advanced-data-import-system   # paste the sk-ant-oat token
-gh secret set DOCS_AGENT_APP_ID       --repo theoju/advanced-data-import-system   # paste the numeric App ID
+gh variable set DOCS_AGENT_APP_CLIENT_ID --repo theoju/advanced-data-import-system   # paste the OAuth Client ID (Iv1.xxx format)
 gh secret set DOCS_AGENT_APP_PRIVATE_KEY --repo theoju/advanced-data-import-system < /path/to/app-key.pem
 ```
 
@@ -110,7 +110,7 @@ If you flipped `sources.jira.enabled: true`:
 
 ```bash
 gh secret set JIRA_API_TOKEN --repo theoju/advanced-data-import-system
-gh secret set JIRA_EMAIL     --repo theoju/advanced-data-import-system
+gh variable set JIRA_EMAIL   --repo theoju/advanced-data-import-system
 ```
 
 ### Branch protection (Part 2.5)

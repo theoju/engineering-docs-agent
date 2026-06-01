@@ -78,3 +78,42 @@ def test_unpaired_fence_detected(tmp_path):
     assert out["rule"] == "markdown_hygiene_structure"
     assert out["severity"] == "block"
     assert "unpaired" in out["results"][0]["message"].lower()
+
+
+def test_fenced_yaml_comment_does_not_trigger_hierarchy_jump(tmp_path):
+    """CCE-68: a `# ` comment inside a fenced code block must not be
+    counted as a heading. The bootstrap-style pattern is real h1 → h2 →
+    fenced YAML with `# comment` → real h3. Without fence-aware scanning,
+    the YAML comment counts as h1 and the real h3 reads as an h1→h3 jump."""
+    p = tmp_path / "fenced.md"
+    p.write_text(
+        "# Real H1\n\nintro prose\n\n## Real H2\n\nconfig example:\n\n"
+        "```yaml\n"
+        "# lens and page mappings (this is a YAML comment, not a heading)\n"
+        "key: value\n"
+        "```\n\n"
+        "### Real H3\n"
+    )
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("{}")
+    rc, out = _run([p], cfg)
+    assert rc == 0, f"fence-aware scanning should not flag this; got {out}"
+    assert out["results"][0]["ok"] is True
+
+
+def test_heading_inside_fenced_block_is_ignored(tmp_path):
+    """CCE-68 (variant): a literal `#` heading line inside a fenced markdown
+    example must not contribute to hierarchy tracking. Demonstrative
+    snippets are valid. Here a `# Document title` example inside a fenced
+    block resets prev_level to h1, making the subsequent real h3 look like
+    an h1→h3 jump."""
+    p = tmp_path / "fenced-heading.md"
+    p.write_text(
+        "# Real H1\n\n## Real H2\n\nAn example markdown document:\n\n"
+        "```markdown\n# Document title\nSome content\n```\n\n"
+        "### Real H3\n"
+    )
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("{}")
+    rc, out = _run([p], cfg)
+    assert rc == 0

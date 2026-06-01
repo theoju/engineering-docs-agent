@@ -79,12 +79,31 @@ def secrets_from_workflow(workflow_text: str) -> list[dict]:
     found = sorted(set(re.findall(r"secrets\.([A-Z_]+)", workflow_text)))
     required = {
         "CLAUDE_CODE_OAUTH_TOKEN",
-        "DOCS_AGENT_APP_ID",
         "DOCS_AGENT_APP_PRIVATE_KEY",
     }
     found = [n for n in found if n != "GITHUB_TOKEN"]
     # Ensure the three blocking secrets are always present even if the
     # shipped template happens to omit one (defense-in-depth for the runbook).
+    for n in sorted(required):
+        if n not in found:
+            found.append(n)
+    return [{"name": n, "required": n in required} for n in sorted(set(found))]
+
+
+def variables_from_workflow(workflow_text: str) -> list[dict]:
+    """Return required + discovered repo Variables for the host.
+
+    Variables are independent of Secrets (no shared namespace). CCE-66
+    introduced two required variables: DOCS_AGENT_APP_CLIENT_ID (the
+    OAuth Client ID for the GitHub App, format Iv1.xxx) and JIRA_EMAIL
+    (the basic-auth username for Atlassian — a public identifier, not
+    a credential).
+    """
+    found = sorted(set(re.findall(r"vars\.([A-Z_]+)", workflow_text)))
+    required = {
+        "DOCS_AGENT_APP_CLIENT_ID",
+        "JIRA_EMAIL",
+    }
     for n in sorted(required):
         if n not in found:
             found.append(n)
@@ -163,6 +182,14 @@ def render_text(report: dict) -> str:
         marker = "[required]" if s["required"] else "[optional]"
         lines.append(f"  [ ] {s['name']} {marker}")
     lines.append("")
+    lines.append(
+        "Variables checklist (set in repo Settings -> Secrets and variables -> Actions -> Variables)"
+    )
+    lines.append("-" * 60)
+    for v in report["variables_checklist"]:
+        marker = "[required]" if v["required"] else "[optional]"
+        lines.append(f"  [ ] {v['name']} {marker}")
+    lines.append("")
     if report["warnings"]:
         lines.append("Warnings")
         lines.append("-" * 60)
@@ -183,6 +210,7 @@ def build_report(repo_root: Path) -> dict:
         "discovery": discovery,
         "proposed_config": proposed_config(discovery),
         "secrets_checklist": secrets_from_workflow(workflow_text),
+        "variables_checklist": variables_from_workflow(workflow_text),
         "warnings": compute_warnings(discovery),
     }
 

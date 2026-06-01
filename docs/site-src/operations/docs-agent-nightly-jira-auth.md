@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/68
+  - https://github.com/theoju/engineering-docs-agent/pull/91
 synthesized_into: []
 ---
 
@@ -34,9 +35,21 @@ When `JIRA_EMAIL` or `JIRA_API_TOKEN` is absent, the source-collector returns `j
 
 Partial mode is an operational-visibility signal. It is intended for transient failures — a run that partially succeeded because a downstream service was briefly unavailable. If it fires on every run, the signal loses its value. A permanently missing Jira credential is exactly this failure mode: the docs-PR is opened with a `partial: true` banner that never clears.
 
+## Preflight check: Variables checklist
+
+The preflight helper (`scripts/preflight.py`) gained a `variables_from_workflow` function in PR 91 that reads your workflow files and reports which Repository Variables the workflow references. It emits a **Variables** checklist section alongside the existing Secrets section.
+
+Run it before your first nightly to confirm `JIRA_EMAIL` is detected:
+
+```bash
+python3 scripts/preflight.py --config .engineering-docs-agent/config.yml
+```
+
+The output will list `JIRA_EMAIL` under **Variables** and flag it as missing if the variable has not been set in **Settings → Secrets and variables → Actions → Variables**. A CI guard test (`tests/test_workflow_input_drift.py`) ensures the workflow files and templates stay in sync — if you add a new `vars.*` reference, the preflight report will catch it automatically.
+
 ## Verifying the fix
 
-After adding the secrets, trigger a manual run:
+After adding the credentials, trigger a manual run:
 
 ```bash
 gh workflow run docs-agent-nightly.yml -f reason="verify jira auth"

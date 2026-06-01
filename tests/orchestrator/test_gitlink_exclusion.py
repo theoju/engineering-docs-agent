@@ -240,3 +240,69 @@ def test_stage_docs_run_changes_preserves_pre_tracked_plugin_content(
     assert ".docs-agent-plugin/legacy.txt" not in staged_deletions, (
         f"pre-existing tracked content must NOT be staged for deletion; got staged deletions {staged_deletions}"
     )
+
+
+def test_stage_docs_run_changes_drops_midrun_modifications_to_tracked_plugin_content(
+    tmp_path: Path,
+) -> None:
+    """CCE-75 polish: mid-run modifications to tracked content under
+    `.docs-agent-plugin/` are dropped from the docs commit.
+
+    The helper's `restore --staged` step is gated on whether ANY
+    `.docs-agent-plugin/*` entry made it into the index. When a host
+    has pre-tracked content there AND it's been modified during the
+    run (orchestrator bug, careless subagent write, whatever), the
+    modification gets staged by `git add -A .`, the diff probe finds
+    it, and the restore step reverts the index entry to HEAD. Net
+    effect: the modification is silently not committed. Docs runs
+    should never mutate the plugin tree on the runner, so this is
+    correct — but pinning it prevents future refactors from silently
+    regressing it.
+    """
+    _init_git_repo(tmp_path)
+    plugin = tmp_path / ".docs-agent-plugin"
+    plugin.mkdir()
+    (plugin / "tracked.txt").write_text("baseline content\n")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", ".docs-agent-plugin"], check=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "commit",
+            "-q",
+            "-m",
+            "pre-tracked plugin content",
+        ],
+        check=True,
+    )
+
+    (plugin / "tracked.txt").write_text("MUTATED MID-RUN\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "page.md").write_text("# authored page\n")
+
+    rc, stderr = orun._stage_docs_run_changes(tmp_path)
+    assert rc == 0, f"staging failed: rc={rc}, stderr={stderr!r}"
+
+    staged_diff = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--cached", "--", ".docs-agent-plugin"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "MUTATED MID-RUN" not in staged_diff, (
+        f"mid-run modification to tracked plugin content must NOT be staged; "
+        f"got staged diff: {staged_diff!r}"
+    )
+
+    staged_files = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--cached", "--name-only"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    assert "docs/page.md" in staged_files, (
+        f"authored docs page must be staged; got {staged_files}"
+    )

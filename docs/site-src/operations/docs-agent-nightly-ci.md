@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/66
+  - https://github.com/theoju/engineering-docs-agent/pull/91
 synthesized_into: []
 ---
 
@@ -13,14 +14,24 @@ The nightly authoring pipeline runs automatically at 07:07 UTC via `.github/work
 
 The default `GITHUB_TOKEN` GitHub injects into every workflow run is subject to a loop-prevention rule: any commit or PR it authors suppresses both `pull_request` and `push` event triggers. That means every PR the docs-agent opens would sit inert — your pytest and diagram-gate workflows never fire, and you'd need a manual empty-commit push to wake them up.
 
-The workflow mints a GitHub App installation token instead (`actions/create-github-app-token@v3`, step id `app-token`). App-installation tokens are exempt from the suppression rule, so CI fires normally on docs-agent PRs.
+The workflow mints a GitHub App installation token instead (`actions/create-github-app-token@v3`, step id `app-token`). The action's `client-id:` input replaced the deprecated `app-id:` parameter — the workflow YAML uses `client-id:` and the old spelling is no longer accepted. App-installation tokens are exempt from the suppression rule, so CI fires normally on docs-agent PRs.
 
-Two credentials back this up — one Variable, one Secret:
+Three credentials back the workflow — two Variables, one Secret.
 
-| Name                         | Tier     | Purpose                                                                                                                                                    |
-| ---------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DOCS_AGENT_APP_CLIENT_ID`   | Variable | OAuth Client ID for `docs-agent-bot` (e.g. `Iv1.xxx` or `Iv23li...` depending on App age). Non-sensitive — set via `gh variable set` or the Variables tab. |
-| `DOCS_AGENT_APP_PRIVATE_KEY` | Secret   | PEM private key for the same App. Sensitive — set via `gh secret set` or the Secrets tab.                                                                  |
+**Repository Variables**
+
+| Name                       | Purpose                                                                                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DOCS_AGENT_APP_CLIENT_ID` | OAuth Client ID for `docs-agent-bot` (`Iv1.x…` format for older Apps, `Iv23li…` for newer Apps). Non-sensitive — set via `gh variable set` or the Variables tab. |
+| `JIRA_EMAIL`               | Atlassian account email used for Jira API basic-auth. Non-sensitive (already visible in Jira comments and git commit authors) — set via `gh variable set`.    |
+
+**Repository Secrets**
+
+| Name                         | Purpose                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------- |
+| `DOCS_AGENT_APP_PRIVATE_KEY` | PEM private key for `docs-agent-bot`. Sensitive — set via `gh secret set` or the Secrets tab.    |
+
+> **Migrating from the old layout?** If `JIRA_EMAIL` currently lives in your Repository Secrets, move it: delete the secret and re-add it as a Repository Variable. Keeping it in Secrets works at runtime but is the wrong security tier — it is a basic-auth username, not a credential.
 
 The App is installed on this repo only and carries `contents:write` and `pull-requests:write` scopes, matching the workflow's `permissions:` block.
 

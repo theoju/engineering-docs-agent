@@ -1,3 +1,12 @@
+---
+status: current
+sources:
+  - https://github.com/theoju/engineering-docs-agent/pull/77
+  - https://github.com/theoju/engineering-docs-agent/pull/79
+  - https://github.com/theoju/engineering-docs-agent/pull/91
+synthesized_into: []
+---
+
 # Setup Guide
 
 End-to-end walkthrough: from zero to a working `engineering-docs-agent` nightly docs-PR pipeline on a new host repo.
@@ -336,7 +345,7 @@ For a fresh host repo:
 - [ ] Run `claude setup-token`, copy the OAuth token.
 - [ ] Register the GitHub App (Part 1.2).
 - [ ] Download the App's private key (`.pem` file).
-- [ ] Note the App ID.
+- [ ] Note the App's Client ID (Part 1.2 step 11). The numeric App ID is no longer used.
 - [ ] (Optional) Generate an Atlassian API token.
 
 **Per host (Part 2 + Part 5):**
@@ -371,6 +380,8 @@ Key tickets that shaped this guide:
 - **CCE-53**: Jira credentials wired into the runner env.
 - **CCE-54**: Node-20 → Node-24 actions bump.
 - **CCE-55**: Strip benign markdown code-fence wraps before strict JSON parse (silences the most common partial-banner class).
-- **CCE-56**: This guide.
+- **CCE-56**: This guide (comprehensive rewrite).
 - **CCE-57, CCE-58**: Onboarding the next two hosts (exercises this guide; surfaces gaps).
 - **CCE-59**: Remove `pull_request paths:` filter on the actionlint workflow so it runs on every PR (unblocks the required-check + path-filter footgun).
+- **CCE-60**: Promoted the comprehensive guide from the unpublished repo-root path to `docs/site-src/setup-guide.md` so it appears on the GitHub Pages site.
+- **CCE-66**: Migrated `actions/create-github-app-token@v3` from the deprecated `app-id` input to `client-id`; reclassified `JIRA_EMAIL` from Repository Secret to Repository Variable (it is a basic-auth username, not a credential). The workflow's `preflight_host.py` helper gained a `variables_checklist` field to generate correct mixed-tier (Secrets vs Variables) onboarding guidance.

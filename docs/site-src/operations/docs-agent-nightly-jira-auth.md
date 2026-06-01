@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/68
+  - https://github.com/theoju/engineering-docs-agent/pull/91
 synthesized_into: []
 ---
 
@@ -11,12 +12,21 @@ The nightly docs-agent workflow authenticates to Jira using two repo credentials
 
 ## Required credentials
 
-Set both of the following in your repository's **Settings → Secrets and variables → Actions**. The API token is sensitive and goes in the Secrets tab; the email is non-sensitive (it's already visible in commit metadata anywhere it matters) and goes in the Variables tab so it shows up plainly in workflow logs.
+Set the following in your repository's **Settings → Secrets and variables → Actions**, using the correct tab for each tier.
 
-| Name             | Tier     | Value                                                                                                                                             |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `JIRA_API_TOKEN` | Secret   | Atlassian Cloud API token from [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) |
-| `JIRA_EMAIL`     | Variable | The email address associated with your Atlassian account                                                                                          |
+### Repository Secrets
+
+| Name             | Value                                                                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JIRA_API_TOKEN` | Atlassian Cloud API token from [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) |
+
+### Repository Variables
+
+| Name         | Value                                                    |
+| ------------ | -------------------------------------------------------- |
+| `JIRA_EMAIL` | The email address associated with your Atlassian account |
+
+`JIRA_EMAIL` is a non-sensitive basic-auth username — it's already visible in Jira comments and git commit authors. Storing it as a Variable (not a Secret) makes it visible in workflow logs and avoids misleading operators about its sensitivity tier.
 
 The workflow exposes them to the runner process:
 

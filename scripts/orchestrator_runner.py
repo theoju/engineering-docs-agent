@@ -1767,7 +1767,23 @@ def _stage_docs_run_changes(repo_root: Path) -> tuple[int, str]:
     entries: naming a path in a pathspec promotes it to "explicitly
     mentioned", which triggers git's gitignore-aware safety check —
     failing with `paths are ignored by one of your .gitignore files`.
+
+    Mid-run modifications to tracked content under `.docs-agent-plugin/`
+    are dropped from the docs commit: `git add -A .` stages them, the
+    diff probe then sees the staged change under `.docs-agent-plugin/`
+    and TRIGGERS the `git restore --staged --` step (which is gated on
+    the probe finding anything — not unconditional), and the restore
+    reverts the index entry back to HEAD. Docs runs should never mutate
+    the plugin tree on the runner, so this is correct — but it does
+    mean an orchestrator bug that touched plugin files would fail
+    silently in the docs PR. (Pinned by tests in
+    `tests/orchestrator/test_gitlink_exclusion.py`.)
     """
+    # The three git operations below all assume `.docs-agent-plugin/`
+    # is a real directory (per actions/checkout@v5), not a symlink.
+    # A symlink would change pathspec semantics for add/diff/restore
+    # alike: `add -A .` would recurse into the target, and the diff
+    # probe + restore would match the link rather than its contents.
     add = subprocess.run(
         ["git", "-C", str(repo_root), "add", "-A", "."],
         capture_output=True,

@@ -240,3 +240,179 @@ def test_stage_docs_run_changes_preserves_pre_tracked_plugin_content(
     assert ".docs-agent-plugin/legacy.txt" not in staged_deletions, (
         f"pre-existing tracked content must NOT be staged for deletion; got staged deletions {staged_deletions}"
     )
+
+
+def test_stage_docs_run_changes_drops_midrun_modifications_to_tracked_plugin_content(
+    tmp_path: Path,
+) -> None:
+    """CCE-75 polish: mid-run modifications to tracked content under
+    `.docs-agent-plugin/` are dropped from the docs commit.
+
+    The helper's `restore --staged` step is gated on whether ANY
+    `.docs-agent-plugin/*` entry made it into the index. When a host
+    has pre-tracked content there AND it's been modified during the
+    run (orchestrator bug, careless subagent write, whatever), the
+    modification gets staged by `git add -A .`, the diff probe finds
+    it, and the restore step reverts the index entry to HEAD. Net
+    effect: the modification is silently not committed. Docs runs
+    should never mutate the plugin tree on the runner, so this is
+    correct — but pinning it prevents future refactors from silently
+    regressing it.
+    """
+    _init_git_repo(tmp_path)
+    plugin = tmp_path / ".docs-agent-plugin"
+    plugin.mkdir()
+    (plugin / "tracked.txt").write_text("baseline content\n")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", ".docs-agent-plugin"], check=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "commit",
+            "-q",
+            "-m",
+            "pre-tracked plugin content",
+        ],
+        check=True,
+    )
+
+    (plugin / "tracked.txt").write_text("MUTATED MID-RUN\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "page.md").write_text("# authored page\n")
+
+    rc, stderr = orun._stage_docs_run_changes(tmp_path)
+    assert rc == 0, f"staging failed: rc={rc}, stderr={stderr!r}"
+
+    staged_diff = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--cached", "--", ".docs-agent-plugin"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "MUTATED MID-RUN" not in staged_diff, (
+        f"mid-run modification to tracked plugin content must NOT be staged; "
+        f"got staged diff: {staged_diff!r}"
+    )
+
+    staged_files = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--cached", "--name-only"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    assert "docs/page.md" in staged_files, (
+        f"authored docs page must be staged; got {staged_files}"
+    )
+
+
+def test_stage_docs_run_changes_bare_pathspec_does_not_overselect_siblings(
+    tmp_path: Path,
+) -> None:
+    """CCE-75 polish: bare pathspec `-- .docs-agent-plugin` matches the
+    gitlink entry itself AND under-directory entries — but NOT siblings
+    like `.docs-agent-plugin-notes.md` that share a common string prefix.
+
+    Git pathspec rule: a literal pathspec matches if the path equals
+    the spec OR begins with `<spec>/`. So `.docs-agent-plugin` matches
+      - `.docs-agent-plugin` (the gitlink — exact match)
+      - `.docs-agent-plugin/foo` (under-directory — prefix-followed-by-slash)
+    but NOT `.docs-agent-plugin-notes.md` (no trailing slash before `-`).
+
+    Why this test exists: a validator panel suggested "tightening" the
+    diff probe to `:(glob).docs-agent-plugin/**` on the assumption that
+    the bare form over-selects siblings. Empirical verification proved
+    otherwise. A `:(glob)/**` rewrite would actively REGRESS the helper
+    because production gitlink entries sit at `.docs-agent-plugin` with
+    NO trailing slash and would not match `<path>/**`. This test pins
+    the correct behavior so a future "tightening" attempt is caught at
+    test time, not in production:
+
+    (a) Direct pathspec assertion against an injected gitlink (via
+        `git update-index --cacheinfo`, which mirrors production's
+        actions/checkout layout) — proves bare pathspec matches the
+        gitlink, which a `:(glob)/**` rewrite would NOT.
+    (b) Direct pathspec assertion against a sibling — proves bare form
+        does NOT prefix-match across path boundaries.
+    """
+    _init_git_repo(tmp_path)
+
+    (tmp_path / ".docs-agent-plugin-notes.md").write_text(
+        "# notes about the docs-agent plugin\n"
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", ".docs-agent-plugin-notes.md"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    # Inject a gitlink at `.docs-agent-plugin`. cacheinfo format:
+    # `<mode>,<sha>,<path>` where 160000 is the gitlink mode. Git
+    # validates the SHA against its object database (all-zeros is
+    # rejected as a null entry), so reuse the repo's own initial
+    # commit SHA — any real object SHA is accepted for a gitlink and
+    # the pathspec layer doesn't follow the target.
+    head_sha = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{head_sha},.docs-agent-plugin",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    all_staged = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--cached", "--name-only"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    assert ".docs-agent-plugin" in all_staged, (
+        f"setup error: gitlink injection failed; got staged: {all_staged}"
+    )
+    assert ".docs-agent-plugin-notes.md" in all_staged, (
+        f"setup error: sibling not staged; got staged: {all_staged}"
+    )
+
+    bare_match = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "diff",
+            "--cached",
+            "--name-only",
+            "--",
+            ".docs-agent-plugin",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+
+    assert ".docs-agent-plugin" in bare_match, (
+        f"bare pathspec MUST match the gitlink entry `.docs-agent-plugin`; "
+        f"got: {bare_match}. A `:(glob).docs-agent-plugin/**` rewrite would "
+        f"fail this — the gitlink has no trailing slash so `/**` would not "
+        f"match it, breaking CCE-70 coverage in production."
+    )
+    assert ".docs-agent-plugin-notes.md" not in bare_match, (
+        f"bare pathspec MUST NOT prefix-match `.docs-agent-plugin-notes.md`; "
+        f"git pathspec requires exact-match or prefix-followed-by-slash. "
+        f"got: {bare_match}"
+    )

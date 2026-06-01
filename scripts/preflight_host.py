@@ -186,9 +186,9 @@ def render_text(report: dict) -> str:
         "Variables checklist (set in repo Settings -> Secrets and variables -> Actions -> Variables)"
     )
     lines.append("-" * 60)
-    for v in report["variables_checklist"]:
-        marker = "[required]" if v["required"] else "[optional]"
-        lines.append(f"  [ ] {v['name']} {marker}")
+    for var in report["variables_checklist"]:
+        marker = "[required]" if var["required"] else "[optional]"
+        lines.append(f"  [ ] {var['name']} {marker}")
     lines.append("")
     if report["warnings"]:
         lines.append("Warnings")

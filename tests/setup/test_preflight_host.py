@@ -28,16 +28,29 @@ def test_preflight_json_mode_on_js_docusaurus():
         "discovery",
         "proposed_config",
         "secrets_checklist",
+        "variables_checklist",
         "warnings",
     }
     assert out["discovery"]["framework"] == "docusaurus"
     assert out["discovery"]["toolchain"]["docusaurus_dep"] is True
     names = {s["name"] for s in out["secrets_checklist"]}
+    # CCE-66: DOCS_AGENT_APP_ID is migrated out; CLAUDE_CODE_OAUTH_TOKEN
+    # and DOCS_AGENT_APP_PRIVATE_KEY remain secrets.
     assert {
         "CLAUDE_CODE_OAUTH_TOKEN",
-        "DOCS_AGENT_APP_ID",
         "DOCS_AGENT_APP_PRIVATE_KEY",
     } <= names
+    assert "DOCS_AGENT_APP_ID" not in names, (
+        "CCE-66: DOCS_AGENT_APP_ID should no longer appear in secrets_checklist"
+    )
+
+    # CCE-66: new variables_checklist surfaces the required vars
+    # (client-id, JIRA_EMAIL) so onboarding operators get correct guidance.
+    var_names = {v["name"] for v in out["variables_checklist"]}
+    assert {
+        "DOCS_AGENT_APP_CLIENT_ID",
+        "JIRA_EMAIL",
+    } <= var_names
 
 
 def test_preflight_text_mode_on_bare_repo():
@@ -57,6 +70,7 @@ def test_preflight_text_mode_on_bare_repo():
     text = r.stdout
     assert "Discovery" in text
     assert "Secrets checklist" in text
+    assert "Variables checklist" in text  # CCE-66: parallel block to Secrets
     assert "framework: None" in text
 
 

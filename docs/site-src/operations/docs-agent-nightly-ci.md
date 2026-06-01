@@ -15,12 +15,12 @@ The default `GITHUB_TOKEN` GitHub injects into every workflow run is subject to 
 
 The workflow mints a GitHub App installation token instead (`actions/create-github-app-token@v3`, step id `app-token`). App-installation tokens are exempt from the suppression rule, so CI fires normally on docs-agent PRs.
 
-Two secrets back this up:
+Two credentials back this up — one Variable, one Secret:
 
-| Secret | Purpose |
-|---|---|
-| `DOCS_AGENT_APP_ID` | Numeric GitHub App ID for `docs-agent-bot` |
-| `DOCS_AGENT_APP_PRIVATE_KEY` | PEM private key for the same App |
+| Name                         | Tier     | Purpose                                                                                                                                                    |
+| ---------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DOCS_AGENT_APP_CLIENT_ID`   | Variable | OAuth Client ID for `docs-agent-bot` (e.g. `Iv1.xxx` or `Iv23li...` depending on App age). Non-sensitive — set via `gh variable set` or the Variables tab. |
+| `DOCS_AGENT_APP_PRIVATE_KEY` | Secret   | PEM private key for the same App. Sensitive — set via `gh secret set` or the Secrets tab.                                                                  |
 
 The App is installed on this repo only and carries `contents:write` and `pull-requests:write` scopes, matching the workflow's `permissions:` block.
 
@@ -34,7 +34,7 @@ The correct placement is on the "Run nightly authoring" step:
 # .github/workflows/docs-agent-nightly.yml
 - name: Run nightly authoring
   env:
-    GH_TOKEN: ${{ steps.app-token.outputs.token }}  # step-level: valid
+    GH_TOKEN: ${{ steps.app-token.outputs.token }} # step-level: valid
   run: python3 scripts/orchestrator_runner.py --repo-root "$GITHUB_WORKSPACE"
 ```
 

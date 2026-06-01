@@ -7,30 +7,30 @@ synthesized_into: []
 
 # Nightly workflow: Jira authentication
 
-The nightly docs-agent workflow authenticates to Jira using two repo secrets forwarded as job-level environment variables in `.github/workflows/docs-agent-nightly.yml`. Without them, every run operates in partial mode.
+The nightly docs-agent workflow authenticates to Jira using two repo credentials — one Secret, one Variable — forwarded as job-level environment variables in `.github/workflows/docs-agent-nightly.yml`. Without them, every run operates in partial mode.
 
-## Required secrets
+## Required credentials
 
-Set both of the following in your repository's **Settings → Secrets and variables → Actions**:
+Set both of the following in your repository's **Settings → Secrets and variables → Actions**. The API token is sensitive and goes in the Secrets tab; the email is non-sensitive (it's already visible in commit metadata anywhere it matters) and goes in the Variables tab so it shows up plainly in workflow logs.
 
-| Secret | Value |
-|---|---|
-| `JIRA_API_TOKEN` | Atlassian Cloud API token from [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) |
-| `JIRA_EMAIL` | The email address associated with your Atlassian account |
+| Name             | Tier     | Value                                                                                                                                             |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JIRA_API_TOKEN` | Secret   | Atlassian Cloud API token from [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) |
+| `JIRA_EMAIL`     | Variable | The email address associated with your Atlassian account                                                                                          |
 
 The workflow exposes them to the runner process:
 
 ```yaml
 env:
   JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-  JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+  JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
 ```
 
 The orchestrator passes its full environment into each subagent subprocess, so both variables reach the source-collector without additional plumbing once they are in the job environment.
 
-## What happens when the secrets are missing
+## What happens when the credentials are missing
 
-When `JIRA_EMAIL` or `JIRA_API_TOKEN` is absent, the source-collector returns `jira_issues: []` and the run is marked `partial: true` with `error: "jira_auth_missing"` in `.engineering-docs-agent/state.json`. The `partial_reasons` list will include `jira_auth_missing` on every subsequent run until the secrets are configured.
+When `JIRA_EMAIL` or `JIRA_API_TOKEN` is absent, the source-collector returns `jira_issues: []` and the run is marked `partial: true` with `error: "jira_auth_missing"` in `.engineering-docs-agent/state.json`. The `partial_reasons` list will include `jira_auth_missing` on every subsequent run until the credentials are configured.
 
 Partial mode is an operational-visibility signal. It is intended for transient failures — a run that partially succeeded because a downstream service was briefly unavailable. If it fires on every run, the signal loses its value. A permanently missing Jira credential is exactly this failure mode: the docs-PR is opened with a `partial: true` banner that never clears.
 

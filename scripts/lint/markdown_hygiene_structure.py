@@ -36,8 +36,21 @@ def check_path(path: Path, config: dict[str, Any]) -> tuple[bool, str]:
     fences = list(FENCE_RE.finditer(text))
     if len(fences) % 2 != 0:
         problems.append(f"unpaired code fence (count={len(fences)})")
+    # CCE-68: pair fences greedily and mask headings inside them. A `#`
+    # line inside ```yaml``` (or any fenced block) is a code comment, not
+    # a Markdown heading. Without masking, false-positive hierarchy
+    # jumps fire on structurally-correct documents.
+    fenced_regions = [
+        (fences[i].start(), fences[i + 1].end()) for i in range(0, len(fences) - 1, 2)
+    ]
+
+    def _in_fence(offset: int) -> bool:
+        return any(start <= offset < end for start, end in fenced_regions)
+
     prev_level = 0
     for m in HEADING_RE.finditer(text):
+        if _in_fence(m.start()):
+            continue
         level = len(m.group(1))
         if prev_level and level > prev_level + 1:
             problems.append(f"heading hierarchy jumps from h{prev_level} to h{level}")

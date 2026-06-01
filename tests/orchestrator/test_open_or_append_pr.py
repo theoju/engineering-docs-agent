@@ -495,3 +495,317 @@ def test_clean_pr_body_unchanged(tmp_path: Path):
         )
 
     assert captured_body["body"] == "docs-agent run"
+
+
+# CCE-73: open_or_append_pr's failure paths captured subprocess stderr into
+# state.partial_reasons via reasons.append, but emitted ZERO bytes to
+# stdout/stderr. Combined with Python's block-buffered stdout-to-pipe under
+# GitHub Actions, a crash inside any failure branch produced a workflow log
+# of "##[error]Process completed with exit code 1" and nothing else. The
+# invariant: every reason recorded MUST also reach stderr alongside being
+# recorded, so post-mortems can grep the workflow log instead of fetching
+# state.json out-of-band.
+
+
+def test_checkout_failure_emits_reason_to_stderr(tmp_path: Path, capsys):
+    """When `git checkout -B branch ...` fails, the checkout_failed reason
+    must reach stderr (alongside being recorded in reasons)."""
+    gh = _make_gh_client_stub()
+
+    def _run(argv, **kwargs):
+        if "checkout" in argv and "-B" in argv:
+            return MagicMock(
+                returncode=1, stdout="", stderr="error: branch is dirty: aborting"
+            )
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch.object(orun.subprocess, "run", side_effect=_run):
+        pr_number, reasons = orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/test",
+            now_iso="2026-06-01T00:00:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+
+    assert pr_number is None
+    err = capsys.readouterr().err
+    assert "checkout_failed" in err, (
+        f"expected 'checkout_failed' in stderr; got: {err!r}"
+    )
+    assert "branch is dirty" in err, (
+        f"expected captured subprocess stderr substring in our stderr; got: {err!r}"
+    )
+
+
+def test_push_refs_failed_emits_reason_to_stderr(tmp_path: Path, capsys):
+    """When push fails AND remote does not have our commit, push_refs_failed
+    must reach stderr."""
+    gh = _make_gh_client_stub()
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_make_subprocess_stub(
+            push_rc=1,
+            push_stderr="fatal: remote rejected non-fast-forward",
+            lsremote_sha=None,
+        ),
+    ):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/test",
+            now_iso="2026-06-01T00:00:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+    err = capsys.readouterr().err
+    assert "push_refs_failed" in err, (
+        f"expected 'push_refs_failed' in stderr; got: {err!r}"
+    )
+
+
+def test_push_tracking_setup_failure_emits_info_only_reason_to_stderr(
+    tmp_path: Path, capsys
+):
+    """Info-only reasons must also reach stderr — operators still need them
+    visible in the workflow log even when they don't fail the run."""
+    gh = _make_gh_client_stub(pr_number=42)
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_make_subprocess_stub(
+            push_rc=1,
+            push_stderr="warning: failed to set up tracking; refs already pushed",
+            lsremote_sha="localsha",
+        ),
+    ):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/test",
+            now_iso="2026-06-01T00:00:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+    err = capsys.readouterr().err
+    assert "push_tracking_setup_failed" in err, (
+        f"expected 'push_tracking_setup_failed' in stderr; got: {err!r}"
+    )
+
+
+def test_gh_pr_list_failure_emits_reason_to_stderr(tmp_path: Path, capsys):
+    """When gh.pr_list_for_branch returns ok=False, the reason must reach
+    stderr."""
+    gh = MagicMock()
+    gh.pr_list_for_branch.return_value = MagicMock(
+        ok=False, error="rate limit exceeded"
+    )
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_make_subprocess_stub(
+            push_rc=0,
+            push_stderr="",
+            lsremote_sha="localsha",
+        ),
+    ):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/test",
+            now_iso="2026-06-01T00:00:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+    err = capsys.readouterr().err
+    assert "gh_pr_list_failed" in err, (
+        f"expected 'gh_pr_list_failed' in stderr; got: {err!r}"
+    )
+    assert "rate limit" in err, f"expected gh error in stderr; got: {err!r}"
+
+
+def test_gh_pr_create_failure_emits_reason_to_stderr(tmp_path: Path, capsys):
+    """When gh.pr_create returns ok=False, the reason must reach stderr."""
+    gh = MagicMock()
+    gh.pr_list_for_branch.return_value = MagicMock(ok=True, value=None)
+    gh.pr_create.return_value = MagicMock(
+        ok=False, error="HTTP 422: Validation Failed", value=None
+    )
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_make_subprocess_stub(
+            push_rc=0,
+            push_stderr="",
+            lsremote_sha="localsha",
+        ),
+    ):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/test",
+            now_iso="2026-06-01T00:00:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+    err = capsys.readouterr().err
+    assert "gh_pr_create_failed" in err, (
+        f"expected 'gh_pr_create_failed' in stderr; got: {err!r}"
+    )
+    assert "Validation Failed" in err, f"expected gh error in stderr; got: {err!r}"
+
+
+def test_git_add_failure_emits_reason_to_stderr(tmp_path: Path, capsys):
+    """When _stage_docs_run_changes fails, git_add_failed reason must reach
+    stderr — covers the second of 7 failure paths in open_or_append_pr."""
+    gh = _make_gh_client_stub()
+
+    def _run(argv, **kwargs):
+        if "add" in argv:
+            return MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="error: pathspec did not match any files",
+            )
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch.object(orun.subprocess, "run", side_effect=_run):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/test",
+            now_iso="2026-06-01T00:00:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+    err = capsys.readouterr().err
+    assert "git_add_failed" in err, f"expected 'git_add_failed' in stderr; got: {err!r}"
+
+
+def test_push_failed_unknown_rev_parse_emits_reason_to_stderr(tmp_path: Path, capsys):
+    """When push fails AND rev-parse also fails (cannot determine local HEAD),
+    push_failed_unknown reason must reach stderr."""
+    gh = _make_gh_client_stub()
+
+    def _run(argv, **kwargs):
+        if "push" in argv:
+            return MagicMock(returncode=1, stdout="", stderr="fatal: push failed")
+        if "rev-parse" in argv:
+            return MagicMock(returncode=1, stdout="", stderr="fatal: bad rev")
+        if "ls-remote" in argv:
+            return MagicMock(returncode=0, stdout="", stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch.object(orun.subprocess, "run", side_effect=_run):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/test",
+            now_iso="2026-06-01T00:00:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+    err = capsys.readouterr().err
+    assert "push_failed_unknown" in err, (
+        f"expected 'push_failed_unknown' in stderr; got: {err!r}"
+    )
+    assert "rev-parse failed" in err, (
+        f"expected 'rev-parse failed' detail in stderr; got: {err!r}"
+    )
+
+
+def test_push_failed_unknown_ls_remote_emits_reason_to_stderr(tmp_path: Path, capsys):
+    """When push fails, rev-parse succeeds but ls-remote fails (cannot
+    determine remote state), the ls-remote variant of push_failed_unknown
+    must reach stderr."""
+    gh = _make_gh_client_stub()
+
+    def _run(argv, **kwargs):
+        if "push" in argv:
+            return MagicMock(returncode=1, stdout="", stderr="fatal: push failed")
+        if "ls-remote" in argv:
+            return MagicMock(
+                returncode=128, stdout="", stderr="fatal: network unreachable"
+            )
+        if "rev-parse" in argv:
+            return MagicMock(returncode=0, stdout="localsha\n", stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch.object(orun.subprocess, "run", side_effect=_run):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/test",
+            now_iso="2026-06-01T00:00:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+    err = capsys.readouterr().err
+    assert "push_failed_unknown" in err, (
+        f"expected 'push_failed_unknown' in stderr; got: {err!r}"
+    )
+    assert "ls-remote rc=128" in err, (
+        f"expected 'ls-remote rc=128' detail in stderr; got: {err!r}"
+    )
+
+
+def test_record_failure_redacts_credential_url_from_stderr_and_reasons(capsys):
+    """Defense in depth: `git push` and `gh` auth failures can embed
+    `https://x-access-token:ghs_xxxxx@github.com/...` URLs in their stderr.
+    `_STDERR_TRUNCATE` clips length but doesn't redact content. GitHub Actions
+    only redacts secret patterns it has registered for the run — a token
+    sourced via an external action's env var may slip through. Redact at the
+    source so the same string is safe in both stderr AND state.json."""
+    reasons: list[tuple[str, bool]] = []
+    orun._record_failure(
+        reasons,
+        "push_refs_failed: fatal: unable to access "
+        "'https://x-access-token:ghs_AAAAAAAAAAAAAAAAAAAA@github.com/owner/repo.git/': 403",
+    )
+    err = capsys.readouterr().err
+    # Token bytes MUST NOT appear in stderr
+    assert "ghs_AAAAAAAAAAAAAAAAAAAA" not in err, (
+        f"token leaked to stderr; got: {err!r}"
+    )
+    assert "x-access-token" not in err, f"credential username leaked; got: {err!r}"
+    # Token bytes MUST NOT appear in the recorded reason (which lands in state.json)
+    recorded_reason, _info_only = reasons[0]
+    assert "ghs_AAAAAAAAAAAAAAAAAAAA" not in recorded_reason, (
+        f"token leaked to recorded reason; got: {recorded_reason!r}"
+    )
+    # Redaction marker present
+    assert "<redacted>" in err
+    # Non-secret context survives
+    assert "push_refs_failed" in err
+    assert "github.com/owner/repo" in err
+    assert "403" in err
+
+
+def test_happy_path_emits_no_failure_reason_to_stderr(tmp_path: Path, capsys):
+    """Successful runs must NOT emit failure-reason prints — preserves the
+    discipline that the 'docs-agent: open_or_append_pr' marker means a real
+    partial, not noise."""
+    gh = _make_gh_client_stub(pr_number=42)
+    with patch.object(
+        orun.subprocess,
+        "run",
+        side_effect=_make_subprocess_stub(
+            push_rc=0,
+            push_stderr="",
+            lsremote_sha="localsha",
+        ),
+    ):
+        orun.open_or_append_pr(
+            tmp_path,
+            gh,
+            branch="docs-agent/test",
+            now_iso="2026-06-01T00:00:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+    err = capsys.readouterr().err
+    assert "docs-agent: open_or_append_pr" not in err, (
+        f"happy path must not emit failure markers; got stderr: {err!r}"
+    )

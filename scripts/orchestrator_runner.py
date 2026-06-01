@@ -1400,6 +1400,20 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
         if pr_number is None:
             save_persistent_state(state_path, state)
             save_current_run(state_path, state)
+            # CCE-73: surface the recorded reasons to stderr before exit so
+            # the workflow log carries the failure root cause without the
+            # operator having to fetch state.json out-of-band. Redact
+            # credential URLs in case any reason came from a code path that
+            # bypassed _record_failure (e.g., add_partial called from drift
+            # handlers).
+            safe_reasons = [
+                _redact_credentials(r) for r in state["current_run"]["partial_reasons"]
+            ]
+            print(
+                f"docs-agent: orchestrator exiting 1; partial_reasons={safe_reasons}",
+                file=sys.stderr,
+                flush=True,
+            )
             return 1
         state["current_run"]["pr_number"] = pr_number
         save_persistent_state(state_path, state)
@@ -1751,6 +1765,40 @@ def _stage_docs_run_changes(repo_root: Path) -> tuple[int, str]:
     return result.returncode, result.stderr.strip()
 
 
+_CREDENTIAL_URL_RE = re.compile(r"(https?://)[^@/\s]*@")
+
+
+def _redact_credentials(text: str) -> str:
+    """Strip embedded credentials from URLs in failure reasons.
+
+    CCE-73 defense in depth: `git push` and `gh` auth failures can embed
+    `https://x-access-token:ghs_xxxxx@github.com/...` URLs in stderr.
+    Truncation to `_STDERR_TRUNCATE` bounds length but does not redact.
+    GitHub Actions only redacts secret patterns it has registered for the
+    run — tokens sourced via external actions or runtime-generated
+    installation tokens may slip through. Redact at the source so the same
+    string is safe in both stderr and state.json.
+    """
+    return _CREDENTIAL_URL_RE.sub(r"\1<redacted>@", text)
+
+
+def _record_failure(
+    reasons: list[tuple[str, bool]], reason: str, *, info_only: bool = False
+) -> None:
+    """Append (reason, info_only) to reasons AND emit it to stderr.
+
+    CCE-73: every failure path in open_or_append_pr previously captured
+    subprocess stderr into state.partial_reasons but emitted zero bytes to
+    stdout/stderr. Combined with Python's block-buffered stdout under GitHub
+    Actions, a crash in any failure branch produced a workflow log of just
+    `Process completed with exit code 1`. The stderr emit makes the reason
+    greppable in the raw log alongside being persisted to state.json.
+    """
+    safe = _redact_credentials(reason)
+    print(f"docs-agent: open_or_append_pr {safe}", file=sys.stderr, flush=True)
+    reasons.append((safe, info_only))
+
+
 def open_or_append_pr(
     repo_root: Path,
     gh: GhClient,
@@ -1784,14 +1832,14 @@ def open_or_append_pr(
         checkout_argv.append(f"origin/{branch}")
     checkout = subprocess.run(checkout_argv, capture_output=True, text=True)
     if checkout.returncode != 0:
-        reasons.append(
-            (f"checkout_failed: {checkout.stderr.strip()[:_STDERR_TRUNCATE]}", False)
+        _record_failure(
+            reasons, f"checkout_failed: {checkout.stderr.strip()[:_STDERR_TRUNCATE]}"
         )
         return None, reasons
 
     add_rc, add_stderr = _stage_docs_run_changes(repo_root)
     if add_rc != 0:
-        reasons.append((f"git_add_failed: {add_stderr[:_STDERR_TRUNCATE]}", False))
+        _record_failure(reasons, f"git_add_failed: {add_stderr[:_STDERR_TRUNCATE]}")
         return None, reasons
 
     commit_msg = f"docs(agent): run {now_iso}"
@@ -1824,42 +1872,32 @@ def open_or_append_pr(
 
         stderr_summary = (push.stderr or "").strip()[:_STDERR_TRUNCATE]
         if local_head.returncode != 0 or not local_sha:
-            reasons.append(
-                (
-                    f"push_failed_unknown: rev-parse failed (rc={local_head.returncode}); "
-                    f"push stderr: {stderr_summary}",
-                    False,
-                )
+            _record_failure(
+                reasons,
+                f"push_failed_unknown: rev-parse failed (rc={local_head.returncode}); "
+                f"push stderr: {stderr_summary}",
             )
             return None, reasons
         if remote_sha == local_sha:
-            reasons.append(
-                (
-                    f"push_tracking_setup_failed: {stderr_summary}",
-                    True,
-                )
+            _record_failure(
+                reasons,
+                f"push_tracking_setup_failed: {stderr_summary}",
+                info_only=True,
             )
         elif lsremote.returncode != 0:
-            reasons.append(
-                (
-                    f"push_failed_unknown: ls-remote rc={lsremote.returncode}; "
-                    f"push stderr: {stderr_summary}",
-                    False,
-                )
+            _record_failure(
+                reasons,
+                f"push_failed_unknown: ls-remote rc={lsremote.returncode}; "
+                f"push stderr: {stderr_summary}",
             )
             return None, reasons
         else:
-            reasons.append(
-                (
-                    f"push_refs_failed: {stderr_summary}",
-                    False,
-                )
-            )
+            _record_failure(reasons, f"push_refs_failed: {stderr_summary}")
             return None, reasons
 
     existing = gh.pr_list_for_branch(branch)
     if not existing.ok:
-        reasons.append((f"gh_pr_list_failed: {existing.error}", False))
+        _record_failure(reasons, f"gh_pr_list_failed: {existing.error}")
         return None, reasons
     if existing.value is not None:
         return existing.value, reasons
@@ -1870,7 +1908,7 @@ def open_or_append_pr(
         body = "docs-agent run"
     created = gh.pr_create(branch, commit_msg, body)
     if not created.ok:
-        reasons.append((f"gh_pr_create_failed: {created.error}", False))
+        _record_failure(reasons, f"gh_pr_create_failed: {created.error}")
         return None, reasons
     return created.value, reasons
 

@@ -52,10 +52,11 @@ jobs:
         # Node 24.
         # CCE-66: v3 deprecates `app-id` in favor of `client-id` — a
         # semantically different App field (the OAuth Client ID, format
-        # Iv1.xxxxxxxxxxxxxxxx, not the numeric App ID). Both inputs work in v3
-        # today, but only `client-id` appears in upstream examples. Stored as a
-        # repo Variable (not Secret) because Client IDs are not credentials —
-        # they are visible on the App's public settings page.
+        # Iv1.xxx or Iv23li... depending on App age, not the numeric App ID).
+        # Both inputs work in v3 today, but only `client-id` appears in
+        # upstream examples. Stored as a repo Variable (not Secret) because
+        # Client IDs are not credentials — they are visible on the App's
+        # public settings page.
         uses: actions/create-github-app-token@v3
         with:
           client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}

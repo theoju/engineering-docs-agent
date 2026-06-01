@@ -59,7 +59,7 @@ You register the App once. You then install it on each host repo individually (P
 8. **Where can this App be installed?**: Only on this account.
 9. Click **Create GitHub App**.
 10. On the App's General page, scroll to **Private keys** → click **Generate a private key**. A `.pem` file downloads. Keep it safe.
-11. Note the **Client ID** at the top of the General page (format: `Iv1.xxxxxxxxxxxxxxxx`). You'll need it as the `DOCS_AGENT_APP_CLIENT_ID` repo Variable in each host. The numeric App ID is no longer used — `actions/create-github-app-token@v3` authenticates via the Client ID.
+11. Note the **Client ID** at the top of the General page. You'll need it as the `DOCS_AGENT_APP_CLIENT_ID` repo Variable in each host. The format depends on when the App was registered: pre-2024 Apps use `Iv1.xxxxxxxxxxxxxxxx` (16 hex chars after a period); newer Apps use `Iv23li...` (~20 chars, no period). Either is valid — paste the value verbatim. The numeric App ID is no longer used — `actions/create-github-app-token@v3` authenticates via the Client ID.
 
 ### 1.3 (Optional) Atlassian API token
 
@@ -121,7 +121,7 @@ This is the per-repo install of the App you registered in Part 1.2.
 5. Click **Install**.
 6. Verify: https://github.com/<owner>/<repo>/settings/installations should show your App.
 
-You don't need to copy the installation ID — `actions/create-github-app-token@v3` derives it at runtime from the App Client ID (`Iv1.xxx`), private key, and repo name.
+You don't need to copy the installation ID — `actions/create-github-app-token@v3` derives it at runtime from the App Client ID, private key, and repo name.
 
 ### 2.4 Configure repo secrets and variables
 
@@ -139,10 +139,10 @@ Open the host repo's **Settings → Secrets and variables → Actions**. You'll 
 
 **Variables** (Settings → Secrets and variables → Actions → **Variables** tab → New repository variable):
 
-| Variable                   | What it is                                                        | Where to get it        | Required?               |
-| -------------------------- | ----------------------------------------------------------------- | ---------------------- | ----------------------- |
-| `DOCS_AGENT_APP_CLIENT_ID` | The GitHub App's OAuth Client ID (format: `Iv1.xxxxxxxxxxxxxxxx`) | Part 1.2 step 11       | **Yes**                 |
-| `JIRA_EMAIL`               | The email associated with the Jira token                          | Your Atlassian account | Only if Jira enrichment |
+| Variable                   | What it is                                                       | Where to get it        | Required?               |
+| -------------------------- | ---------------------------------------------------------------- | ---------------------- | ----------------------- |
+| `DOCS_AGENT_APP_CLIENT_ID` | The GitHub App's OAuth Client ID (e.g. `Iv1.xxx` or `Iv23li...`) | Part 1.2 step 11       | **Yes**                 |
+| `JIRA_EMAIL`               | The email associated with the Jira token                         | Your Atlassian account | Only if Jira enrichment |
 
 Without `JIRA_API_TOKEN` + `JIRA_EMAIL`, the source-collector skips Jira enrichment cleanly and the run is marked partial with `source_collector_error: jira_auth_missing`. The PR still opens — partial-mode is the operational-visibility surface, not a hard failure.
 

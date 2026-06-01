@@ -95,9 +95,9 @@ def variables_from_workflow(workflow_text: str) -> list[dict]:
 
     Variables are independent of Secrets (no shared namespace). CCE-66
     introduced two required variables: DOCS_AGENT_APP_CLIENT_ID (the
-    OAuth Client ID for the GitHub App, format Iv1.xxx) and JIRA_EMAIL
-    (the basic-auth username for Atlassian — a public identifier, not
-    a credential).
+    OAuth Client ID for the GitHub App, format Iv1.xxx or Iv23li...
+    depending on App age) and JIRA_EMAIL (the basic-auth username for
+    Atlassian — a public identifier, not a credential).
     """
     found = sorted(set(re.findall(r"vars\.([A-Z_]+)", workflow_text)))
     required = {

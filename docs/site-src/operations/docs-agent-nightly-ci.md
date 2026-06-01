@@ -17,10 +17,10 @@ The workflow mints a GitHub App installation token instead (`actions/create-gith
 
 Two credentials back this up — one Variable, one Secret:
 
-| Name                         | Tier     | Purpose                                                                                                                   |
-| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `DOCS_AGENT_APP_CLIENT_ID`   | Variable | OAuth Client ID (format: `Iv1.xxx`) for `docs-agent-bot`. Non-sensitive — set via `gh variable set` or the Variables tab. |
-| `DOCS_AGENT_APP_PRIVATE_KEY` | Secret   | PEM private key for the same App. Sensitive — set via `gh secret set` or the Secrets tab.                                 |
+| Name                         | Tier     | Purpose                                                                                                                                                    |
+| ---------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DOCS_AGENT_APP_CLIENT_ID`   | Variable | OAuth Client ID for `docs-agent-bot` (e.g. `Iv1.xxx` or `Iv23li...` depending on App age). Non-sensitive — set via `gh variable set` or the Variables tab. |
+| `DOCS_AGENT_APP_PRIVATE_KEY` | Secret   | PEM private key for the same App. Sensitive — set via `gh secret set` or the Secrets tab.                                                                  |
 
 The App is installed on this repo only and carries `contents:write` and `pull-requests:write` scopes, matching the workflow's `permissions:` block.
 

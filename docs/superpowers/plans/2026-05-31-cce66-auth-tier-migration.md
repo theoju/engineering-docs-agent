@@ -241,17 +241,18 @@ EOF
 
 **Files:**
 
-- Modify: `scripts/preflight_host.py:78-91` — `build_secrets_checklist` function
+- Modify: `scripts/preflight_host.py:72-91` — `secrets_from_workflow` function
+- Modify: `scripts/preflight_host.py:176-200` — `build_report` (adds `variables_checklist` field)
+- Modify: `scripts/preflight_host.py:143-174` — `render_text` (renders the new variables section)
 - Modify: `tests/setup/test_preflight_host.py:36-40` — assertion set
 
-- [ ] **Step 1: Read current `build_secrets_checklist`**
+- [ ] **Step 1: Read current `secrets_from_workflow` and `build_report`**
 
-Read `scripts/preflight_host.py` lines 70-95 to anchor the edit. The function currently:
+Read `scripts/preflight_host.py` lines 70-95 to anchor the edit on `secrets_from_workflow`, and lines 175-205 to anchor on `build_report`. The function currently:
 
-- Scans workflow text via `re.findall(r"secrets\.([A-Z_]+)", workflow_text)`.
-- Force-injects `{CLAUDE_CODE_OAUTH_TOKEN, DOCS_AGENT_APP_ID, DOCS_AGENT_APP_PRIVATE_KEY}` as required.
-- Filters out `GITHUB_TOKEN`.
-- Returns `[{name, required}]` list.
+- `secrets_from_workflow(workflow_text)` (line 72): scans via `re.findall(r"secrets\.([A-Z_]+)", workflow_text)`, force-injects `{CLAUDE_CODE_OAUTH_TOKEN, DOCS_AGENT_APP_ID, DOCS_AGENT_APP_PRIVATE_KEY}` as required, filters `GITHUB_TOKEN`, returns `[{name, required}]`.
+- `build_report(repo_root)` (line 176): composes the JSON report dict — currently stores secrets via `"secrets_checklist": secrets_from_workflow(workflow_text)`.
+- `render_text(report)` (line 143): renders the human-readable text version, reading `report["secrets_checklist"]` (line 162).
 
 - [ ] **Step 2: Write a failing test for new behavior**
 
@@ -295,16 +296,16 @@ Run: `python3 -m pytest tests/setup/test_preflight_host.py -v 2>&1 | tail -15`
 
 Expected: failures on (a) `DOCS_AGENT_APP_ID` still present, and/or (b) `variables_checklist` key missing from `out`. Confirms the test is red.
 
-- [ ] **Step 3: Update `build_secrets_checklist` — remove DOCS_AGENT_APP_ID**
+- [ ] **Step 3: Update `secrets_from_workflow` — remove DOCS_AGENT_APP_ID**
 
-In `scripts/preflight_host.py:78-91`, remove `"DOCS_AGENT_APP_ID",` from the `required` set so only genuine credentials remain.
+In `scripts/preflight_host.py:78-83` (the `required` set inside `secrets_from_workflow`), remove `"DOCS_AGENT_APP_ID",` so only genuine credentials remain (`CLAUDE_CODE_OAUTH_TOKEN`, `DOCS_AGENT_APP_PRIVATE_KEY`).
 
-- [ ] **Step 4: Add `build_variables_checklist`**
+- [ ] **Step 4: Add `variables_from_workflow`**
 
-In the same file, add a new function `build_variables_checklist(workflow_text)` that mirrors the secrets pattern:
+In the same file, add a new function `variables_from_workflow(workflow_text)` next to `secrets_from_workflow`. It mirrors the secrets pattern but scans `vars\.` references:
 
 ```python
-def build_variables_checklist(workflow_text: str) -> list[dict]:
+def variables_from_workflow(workflow_text: str) -> list[dict]:
     """Return required + discovered repo Variables for the host.
 
     Variables are independent of Secrets (no shared namespace). CCE-66
@@ -326,7 +327,11 @@ def build_variables_checklist(workflow_text: str) -> list[dict]:
 
 - [ ] **Step 5: Surface `variables_checklist` in the output payload**
 
-Find the function that composes the `--format json` output (likely `compose_output` or similar — locate via grep). Add a `"variables_checklist": build_variables_checklist(workflow_text)` field alongside the existing `"secrets_checklist"` field.
+In `build_report(repo_root)` at `scripts/preflight_host.py:176`, add a `"variables_checklist": variables_from_workflow(workflow_text)` field alongside the existing `"secrets_checklist": secrets_from_workflow(workflow_text)` field (the one at the function's return dict around line 185).
+
+- [ ] **Step 5b: Render `variables_checklist` in human-readable output**
+
+In `render_text(report)` at `scripts/preflight_host.py:143`, after the block that loops over `report["secrets_checklist"]` (around line 162), add a parallel block that loops over `report["variables_checklist"]` and prints each line under a `Required Variables:` heading. Use the same `[x] required` / `[ ] optional` glyph convention. Without this addition `preflight_host` would emit variables in JSON output but hide them from the text helper, defeating the onboarding-clarity goal.
 
 - [ ] **Step 6: Run Task 3's tests — confirm both PASS**
 
@@ -367,25 +372,25 @@ EOF
 
 **Files:**
 
-- Modify: `docs/site-src/setup-guide.md` (8 lines: 62, 70, 124, 133, 136, 280, 293, 342, 343)
+- Modify: `docs/site-src/setup-guide.md` (8 verified edit anchors: 62, 70, 124, 133, 136, 293, 342, 343)
 - Modify: `docs/site-src/operations/docs-agent-nightly-ci.md:22`
 - Modify: `docs/site-src/operations/docs-agent-nightly-jira-auth.md` (4 lines: 16, 19, 26, 33)
 - Modify: `docs/host-onboarding/advanced-data-import-system.md:105,113`
 
 - [ ] **Step 1: Update setup-guide.md**
 
-For each of the 8 lines noted in the spec table, replace per the spec's "Documentation updates" subsection (4.). Use Read + Edit for each line; do not bulk-rewrite the file. Specifically:
+For each of the 8 verified anchors, replace per the spec's "Documentation updates" subsection (4.). Use Read + Edit per anchor; do not bulk-rewrite the file. Anchors (verified against current file state):
 
 - Line 62: replace the App ID note with a Client ID note (format `Iv1.xxxxxxxxxxxxxxxx`).
 - Line 70: clarify `JIRA_EMAIL` is stored as a repo Variable.
-- Line 124: rewrite the App-ID derivation prose to reference Client ID.
+- Line 124: rewrite the App-ID derivation prose to reference Client ID. The current sentence is `"You don't need to copy the installation ID — actions/create-github-app-token@v3 derives it at runtime from the App ID, private key, and repo name."` — flip `App ID` to `App Client ID (Iv1.xxx)`.
 - Line 133: table row for `DOCS_AGENT_APP_ID` → row for `DOCS_AGENT_APP_CLIENT_ID` (Required Variable, not Secret).
 - Line 136: table row for `JIRA_EMAIL` — mark as Variable.
-- Line 293: rewrite the "Fix" example workflow snippet to use `client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}`.
+- Line 293: in the "Fix" prose paragraph for the CCE-45 wiring, append a one-sentence note that the canonical example uses `client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}` (Variable, not Secret).
 - Line 342: checklist updated — "Set secrets: `CLAUDE_CODE_OAUTH_TOKEN`, `DOCS_AGENT_APP_PRIVATE_KEY`. Set variables: `DOCS_AGENT_APP_CLIENT_ID`."
 - Line 343: checklist clarified — "Set secret `JIRA_API_TOKEN` and variable `JIRA_EMAIL` for Jira enrichment."
 
-Read the file first; then perform one Edit per line. The format-on-edit hook may renumber lines as it reformats — re-Read between edits if line offsets drift.
+**Imperative re-Read rule (avoid stale-offset edits):** After EACH Edit, re-Read the surrounding ±3 lines before the next Edit. The format-on-edit hook may renumber rows of nearby content as it reformats. Do not chain multiple Edits without an intervening Read of the affected line range — silent off-by-one edits compound and produce a syntactically valid but semantically wrong file.
 
 - [ ] **Step 2: Update operations/docs-agent-nightly-ci.md:22**
 
@@ -457,7 +462,7 @@ git status --short
 git log --oneline main..HEAD
 ```
 
-Expected: clean working tree; 4 commits ahead of main (after the spec commits at 5588830 + 6da0d1f, Tasks 1–4 add 4 more = 6 commits ahead of main, or thereabouts).
+Expected: clean working tree; **7 commits** ahead of main. Composition: spec original (5588830) + spec revised (6da0d1f) + plan (d4aa5f0) + plan revised (this commit's HEAD~3) + Task 1 failing tests + Task 2 workflow edit + Task 3 preflight + Task 4 docs sweep = 7 commits. Adjust the lower bound by ±1 if /ship's commit spoke amends or no-ops the plan-revision commit; the floor for a healthy state is **≥6 commits** ahead with a clean working tree.
 
 - [ ] **Step 3: No commit — hand off to /ship**
 
@@ -504,12 +509,36 @@ Add a note to the plugin PR's body confirming Phase 1.5 verification: `Variables
 
 **Files:** (none — `/ship` orchestrates)
 
+- [ ] **Step 0: HARD GATE — Re-verify Phase 1.5 across all 3 repos**
+
+Before `/ship` may proceed, the operator MUST re-run the variables-verification gate from Task 6 Step 2. The plugin PR's merge will trigger every host's next nightly to use the new `vars.DOCS_AGENT_APP_CLIENT_ID` / `vars.JIRA_EMAIL` references; if any repo is missing either variable, that nightly hard-fails at the app-token step or surfaces a `jira_auth_missing` partial reason.
+
+Run (machine-checkable):
+
+```bash
+set -e
+FAIL=0
+for repo in theoju/engineering-docs-agent theoju/claude-code-self-assessment theoju/advanced-data-import-system; do
+  COUNT=$(gh variable list --repo "$repo" --json name --jq '[.[] | select(.name == "DOCS_AGENT_APP_CLIENT_ID" or .name == "JIRA_EMAIL")] | length')
+  if [ "$COUNT" != "2" ]; then
+    echo "::error::$repo is missing one or both required variables (have $COUNT, need 2)"
+    FAIL=1
+  else
+    echo "OK: $repo has both DOCS_AGENT_APP_CLIENT_ID and JIRA_EMAIL"
+  fi
+done
+[ "$FAIL" = "0" ] || { echo "Phase 1.5 gate FAILED — do not /ship"; exit 1; }
+echo "Phase 1.5 gate PASSED — proceed to /ship"
+```
+
+Expected: 3 `OK:` lines and a final `Phase 1.5 gate PASSED`. Anything else → STOP. Re-run Task 6 Step 1 to fill the gaps, then re-verify before proceeding.
+
 - [ ] **Step 1: Confirm working tree clean + on feature branch**
 
 ```bash
 git branch --show-current  # expect: chore/CCE-66-auth-tier-migration
 git status --short          # expect: empty
-git log --oneline main..HEAD  # expect: 6+ commits (spec + revision + Tasks 1-4)
+git log --oneline main..HEAD  # expect: 7 commits (spec + spec revision + plan + plan revision + Tasks 1-4)
 ```
 
 - [ ] **Step 2: Invoke /ship**
@@ -529,6 +558,8 @@ Plugin PR will appear at `https://github.com/theoju/engineering-docs-agent/pull/
 ---
 
 ## Task 8: Host PR — CCSA workflow edit
+
+> **Repo-name convention:** Tasks 8 and 9 hardcode concrete `theoju/<repo>` slugs (`theoju/claude-code-self-assessment`, `theoju/advanced-data-import-system`) intentionally — this plan is rolling out CCE-66 to a known fleet of onboarded hosts. If a future operator runs the same task on a different fleet, swap the slugs. Do NOT parameterize; the literal slugs are the audit trail.
 
 **Files:**
 
@@ -583,14 +614,49 @@ EOF
 git push -u origin chore/CCE-66-client-id-migration
 ```
 
-Then open the PR (run from `/tmp/cce66-ccsa` since `gh pr create` needs the repo's working tree):
+Then open the PR (run from `/tmp/cce66-ccsa` since `gh pr create` needs the repo's working tree). Use the heredoc form to keep the PR body verbatim — no placeholder text:
 
 ```bash
 gh pr create \
   --base main \
   --head chore/CCE-66-client-id-migration \
   --title "chore(CCE-66): migrate workflow to client-id + vars.JIRA_EMAIL" \
-  --body "<see spec §References and the commit message; mention Phase 1.5 verification>"
+  --body "$(cat <<'EOF'
+## Summary
+
+Two-line edit to `.github/workflows/docs-agent-nightly.yml`:
+
+1. `app-id: ${{ secrets.DOCS_AGENT_APP_ID }}` → `client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}`
+   — `app-id` is deprecated upstream in `actions/create-github-app-token@v3`.
+2. `JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}` → `JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}`
+   — basic-auth username, not a credential. Already visible in commit author + Jira comments.
+
+## Phase 1.5 verification
+
+Before this PR merges, BOTH repo variables MUST exist on this repository:
+
+- `DOCS_AGENT_APP_CLIENT_ID` (Iv1.xxx format from the App settings page)
+- `JIRA_EMAIL` (Atlassian account email)
+
+The reviewer should run:
+
+```
+
+gh variable list --repo theoju/claude-code-self-assessment | grep -E "DOCS_AGENT_APP_CLIENT_ID|JIRA_EMAIL"
+
+```
+
+and confirm both rows are present before merging. If either is missing, the next nightly hard-fails at the app-token step.
+
+## References
+
+- Companion plugin PR: theoju/engineering-docs-agent#<plugin-pr> (CCE-66)
+- Jira: CCE-66 in the Claude-Code-Extensions project
+- Upstream deprecation: https://github.com/actions/create-github-app-token
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+EOF
+)"
 ```
 
 - [ ] **Step 4: Watch CI; admin-merge when green**
@@ -601,15 +667,33 @@ gh pr view <pr#> --repo theoju/claude-code-self-assessment --json statusCheckRol
 gh pr merge <pr#> --repo theoju/claude-code-self-assessment --admin --squash --delete-branch
 ```
 
-- [ ] **Step 5: Workflow_dispatch verification (Phase 3)**
+- [ ] **Step 5: Workflow_dispatch verification (Phase 3) — machine-checkable**
 
 ```bash
 gh workflow run docs-agent-nightly.yml --repo theoju/claude-code-self-assessment -f reason="CCE-66 verify"
-gh run list --repo theoju/claude-code-self-assessment --workflow docs-agent-nightly.yml --limit 1
-gh run view <id> --repo theoju/claude-code-self-assessment --log | head -100
+sleep 30  # let the run register
+RUN_ID=$(gh run list --repo theoju/claude-code-self-assessment --workflow docs-agent-nightly.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run watch "$RUN_ID" --repo theoju/claude-code-self-assessment --exit-status
+LOG=$(gh run view "$RUN_ID" --repo theoju/claude-code-self-assessment --log)
+
+# Assertion A: app-token step succeeded (Bash exit propagated above; double-check the marker line):
+echo "$LOG" | grep -qE "Generate GitHub App installation token.*completed.*success" \
+  || { echo "::error::app-token step did not show a success marker"; exit 1; }
+
+# Assertion B: no `app-id` deprecation warning emitted:
+if echo "$LOG" | grep -qE "Warning:.*app-id"; then
+  echo "::error::workflow still surfaces an app-id deprecation warning"; exit 1
+fi
+
+# Assertion C: source-collector Jira enrichment ran without missing-auth flag:
+if echo "$LOG" | grep -qE "jira_auth_missing"; then
+  echo "::error::source-collector reports jira_auth_missing — JIRA_EMAIL var likely empty"; exit 1
+fi
+
+echo "Task 8 Step 5 verification PASSED"
 ```
 
-Confirm: (a) "Generate GitHub App installation token" step succeeds; (b) no `app-id` deprecation warning; (c) source-collector's Jira enrichment runs (or partial_reasons doesn't include `jira_auth_missing`).
+Each assertion is a non-zero-exit check, so failure halts the script and surfaces the specific failed condition to the operator.
 
 ---
 
@@ -652,12 +736,70 @@ Transition CCE-66 → Done with a comment summarizing: plugin PR + 2 host PRs + 
 
 ---
 
+## Recovery procedures
+
+The migration is staged so any single phase can fail and roll back without losing the others. Refer to this section if any of Tasks 7/8/9 produces an unexpected red CI run or hard-fails in production.
+
+### Scenario A — Plugin PR merged, host PR not yet merged, host nightly red
+
+Most likely cause: variable not set on the host. The plugin PR's docs sweep and preflight changes alone are inert on a host until that host's workflow file references `vars.` paths. If the host's `docs-agent-nightly.yml` still references `secrets.DOCS_AGENT_APP_ID` AND the secret hasn't been deleted yet (Phase 4 not yet run), the host should be unaffected. If you are seeing red runs, re-check Phase 1.5 with the bash from Task 7 Step 0.
+
+### Scenario B — Host PR merged, variable missing on that host
+
+The next nightly will hard-fail at the `Generate GitHub App installation token` step (the action will refuse to mint a token with an empty `client-id`). Fix:
+
+```bash
+gh variable set DOCS_AGENT_APP_CLIENT_ID --repo theoju/<host> --body "Iv1.xxxxxxxxxxxxxxxx"
+gh workflow run docs-agent-nightly.yml --repo theoju/<host> -f reason="post-fix verify"
+```
+
+No code change needed. Set the variable, re-fire dispatch.
+
+### Scenario C — Need to revert ONE host while leaving the others migrated
+
+The host PRs are mutually independent (Tasks 8 and 9 each open a separate PR on a separate repo). Revert is per-host:
+
+```bash
+# In the host repo's clone:
+git checkout main && git pull
+git revert <merge-commit-of-CCE-66-host-PR> -m 1
+git push
+# Then restore the host's old secrets if you also already ran Phase 4 on it:
+gh secret set DOCS_AGENT_APP_ID --repo theoju/<host> --body "<numeric-app-id>"
+gh secret set JIRA_EMAIL        --repo theoju/<host> --body "<atlassian-email>"
+```
+
+The OTHER hosts stay on the new wiring. The plugin PR does not need to revert — preflight surfacing both `secrets_checklist` and `variables_checklist` is forward-compatible with both auth tiers on different hosts.
+
+### Scenario D — Plugin PR introduces a pytest regression discovered after merge
+
+Re-open a fix PR off `main`. Do NOT revert the plugin PR — the host PRs may already reference the new variable wiring and rolling back the plugin would leave them with no preflight guidance. Fix forward.
+
 ## Out of scope
 
 - `templates/workflow-run.yml` / `workflow-verify.yml` refresh — separate brainstorm (task #383).
 - Auditing other `secrets.*` references for category errors — Phase 1 audit already exhaustive.
 - Removing `app-id` upstream support — GitHub-side concern.
 - Changing the App itself — same App, same permissions, same installations.
+- `docs/site-src/whats-new.md` and `CHANGELOG.md` entries — written by the docs-agent nightly itself from the merged PR's commit history, not by this plan. Do not pre-author them.
+
+## Review notes (Phase C revision)
+
+This plan was revised after a 3-reviewer parallel pass (workflow `wf_091ebf57-ab3`) found 4 Critical + 8 Important + 10 Nice-to-have issues. Phase C addressed all Critical + 7 Important findings inline:
+
+- **C1 (function names)** — Task 3 now references the real `secrets_from_workflow` (line 72), `build_report` (line 176), and `render_text` (line 143). Earlier draft hallucinated `build_secrets_checklist` and `compose_output`.
+- **C2 (spec/plan contract)** — Plan keeps the YAGNI separate-function design (`variables_from_workflow` + `variables_checklist` field) rather than the spec's tagged-list-with-`kind`. The companion spec edit aligns spec §2 to this choice.
+- **C3 (setup-guide.md lines)** — Verified anchors via grep + targeted Read: 62, 70, 124, 133, 136, 293, 342, 343. Earlier draft cited 124, 280, 293 with 280 being a fictitious anchor for env-var resolution prose that does not contain a `DOCS_AGENT_APP_ID` reference.
+- **C4 (Phase 1.5 enforcement)** — Task 7 now opens with Step 0, a machine-checkable bash gate that exits non-zero unless all three repos report both required variables.
+- **I1 (commit count)** — Task 5 + Task 7 normalized to **7 commits ahead of main** with a ≥6 floor.
+- **I2 (Task 4 Files header)** — Reconciled with Step 1's verified anchor list.
+- **I3 (format-on-edit warning)** — Promoted to imperative: re-Read ±3 lines after each Edit before issuing the next.
+- **I4 (Task 8 Step 5 verifiability)** — Verification block now exits non-zero on any failed assertion.
+- **I5 (no partial-revert procedure)** — New "Recovery procedures" section above covers four real failure modes.
+- **I6 (Task 8 PR body placeholder)** — Replaced with a verbatim heredoc body.
+- **I7 (hardcoded repo names)** — Documented at Task 8's intro as intentional audit-trail concrete-name rollout, not a generalization defect.
+
+Nice-to-have items (h-level alignment, deeper docstrings, etc.) were considered and skipped to keep the diff focused.
 
 ## After Task 10 — handoff
 

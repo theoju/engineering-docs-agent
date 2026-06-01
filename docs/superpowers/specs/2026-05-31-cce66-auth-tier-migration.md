@@ -119,13 +119,14 @@ uses: actions/create-github-app-token@v3
 
 ### 2. Onboarding helper — `scripts/preflight_host.py` + tests
 
-`scripts/preflight_host.py:78-91` builds the secrets checklist that the setup skill surfaces during host onboarding. It currently force-injects `DOCS_AGENT_APP_ID` into the required set even when the discovered workflow text doesn't reference it. After CCE-66, the workflow text contains `vars.DOCS_AGENT_APP_CLIENT_ID` instead of `secrets.DOCS_AGENT_APP_ID`, so:
+`scripts/preflight_host.py:72-91` builds the secrets checklist that the setup skill surfaces during host onboarding. The current `secrets_from_workflow` function force-injects `DOCS_AGENT_APP_ID` into the required set even when the discovered workflow text doesn't reference it. After CCE-66, the workflow text contains `vars.DOCS_AGENT_APP_CLIENT_ID` instead of `secrets.DOCS_AGENT_APP_ID`, so:
 
-- Remove `DOCS_AGENT_APP_ID` from the required set.
-- Extend the function to also scan `vars\.([A-Z_]+)` patterns and surface them in the checklist with an explicit `kind: "variable" | "secret"` field, so new operators are told to set BOTH the new variable AND the existing secrets.
-- The required-variables set seeded by the function: `DOCS_AGENT_APP_CLIENT_ID`, `JIRA_EMAIL`.
+- Remove `DOCS_AGENT_APP_ID` from `secrets_from_workflow`'s required set.
+- Add a sibling function `variables_from_workflow(workflow_text)` that mirrors the secrets pattern but scans `vars\.([A-Z_]+)` and force-injects the required variables (`DOCS_AGENT_APP_CLIENT_ID`, `JIRA_EMAIL`). Two parallel functions keep each call site single-purpose and avoid `kind`-discriminated branching in the caller.
+- Surface the result via a new `variables_checklist` key in `build_report`'s output dict, alongside the existing `secrets_checklist`. Update `render_text` to print both sections under `Required Secrets:` and `Required Variables:` headings.
+- The required-variables set seeded by `variables_from_workflow`: `DOCS_AGENT_APP_CLIENT_ID`, `JIRA_EMAIL`.
 
-Update `tests/setup/test_preflight_host.py:36-40` to assert the new required-secrets set and a new required-variables set. The test must turn red on a partial migration (e.g., function returns the variable but the test still asserts the old secret name).
+Update `tests/setup/test_preflight_host.py:36-40` to assert `DOCS_AGENT_APP_ID` is NOT in `secrets_checklist` and both required variables ARE in `variables_checklist`. The test must turn red on a partial migration (e.g., the new function returns variables but the secrets test still expects the obsolete name).
 
 ### 3. Guard test — `tests/ci/test_workflow_auth_tier.py` (NEW)
 
@@ -249,7 +250,7 @@ No silent-failure mode is introduced. Every error path has a logged signal at ei
 ## Testing
 
 1. **Failing-first guard tests** (TDD): commit `tests/ci/test_workflow_auth_tier.py` BEFORE the workflow edits. Both new tests FAIL red on the unmodified dogfood — `app-id:` is at `.github/workflows/docs-agent-nightly.yml:57` and `secrets.JIRA_EMAIL` is at `:41`.
-2. **preflight_host.py test red-state**: extend `tests/setup/test_preflight_host.py` with a new assertion that `DOCS_AGENT_APP_CLIENT_ID` appears in the checklist with `kind: "variable"`. Fails red on unmodified `preflight_host.py`; passes after the function update.
+2. **preflight_host.py test red-state**: extend `tests/setup/test_preflight_host.py` with two new assertions — (a) `DOCS_AGENT_APP_ID` is absent from `secrets_checklist`; (b) `DOCS_AGENT_APP_CLIENT_ID` and `JIRA_EMAIL` both appear in the new `variables_checklist` payload. Fails red on unmodified `preflight_host.py`; passes after `variables_from_workflow` is added and wired into `build_report` + `render_text`.
 3. **Plugin workflow + preflight edits** make all new tests PASS.
 4. **Full suite gate**: `python3 -m pytest` returns ≥669 + ~3 new = ≥672 passed, 3 skipped, 0 failed.
 5. **CI integrated suite gate** (per CLAUDE.md): on each workflow PR, the actionlint job parses the modified YAML cleanly; pytest 3.11 + 3.12 + diagram-gate all green.

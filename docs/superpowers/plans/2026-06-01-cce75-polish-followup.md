@@ -104,20 +104,20 @@ Run:
 python3 -m pytest tests/orchestrator/test_gitlink_exclusion.py::test_stage_docs_run_changes_drops_midrun_modifications_to_tracked_plugin_content -v
 ```
 
-Expected: **PASS** on the current code (the behavior is already implemented by `restore --staged --` reverting the index entry). If it FAILS, the test caught a discrepancy between docstring claim and actual behavior — STOP and investigate before proceeding.
+Expected: **PASS** on the current code. Mechanism: `git add -A .` (line ~1769) stages the modified `tracked.txt`, the diff probe (line ~1779-1792) finds `.docs-agent-plugin/tracked.txt` in the index, and `git restore --staged -- .docs-agent-plugin` (line ~1798-1811) reverts the index entry to HEAD. If this test FAILS, exactly one of the three steps has drifted — `git log -p scripts/orchestrator_runner.py` and check what changed before touching the test.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add tests/orchestrator/test_gitlink_exclusion.py
 git commit -m "$(cat <<'EOF'
-test(CCE-75): pin mid-run-mods-dropped behavior
+test(CCE-75): assert mid-run plugin mods are dropped from docs commit
 
-Adds anti-regression test for the validator-flagged "mid-run
-modifications to tracked plugin content are dropped" behavior of
-_stage_docs_run_changes. The behavior is already correct on main
-(git restore --staged reverts the index entry); this test prevents
-future refactors from silently regressing it.
+Adds anti-regression test for the validator-flagged behavior:
+mid-run modifications to tracked content under .docs-agent-plugin/
+are reverted from the index by the probe-then-restore pattern in
+_stage_docs_run_changes. The behavior is already correct on main;
+this test prevents future refactors from silently regressing it.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -140,36 +140,72 @@ Append to `tests/orchestrator/test_gitlink_exclusion.py`:
 def test_stage_docs_run_changes_bare_pathspec_does_not_overselect_siblings(
     tmp_path: Path,
 ) -> None:
-    """CCE-75 polish: bare pathspec `-- .docs-agent-plugin` matches only
-    the exact path or `path/*` — NOT arbitrary prefixes.
+    """CCE-75 polish: bare pathspec `-- .docs-agent-plugin` matches the
+    gitlink entry itself AND `<spec>/<anything>` — but NOT siblings like
+    `.docs-agent-plugin-notes.md` that share a common string prefix.
 
-    Git pathspec matching rule: a literal pathspec matches if and only
-    if the path equals the spec OR begins with `<spec>/`. So `.docs-agent-plugin`
-    matches `.docs-agent-plugin` itself and `.docs-agent-plugin/anything`,
-    but NOT `.docs-agent-plugin-notes.md` (no trailing slash).
+    Git pathspec rule: a literal pathspec matches if the path equals the
+    spec OR begins with `<spec>/`. A trailing slash is required for
+    prefix matching, so `.docs-agent-plugin` does NOT prefix-match
+    `.docs-agent-plugin-notes.md`.
 
-    A validator panel suggested tightening the pathspec to
-    `:(glob).docs-agent-plugin/**` to "prevent prefix over-select."
-    Empirical verification proved bare pathspec is already correct;
-    this test locks in that behavior so a future contributor does not
-    introduce a `:(glob)` "tightening" that would itself narrow scope
-    incorrectly (e.g., dropping the gitlink entry which sits at
-    `.docs-agent-plugin` without a trailing slash).
+    Why this test exists: a validator panel suggested "tightening" the
+    pathspec to `:(glob).docs-agent-plugin/**` on the assumption that
+    the bare form over-selects. Empirical verification proved otherwise.
+    A `:(glob)` rewrite would actively REGRESS the helper, because the
+    gitlink entry sits at `.docs-agent-plugin` with no trailing slash
+    and would not match `.../**`. This test locks in both halves of the
+    correct behavior so a future "tightening" attempt is caught:
+
+    (1) Direct pathspec assertion — the bare-form `git diff --cached --
+        .docs-agent-plugin` MUST include the gitlink (a `:(glob)/**`
+        rewrite breaks this) AND MUST NOT include the sibling.
+    (2) End-to-end via helper — sibling stays staged, plugin tree gets
+        unstaged.
     """
     _init_git_repo(tmp_path)
-    (tmp_path / ".gitignore").write_text(".docs-agent-plugin/\n")
-    subprocess.run(["git", "-C", str(tmp_path), "add", ".gitignore"], check=True)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "commit", "-q", "-m", "host gitignore"],
-        check=True,
-    )
 
+    # Sibling at repo root that shares a string prefix with the plugin path
     (tmp_path / ".docs-agent-plugin-notes.md").write_text(
         "# notes about the docs-agent plugin\n"
     )
+    # Legitimate docs output the helper should stage
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "page.md").write_text("# authored page\n")
+    # Real plugin checkout so the diff probe has a gitlink entry to find
+    # (and the restore step actually fires inside the helper)
+    _create_nested_plugin_checkout(tmp_path)
 
+    # === Direct pathspec assertion (the property a :(glob) rewrite breaks) ===
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", "-A", "."],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    bare_match = subprocess.run(
+        [
+            "git", "-C", str(tmp_path),
+            "diff", "--cached", "--name-only",
+            "--", ".docs-agent-plugin",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    assert ".docs-agent-plugin" in bare_match, (
+        f"bare pathspec MUST match the gitlink entry `.docs-agent-plugin`; "
+        f"got: {bare_match}. A `:(glob).docs-agent-plugin/**` rewrite would "
+        f"fail this check — the gitlink has no trailing slash."
+    )
+    assert ".docs-agent-plugin-notes.md" not in bare_match, (
+        f"bare pathspec MUST NOT prefix-match `.docs-agent-plugin-notes.md`; "
+        f"git pathspec requires exact-match or prefix-followed-by-slash. "
+        f"got: {bare_match}"
+    )
+
+    # === End-to-end via the helper (sibling survives, plugin tree unstaged) ===
+    subprocess.run(["git", "-C", str(tmp_path), "reset", "-q"], check=True)
     rc, stderr = orun._stage_docs_run_changes(tmp_path)
     assert rc == 0, f"staging failed: rc={rc}, stderr={stderr!r}"
 
@@ -180,11 +216,18 @@ def test_stage_docs_run_changes_bare_pathspec_does_not_overselect_siblings(
         check=True,
     ).stdout.splitlines()
     assert ".docs-agent-plugin-notes.md" in staged_files, (
-        f"sibling file at repo root must stay staged; bare-pathname pathspec "
-        f"should match only `.docs-agent-plugin` or `.docs-agent-plugin/*`. "
-        f"got staged: {staged_files}"
+        f"sibling at repo root must stay staged after helper run; got: {staged_files}"
     )
-    assert "docs/page.md" in staged_files
+    assert "docs/page.md" in staged_files, (
+        f"authored docs page must be staged; got: {staged_files}"
+    )
+    plugin_entries = [
+        p for p in staged_files
+        if p == ".docs-agent-plugin" or p.startswith(".docs-agent-plugin/")
+    ]
+    assert not plugin_entries, (
+        f"plugin tree must NOT be staged after helper run; got: {plugin_entries}"
+    )
 ```
 
 - [ ] **Step 2: Run the test to confirm it passes**
@@ -225,7 +268,7 @@ EOF
 
 **Files:**
 
-- Modify: `scripts/orchestrator_runner.py:1742-1768` (`_stage_docs_run_changes` docstring) + add inline comment above the `add` subprocess call (~line 1769–1772)
+- Modify: `scripts/orchestrator_runner.py:1742-1813` (`_stage_docs_run_changes` — docstring + add inline comment at the top of the function body, before the first subprocess call)
 
 - [ ] **Step 1: Locate the docstring end (line ~1768) and the add-subprocess start (line ~1769)**
 
@@ -262,18 +305,23 @@ Replace with:
     failing with `paths are ignored by one of your .gitignore files`.
 
     Mid-run modifications to tracked content under `.docs-agent-plugin/`
-    are intentionally dropped from the docs commit: `git add -A .` stages
-    them, then `git restore --staged --` reverts the index back to HEAD.
-    Docs runs should never mutate the plugin tree on the runner, so this
-    is correct — but it does mean an orchestrator bug that touched plugin
-    files would fail silently in the docs PR. (Pinned by
-    `test_stage_docs_run_changes_drops_midrun_modifications_to_tracked_plugin_content`.)
+    are dropped from the docs commit: `git add -A .` stages them, the
+    diff probe then sees the staged change under `.docs-agent-plugin/`
+    and TRIGGERS the `git restore --staged --` step (which is gated on
+    the probe finding anything — not unconditional), and the restore
+    reverts the index entry back to HEAD. Docs runs should never mutate
+    the plugin tree on the runner, so this is correct — but it does mean
+    an orchestrator bug that touched plugin files would fail silently in
+    the docs PR. (Pinned by tests in
+    `tests/orchestrator/test_gitlink_exclusion.py`.)
     """
 ```
 
-- [ ] **Step 3: Add Item C symlink-assumption inline comment**
+- [ ] **Step 3: Add Item C symlink-assumption inline comment (top of function body, scoped to all three git ops)**
 
-Find this text:
+The symlink assumption applies to ALL three git operations in this function (add, diff probe, restore), not just `add` — pathspec resolution against a symlink would shift semantics for each. Place the comment at the top of the function body so the scope is unambiguous.
+
+Find this text (the first subprocess call in the function, immediately after the closing `"""` of the docstring):
 
 ```python
     add = subprocess.run(
@@ -283,12 +331,14 @@ Find this text:
     )
 ```
 
-Replace with (adds 2-line comment above the call):
+Replace with:
 
 ```python
-    # Assumes `.docs-agent-plugin/` is a real directory (per
-    # actions/checkout@v5), not a symlink. A symlink at that path
-    # would let `add -A .` recurse into its target and over-stage.
+    # The three git operations below all assume `.docs-agent-plugin/`
+    # is a real directory (per actions/checkout@v5), not a symlink.
+    # A symlink would change pathspec semantics for add/diff/restore
+    # alike: `add -A .` would recurse into the target, and the diff
+    # probe + restore would match the link rather than its contents.
     add = subprocess.run(
         ["git", "-C", str(repo_root), "add", "-A", "."],
         capture_output=True,

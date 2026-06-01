@@ -38,7 +38,7 @@ jobs:
       # enrichment (optional)" for the same vars in the local-shell path.
       # secrets.* is valid at job-env scope (resolved at job start).
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+      JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
     steps:
       - name: Generate GitHub App installation token
         # CCE-45: see GH_TOKEN comment above. The App (docs-agent-bot,
@@ -49,12 +49,16 @@ jobs:
         id: app-token
         # CCE-54: bumped v1 -> v3 for Node-24 runtime. v1 and v2 both ship on
         # Node 20, which GitHub deprecates June 2026; v3 is the first major on
-        # Node 24. v3 emits a cosmetic `app-id` deprecation warning (the input
-        # was renamed to `app_id`); the old name still works — follow-up if/when
-        # we want to silence it.
+        # Node 24.
+        # CCE-66: v3 deprecates `app-id` in favor of `client-id` — a
+        # semantically different App field (the OAuth Client ID, format
+        # Iv1.xxxxxxxxxxxxxxxx, not the numeric App ID). Both inputs work in v3
+        # today, but only `client-id` appears in upstream examples. Stored as a
+        # repo Variable (not Secret) because Client IDs are not credentials —
+        # they are visible on the App's public settings page.
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.DOCS_AGENT_APP_ID }}
+          client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}
           private-key: ${{ secrets.DOCS_AGENT_APP_PRIVATE_KEY }}
 
       - uses: actions/checkout@v5

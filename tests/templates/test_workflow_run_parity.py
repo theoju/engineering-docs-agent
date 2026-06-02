@@ -86,25 +86,70 @@ def dogfood_doc() -> dict:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="CCE-80 plan task 8 lifts: full step-signature parity awaits CCE-73 stdout echo bundle + dogfood id co-edit"
-)
 def test_01_step_signature_parity(template_doc, dogfood_doc) -> None:
-    raise AssertionError("not yet implemented — see CCE-80 plan task 8")
+    """For each step in dogfood, the template has a step with the same uses:
+    or run-first-line signature, modulo _ALLOWLIST. Match on signature + id."""
+    template_steps = list(template_doc["jobs"].values())[0]["steps"]
+    dogfood_steps = list(dogfood_doc["jobs"].values())[0]["steps"]
+
+    def _signature(step: dict) -> str:
+        uses = step.get("uses")
+        sid = step.get("id")
+        if uses:
+            return f"uses:{uses}" + (f"#{sid}" if sid else "")
+        run = step.get("run", "")
+        first = (run.splitlines() or [""])[0].strip()
+        return f"run:{first}"
+
+    template_sigs = {_signature(s) for s in template_steps}
+    dogfood_sigs = {_signature(s) for s in dogfood_steps}
+
+    missing_in_template = dogfood_sigs - template_sigs - set(_ALLOWLIST)
+    assert not missing_in_template, (
+        "Dogfood steps with no template counterpart and no allowlist entry: "
+        f"{sorted(missing_in_template)}.\n"
+        "Action: absorb into templates/workflow-run.yml OR add an _ALLOWLIST "
+        "entry in tests/templates/test_workflow_run_parity.py with rationale."
+    )
 
 
-@pytest.mark.xfail(
-    reason="CCE-80 plan task 8 lifts: with-key contract on all absorbed actions"
-)
 def test_02_with_key_contract(template_doc, dogfood_doc) -> None:
-    raise AssertionError("not yet implemented — see CCE-80 plan task 8")
+    """Each step using an action listed in _WITH_KEY_CONTRACT has the
+    documented keys present. Extra keys are allowed."""
+    for doc, label in [(template_doc, "template"), (dogfood_doc, "dogfood")]:
+        steps = list(doc["jobs"].values())[0]["steps"]
+        for step in steps:
+            uses = step.get("uses")
+            if uses in _WITH_KEY_CONTRACT:
+                with_block = step.get("with") or {}
+                expected = _WITH_KEY_CONTRACT[uses]
+                # checkout-plugin step legitimately doesn't carry `token:`.
+                if (
+                    uses == "actions/checkout@v5"
+                    and step.get("id") == "checkout-plugin"
+                ):
+                    continue
+                missing = expected - set(with_block.keys())
+                assert not missing, (
+                    f"{label}: step `{step.get('name')}` uses {uses} but "
+                    f"missing required with: keys {sorted(missing)}"
+                )
 
 
-@pytest.mark.xfail(
-    reason="CCE-80 plan task 8 lifts: substring asserts include partial_reasons (CCE-73 bundle)"
-)
 def test_03_high_value_substring_asserts(template_doc, dogfood_doc) -> None:
-    raise AssertionError("not yet implemented — see CCE-80 plan task 8")
+    """Substring asserts on the parsed `run:` scalar (not raw bytes)."""
+    for doc, label in [(template_doc, "template"), (dogfood_doc, "dogfood")]:
+        steps = list(doc["jobs"].values())[0]["steps"]
+        run_blocks = [s.get("run", "") for s in steps]
+        joined = "\n---\n".join(str(r) for r in run_blocks)
+
+        assert "sk-ant-oat" in joined, f"{label}: missing sk-ant-oat assertion"
+        assert "sk-ant-api" in joined, f"{label}: missing sk-ant-api arm"
+        assert "which claude" in joined, f"{label}: missing which-claude verify"
+        assert "engineering-docs-agent[bot]" in joined, f"{label}: missing bot identity"
+        assert "partial_reasons" in joined, (
+            f"{label}: missing partial_reasons echo (CCE-73 bundle)"
+        )
 
 
 def test_04_literal_equals_shape_contract(template_doc, dogfood_doc) -> None:
@@ -169,11 +214,37 @@ def test_05_app_token_conditional_shape(template_doc, dogfood_doc) -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="CCE-80 plan task 8 lifts: allowlist orphan/redundant guards run when all steps present"
-)
 def test_06_stale_allowlist_entries(template_doc, dogfood_doc) -> None:
-    raise AssertionError("not yet implemented — see CCE-80 plan task 8")
+    """Every _ALLOWLIST entry matches at least one step; no entry matches a step
+    present in BOTH (redundant-allowlist guard)."""
+    template_steps = list(template_doc["jobs"].values())[0]["steps"]
+    dogfood_steps = list(dogfood_doc["jobs"].values())[0]["steps"]
+
+    def _signature(step: dict) -> str:
+        uses = step.get("uses")
+        sid = step.get("id")
+        if uses:
+            return f"uses:{uses}" + (f"#{sid}" if sid else "")
+        run = step.get("run", "")
+        first = (run.splitlines() or [""])[0].strip()
+        return f"run:{first}"
+
+    template_sigs = {_signature(s) for s in template_steps}
+    dogfood_sigs = {_signature(s) for s in dogfood_steps}
+
+    for key in _ALLOWLIST:
+        in_template = key in template_sigs
+        in_dogfood = key in dogfood_sigs
+        if not (in_template or in_dogfood):
+            raise AssertionError(
+                f"stale allowlist entry `{key}` — no matching step in dogfood "
+                f"or template. Delete from _ALLOWLIST or update."
+            )
+        if in_template and in_dogfood:
+            raise AssertionError(
+                f"redundant allowlist entry `{key}` — present in both files. "
+                "Remove from _ALLOWLIST."
+            )
 
 
 def test_07_run_summary_if_always(template_doc, dogfood_doc) -> None:

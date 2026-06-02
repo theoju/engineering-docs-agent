@@ -62,7 +62,9 @@ jobs:
           client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}
           private-key: ${{ secrets.DOCS_AGENT_APP_PRIVATE_KEY }}
 
-      - uses: actions/checkout@v5
+      - name: Checkout host repo
+        id: checkout-host
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0 # full history so state.json window math sees all merges
           # CCE-45: checkout configures git's credential helper from this
@@ -196,3 +198,15 @@ jobs:
             fi
             echo '  ```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Print partial-run reasons
+        # CCE-73 (bundled in CCE-80 PR per CO-EDIT locked decision): echo
+        # state.json.current_run.partial_reasons to stdout so they show in
+        # `gh run view --log` even when the run-summary block is collapsed.
+        if: always()
+        shell: bash
+        run: |
+          state=".engineering-docs-agent/state.json"
+          if [ -f "$state" ]; then
+            jq -r '.current_run.partial_reasons[]? // empty' "$state" || true
+          fi

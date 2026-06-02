@@ -193,3 +193,16 @@ jobs:
             fi
             echo '  ```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Print partial-run reasons
+        # CCE-73: echo state.json.current_run.partial_reasons to stdout so
+        # they show in `gh run view --log` even when the run-summary block
+        # is collapsed. `// empty` null-safe + `|| true` so a malformed
+        # state.json doesn't fail this step.
+        if: always()
+        shell: bash
+        run: |
+          state=".engineering-docs-agent/state.json"
+          if [ -f "$state" ]; then
+            jq -r '.current_run.partial_reasons[]? // empty' "$state" || true
+          fi

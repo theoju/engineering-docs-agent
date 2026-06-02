@@ -223,3 +223,59 @@ def test_discover_surfaces_toolchain_block(tmp_path):
         "package_manager",
         "docusaurus_dep",
     }
+
+
+def test_discover_git_origin_https_url(tmp_path, monkeypatch) -> None:
+    """HTTPS clone URL → {owner, repo} extracted."""
+    import subprocess
+
+    import setup_discover
+
+    def fake_run(cmd, **kw):
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout="https://github.com/theoju/engineering-docs-agent.git\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(setup_discover.subprocess, "run", fake_run)
+
+    result = setup_discover.discover_git_origin(tmp_path)
+    assert result == {"owner": "theoju", "repo": "engineering-docs-agent"}
+
+
+def test_discover_git_origin_ssh_url(tmp_path, monkeypatch) -> None:
+    """SSH clone URL → {owner, repo} extracted."""
+    import subprocess
+
+    import setup_discover
+
+    def fake_run(cmd, **kw):
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout="git@github.com:theoju/adis.git\n", stderr=""
+        )
+
+    monkeypatch.setattr(setup_discover.subprocess, "run", fake_run)
+
+    result = setup_discover.discover_git_origin(tmp_path)
+    assert result == {"owner": "theoju", "repo": "adis"}
+
+
+def test_discover_git_origin_no_remote(tmp_path, monkeypatch) -> None:
+    """No `origin` remote → None (caller falls back to AskUserQuestion)."""
+    import subprocess
+
+    import setup_discover
+
+    def fake_run(cmd, **kw):
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=128,
+            stdout="",
+            stderr="error: No such remote 'origin'\n",
+        )
+
+    monkeypatch.setattr(setup_discover.subprocess, "run", fake_run)
+
+    assert setup_discover.discover_git_origin(tmp_path) is None

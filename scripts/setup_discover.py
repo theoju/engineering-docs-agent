@@ -1,7 +1,7 @@
 """Auto-discover host repo settings for the setup skill."""
 
 from __future__ import annotations
-import argparse, json, sys
+import argparse, json, re, subprocess, sys
 from pathlib import Path
 
 
@@ -200,6 +200,33 @@ def detect_pages_publishable(framework: str | None, ci: str | None) -> bool:
     return ci == "github_actions" and framework == "mkdocs"
 
 
+_REMOTE_PATTERN = re.compile(r"github\.com[:/]([^/]+)/([^/.]+?)(?:\.git)?/?$")
+
+
+def discover_git_origin(repo_root: Path) -> dict | None:
+    """Return {owner, repo} parsed from `git remote get-url origin`, or None.
+
+    Returns None if no `origin` remote exists, or the URL doesn't match the
+    github.com pattern. Caller (SKILL.md) falls back to AskUserQuestion.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, FileNotFoundError):
+        return None
+    if result.returncode != 0:
+        return None
+    m = _REMOTE_PATTERN.search(result.stdout.strip())
+    if not m:
+        return None
+    return {"owner": m.group(1), "repo": m.group(2)}
+
+
 def discover(cwd: Path) -> dict:
     """Discover host repo settings. Returns a structured dict with optional warnings."""
     warnings: list[dict] = []
@@ -228,6 +255,7 @@ def discover(cwd: Path) -> dict:
         "openapi_hint": detect_openapi_hint(cwd),
         "toolchain": detect_toolchain(cwd),
         "pages_publishable": detect_pages_publishable(framework, ci),
+        "git": discover_git_origin(cwd),
     }
     if warnings:
         out["warnings"] = warnings

@@ -1,0 +1,5 @@
+# Dev-only dependencies — NOT shipped to host repos.
+# templates/docs-requirements.txt is the host-facing list; keep this separate.
+
+ruamel.yaml>=0.18  # YAML 1.2 parser for tests/templates/test_workflow_run_parity.py
+                   # PyYAML SafeLoader collapses YAML-1.1 `on:` → True; ruamel preserves it as a string.

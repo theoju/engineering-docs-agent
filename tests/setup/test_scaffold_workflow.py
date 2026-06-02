@@ -6,7 +6,6 @@ explicit-substring lock against the CI1 regex-spacing bug.
 
 from __future__ import annotations
 
-import hashlib
 import shutil
 import subprocess
 import sys
@@ -19,12 +18,6 @@ HELPER = ROOT / "scripts" / "scaffold_workflow.py"
 TEMPLATE = ROOT / "templates" / "workflow-run.yml"
 
 sys.path.insert(0, str(ROOT / "scripts"))
-
-
-def _expected_minute(owner: str, repo: str) -> int:
-    """Mirror of the production algorithm (NOT a tautology — bounds + distribution
-    + real-template round-trip catch lockstep drift)."""
-    return int(hashlib.sha256(f"{owner}/{repo}".encode()).hexdigest(), 16) % 51 + 5
 
 
 def test_deterministic_cron_minute_stable() -> None:
@@ -40,17 +33,24 @@ def test_deterministic_cron_minute_stable() -> None:
 
 
 def test_known_fixture_minutes() -> None:
-    """Lock specific (owner, repo) → minute mappings. Regenerate _expected_minute
-    output if the algorithm changes intentionally."""
+    """Lock specific (owner, repo) → minute integer values. Algorithm drift in
+    deterministic_cron_minute will surface here. Regenerate the integers via:
+
+        python3 -c "import hashlib; print(int(hashlib.sha256(b'theoju/adis').hexdigest(), 16) % 51 + 5)"
+    """
     from scaffold_workflow import deterministic_cron_minute
 
-    for owner, repo in [
-        ("theoju", "adis"),
-        ("theoju", "ccsa"),
-        ("theoju", "data-importer"),
-        ("theoju", "dogfood"),
-    ]:
-        assert deterministic_cron_minute(owner, repo) == _expected_minute(owner, repo)
+    # Hardcoded — NOT a mirror of the algorithm. Algorithm drift = test failure.
+    expected = {
+        ("theoju", "adis"): 37,
+        ("theoju", "ccsa"): 44,
+        ("theoju", "data-importer"): 35,
+        ("theoju", "dogfood"): 25,
+    }
+    for (owner, repo), minute in expected.items():
+        assert deterministic_cron_minute(owner, repo) == minute, (
+            f"{owner}/{repo}: expected {minute}, got {deterministic_cron_minute(owner, repo)}"
+        )
 
 
 def test_cron_minute_bounds() -> None:

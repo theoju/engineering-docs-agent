@@ -77,7 +77,9 @@ def _main() -> int:
     rendered = rewrite_cron(text, args.owner, args.repo)
 
     if args.out:
-        Path(args.out).write_text(rendered)
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(rendered)
     else:
         sys.stdout.write(rendered)
     return 0

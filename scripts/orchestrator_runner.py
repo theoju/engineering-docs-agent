@@ -25,6 +25,7 @@ from state_io import (
     save_current_run,
     save_persistent_state,
 )
+from stderr_emit import _OBSERVABILITY_FLUSH, _redact_credentials, emit_log
 
 
 def detect_repo(repo_root: Path) -> dict[str, str]:
@@ -640,7 +641,7 @@ class _BootstrapProgress:
             tmp.write_text(json.dumps(self._state, indent=2))
             os.replace(tmp, self._path)
         except OSError as e:
-            print(f"bootstrap.progress.json write failed: {e}", file=sys.stderr)
+            emit_log(f"bootstrap.progress.json write failed: {e}")
             try:
                 tmp.unlink(missing_ok=True)
             except OSError:
@@ -680,7 +681,7 @@ class _BootstrapProgress:
         try:
             self._path.unlink(missing_ok=True)
         except OSError as e:
-            print(f"bootstrap.progress.json cleanup failed: {e}", file=sys.stderr)
+            emit_log(f"bootstrap.progress.json cleanup failed: {e}")
 
 
 def _page_target_is_editable(rel_posix: str, editable_globs: list[str]) -> bool:
@@ -966,19 +967,19 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     state_path = repo_root / ".engineering-docs-agent" / "state.json"
     if not cfg_path.exists():
-        print("no config", file=sys.stderr)
+        emit_log("no config")
         return 2
 
     try:
         config = load_config_validated(cfg_path)
     except ConfigError as e:
-        print(f"config invalid: {e}", file=sys.stderr)
+        emit_log(f"config invalid: {e}")
         return 2
     voice_samples = load_voice_samples(repo_root, config)
     try:
         state = load_state_validated(state_path)
     except StateError as e:
-        print(f"state invalid: {e}", file=sys.stderr)
+        emit_log(f"state invalid: {e}")
         return 2
     state.setdefault("version", "1")
 
@@ -1219,18 +1220,15 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                     try:
                         rel = fail_path.resolve().relative_to(repo_root.resolve())
                     except ValueError:
-                        state["current_run"]["partial"] = True
-                        state["current_run"]["partial_reasons"].append(
-                            f"lint_block_unsafe_path: {fail['path']} (outside repo)"
+                        add_partial(
+                            state,
+                            f"lint_block_unsafe_path: {fail['path']} (outside repo)",
                         )
                         continue
                     # Reject empty / "." paths that would cause git checkout HEAD -- .
                     # to restore the entire working tree.
                     if str(rel) in (".", ""):
-                        state["current_run"]["partial"] = True
-                        state["current_run"]["partial_reasons"].append(
-                            f"lint_block_unsafe_path: empty path"
-                        )
+                        add_partial(state, "lint_block_unsafe_path: empty path")
                         continue
                     # If the file exists in HEAD, restore it (edit case).
                     # If not (create case), remove it.
@@ -1264,9 +1262,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                     else:
                         fail_path.unlink(missing_ok=True)
                         cleanup_empty_parents(fail_path, until=repo_root)
-                    state["current_run"]["partial"] = True
-                    state["current_run"]["partial_reasons"].append(
-                        f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}"
+                    add_partial(
+                        state,
+                        f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}",
                     )
 
         # Archive index regeneration
@@ -1409,10 +1407,8 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             safe_reasons = [
                 _redact_credentials(r) for r in state["current_run"]["partial_reasons"]
             ]
-            print(
-                f"docs-agent: orchestrator exiting 1; partial_reasons={safe_reasons}",
-                file=sys.stderr,
-                flush=True,
+            emit_log(
+                f"docs-agent: orchestrator exiting 1; partial_reasons={safe_reasons}"
             )
             return 1
         state["current_run"]["pr_number"] = pr_number
@@ -1457,6 +1453,10 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             save_current_run(state_path, state)
         return 0
     finally:
+        try:
+            _emit_shutdown_dump(state)
+        except OSError as exc:
+            emit_log(f"docs-agent: _emit_shutdown_dump failed: {exc}")
         _write_step_summary(state, repo_root)
 
 
@@ -1490,22 +1490,22 @@ def run_bootstrap_core(
 
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     if not cfg_path.exists():
-        print("no config", file=sys.stderr)
+        emit_log("no config")
         return 2
     try:
         config = load_config_validated(cfg_path)
     except ConfigError as e:
-        print(f"config invalid: {e}", file=sys.stderr)
+        emit_log(f"config invalid: {e}")
         return 2
 
     docs_dir = _resolve_docs_dir(config)
     if docs_dir is None:
-        print("no docs_dir; nothing to bootstrap", file=sys.stderr)
+        emit_log("no docs_dir; nothing to bootstrap")
         return 0
 
     manifest_path = repo_root / docs_dir / ".doc-core-manifest.json"
     if not manifest_path.exists():
-        print("no core manifest; run setup first", file=sys.stderr)
+        emit_log("no core manifest; run setup first")
         return 0
     pages = _load_core_manifest_pages(repo_root, docs_dir)
     if not pages:
@@ -1709,6 +1709,54 @@ def _format_partial_digest(partial_reasons: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _emit_shutdown_dump(state: dict) -> None:
+    """Emit a one-reason-per-line stderr summary of partial_reasons.
+
+    Called from run()'s finally block BEFORE _write_step_summary. Covers
+    the exit-0 partial run case (notifier completes, PR opens with
+    WARNING-Partial digest, run returns 0 — currently no log signal)
+    AND fires again on exit-1 alongside the existing pre-finally dump
+    at line 1412 (belt-and-suspenders).
+
+    Gating: non-empty `state['current_run']['partial_reasons']`. NOT
+    gated on `partial` — info_only reasons still warrant exit-time
+    visibility. Matches the precedent at _write_step_summary (gates on
+    reasons list, not partial flag).
+
+    Prefix policy (Open Question Option (a) — locked):
+      - PARTIAL for all reasons when state['current_run']['partial'] is True
+        (the common case: any non-info_only reason has flipped it).
+      - INFO for all reasons when partial is False (info_only-only run).
+    Per-reason PARTIAL vs INFO granularity is visible only in the per-call
+    emit during the run, never in the shutdown dump.
+
+    Implementation: uses print() directly, NOT emit_stderr/emit_log,
+    so OSError propagates to the caller. emit_stderr/emit_log are
+    best-effort (OSError-swallowed); the shutdown dump is the operator's
+    last-resort observability signal and must fail loudly if stderr is
+    broken. Still calls _redact_credentials per reason for defense-in-depth
+    (reasons are already redacted at add_partial entry, but a future
+    contributor bypassing add_partial cannot leak via the shutdown dump).
+    """
+    cr = state.get("current_run") or {}
+    reasons = cr.get("partial_reasons") or []
+    if not reasons:
+        return
+    prefix = "PARTIAL" if cr.get("partial") else "INFO"
+    print(
+        f"docs-agent: run exit summary (reasons={len(reasons)}):",
+        file=sys.stderr,
+        flush=_OBSERVABILITY_FLUSH,
+    )
+    for r in reasons:
+        safe = _redact_credentials(r)
+        print(
+            f"docs-agent {prefix}: {safe}",
+            file=sys.stderr,
+            flush=_OBSERVABILITY_FLUSH,
+        )
+
+
 def _write_step_summary(state: dict, repo_root: Path) -> None:
     """Append the partial-reasons digest to $GITHUB_STEP_SUMMARY.
 
@@ -1827,23 +1875,6 @@ def _stage_docs_run_changes(repo_root: Path) -> tuple[int, str]:
     if restore.returncode != 0:
         return restore.returncode, restore.stderr.strip()
     return 0, ""
-
-
-_CREDENTIAL_URL_RE = re.compile(r"(https?://)[^@/\s]*@")
-
-
-def _redact_credentials(text: str) -> str:
-    """Strip embedded credentials from URLs in failure reasons.
-
-    CCE-73 defense in depth: `git push` and `gh` auth failures can embed
-    `https://x-access-token:ghs_xxxxx@github.com/...` URLs in stderr.
-    Truncation to `_STDERR_TRUNCATE` bounds length but does not redact.
-    GitHub Actions only redacts secret patterns it has registered for the
-    run — tokens sourced via external actions or runtime-generated
-    installation tokens may slip through. Redact at the source so the same
-    string is safe in both stderr and state.json.
-    """
-    return _CREDENTIAL_URL_RE.sub(r"\1<redacted>@", text)
 
 
 def _record_failure(

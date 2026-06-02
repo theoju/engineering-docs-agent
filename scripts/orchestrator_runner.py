@@ -641,7 +641,7 @@ class _BootstrapProgress:
             tmp.write_text(json.dumps(self._state, indent=2))
             os.replace(tmp, self._path)
         except OSError as e:
-            print(f"bootstrap.progress.json write failed: {e}", file=sys.stderr)
+            emit_log(f"bootstrap.progress.json write failed: {e}")
             try:
                 tmp.unlink(missing_ok=True)
             except OSError:
@@ -681,7 +681,7 @@ class _BootstrapProgress:
         try:
             self._path.unlink(missing_ok=True)
         except OSError as e:
-            print(f"bootstrap.progress.json cleanup failed: {e}", file=sys.stderr)
+            emit_log(f"bootstrap.progress.json cleanup failed: {e}")
 
 
 def _page_target_is_editable(rel_posix: str, editable_globs: list[str]) -> bool:
@@ -967,19 +967,19 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     state_path = repo_root / ".engineering-docs-agent" / "state.json"
     if not cfg_path.exists():
-        print("no config", file=sys.stderr)
+        emit_log("no config")
         return 2
 
     try:
         config = load_config_validated(cfg_path)
     except ConfigError as e:
-        print(f"config invalid: {e}", file=sys.stderr)
+        emit_log(f"config invalid: {e}")
         return 2
     voice_samples = load_voice_samples(repo_root, config)
     try:
         state = load_state_validated(state_path)
     except StateError as e:
-        print(f"state invalid: {e}", file=sys.stderr)
+        emit_log(f"state invalid: {e}")
         return 2
     state.setdefault("version", "1")
 
@@ -1407,10 +1407,8 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             safe_reasons = [
                 _redact_credentials(r) for r in state["current_run"]["partial_reasons"]
             ]
-            print(
-                f"docs-agent: orchestrator exiting 1; partial_reasons={safe_reasons}",
-                file=sys.stderr,
-                flush=True,
+            emit_log(
+                f"docs-agent: orchestrator exiting 1; partial_reasons={safe_reasons}"
             )
             return 1
         state["current_run"]["pr_number"] = pr_number
@@ -1492,22 +1490,22 @@ def run_bootstrap_core(
 
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     if not cfg_path.exists():
-        print("no config", file=sys.stderr)
+        emit_log("no config")
         return 2
     try:
         config = load_config_validated(cfg_path)
     except ConfigError as e:
-        print(f"config invalid: {e}", file=sys.stderr)
+        emit_log(f"config invalid: {e}")
         return 2
 
     docs_dir = _resolve_docs_dir(config)
     if docs_dir is None:
-        print("no docs_dir; nothing to bootstrap", file=sys.stderr)
+        emit_log("no docs_dir; nothing to bootstrap")
         return 0
 
     manifest_path = repo_root / docs_dir / ".doc-core-manifest.json"
     if not manifest_path.exists():
-        print("no core manifest; run setup first", file=sys.stderr)
+        emit_log("no core manifest; run setup first")
         return 0
     pages = _load_core_manifest_pages(repo_root, docs_dir)
     if not pages:

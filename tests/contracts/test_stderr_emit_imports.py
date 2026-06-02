@@ -5,8 +5,8 @@ import from scripts.state_io or scripts.orchestrator_runner — doing so
 creates a cycle that breaks state_io's role as the data layer.
 
 Also locks Acceptance Criterion #8: no raw `print(..., file=sys.stderr)`
-remains in scripts/orchestrator_runner.py outside the single intentional
-_record_failure site.
+remains in scripts/orchestrator_runner.py outside the two intentional
+sites: _record_failure and _emit_shutdown_dump.
 """
 
 from __future__ import annotations
@@ -35,47 +35,43 @@ def test_stderr_emit_module_imports_only_stdlib():
     )
 
 
-@pytest.mark.xfail(
-    reason="Pending Task 7: 9 raw print(..., file=sys.stderr) sites at "
-    "lines 643, 683, 969, 975, 981, 1493, 1498, 1503, 1508 are migrated "
-    "to emit_log; the exit-1 dump at 1412 is also routed through emit_log. "
-    "Remove this xfail in Task 7.",
-    strict=True,
-)
 def test_no_new_raw_stderr_prints_in_orchestrator_runner():
     """Acceptance Criterion #8: every stderr write in orchestrator_runner.py
-    routes through stderr_emit (emit_stderr / emit_log) EXCEPT the single
-    intentional _record_failure site, which stays direct.
+    routes through stderr_emit (emit_stderr / emit_log) EXCEPT TWO
+    intentional sites:
+      1. _record_failure (line ~1893) — fires before any later crash; must
+         emit at failure source, can't be best-effort.
+      2. _emit_shutdown_dump — last-resort shutdown signal; must propagate
+         OSError, so cannot use emit_stderr/emit_log (which swallow it).
 
-    This test reads the source and asserts the only `print(..., file=sys.stderr`
-    match lives inside the body of _record_failure (matched by surrounding
-    `def _record_failure` text).
+    Reads the source and asserts every raw `print(..., file=sys.stderr`
+    match falls inside the body of one of these two functions.
     """
     src = Path("scripts/orchestrator_runner.py").read_text()
-    # Find all raw stderr-print call sites (allow flush kwarg ordering).
     raw_pattern = re.compile(r"print\([^)]*file=sys\.stderr", re.DOTALL)
     matches = list(raw_pattern.finditer(src))
-    # The single allowed site is inside _record_failure. Identify it by
-    # locating the def and asserting the match falls between that def and
-    # the next top-level def (or the next blank-line + def).
-    record_failure_start = src.find("def _record_failure(")
-    assert record_failure_start != -1, "_record_failure should still exist"
-    # Find the next top-level def after _record_failure to bound its body.
-    next_def_after = src.find("\ndef ", record_failure_start + 1)
-    if next_def_after == -1:
-        next_def_after = len(src)
+
+    allowed_funcs = ("_record_failure", "_emit_shutdown_dump")
+    allowed_ranges = []
+    for func_name in allowed_funcs:
+        start = src.find(f"def {func_name}(")
+        assert start != -1, f"{func_name} should exist in orchestrator_runner.py"
+        next_def = src.find("\ndef ", start + 1)
+        if next_def == -1:
+            next_def = len(src)
+        allowed_ranges.append((start, next_def, func_name))
 
     offending = []
     for m in matches:
         start = m.start()
-        in_record_failure = record_failure_start <= start < next_def_after
-        if not in_record_failure:
-            # Compute approximate line number for the error message.
+        in_allowed = any(lo <= start < hi for lo, hi, _ in allowed_ranges)
+        if not in_allowed:
             line_no = src.count("\n", 0, start) + 1
             offending.append((line_no, src[start : start + 80]))
 
     assert not offending, (
-        "Raw `print(..., file=sys.stderr` outside _record_failure — must "
-        "route through scripts.stderr_emit.emit_stderr or emit_log:\n"
+        "Raw `print(..., file=sys.stderr` outside _record_failure / "
+        "_emit_shutdown_dump — must route through scripts.stderr_emit."
+        "emit_stderr or emit_log:\n"
         + "\n".join(f"  line {ln}: {snippet!r}" for ln, snippet in offending)
     )

@@ -40,7 +40,7 @@ _ALLOWLIST: dict[str, str] = {
 # (triggers, env keys, if-expressions, with-keys). These are NOT enforced by any
 # test function — they record WHY the human reviewer should accept these
 # divergences when reading the diff. See spec §5.2.
-_TEMPLATE_ONLY_DIVERGENCES = {
+_TEMPLATE_ONLY_DIVERGENCES: dict[str, str] = {
     "on.pull_request.types == [closed]": "Template-only trigger: real-time docs update on merge for hosts (D4)",
     "jobs.run.if contains `github.event_name == 'schedule'`": "Template-only job-level guard: paired with pull_request.closed trigger (D4 self-loop)",
     "with.path == .docs-agent-plugin": "Template-only: vendored-plugin checkout target (paired with checkout-plugin step)",

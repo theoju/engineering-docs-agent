@@ -106,6 +106,28 @@ jobs:
           npm install -g @anthropic-ai/claude-code
           which claude || (echo "claude CLI not installed" && exit 1)
 
+      - name: Assert OAuth token (sk-ant-oat*, len ≥ 32)
+        id: assert-oauth
+        if: vars.DOCS_AGENT_SKIP_OAUTH_ASSERT != 'true'
+        # Enterprise / Bedrock / Vertex hosts use different auth — set
+        # `vars.DOCS_AGENT_SKIP_OAUTH_ASSERT` to `'true'` to skip this check.
+        # CCE-49: three layered checks, cheapest first.
+        shell: bash
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is empty or unset. Set it in repo secrets."
+            exit 1
+          fi
+          case "$CLAUDE_CODE_OAUTH_TOKEN" in
+            sk-ant-oat*) ;;
+            sk-ant-api*) echo "::error::CLAUDE_CODE_OAUTH_TOKEN looks like a console API key (sk-ant-api*). The Claude CLI reads the OAuth slot (sk-ant-oat*). Run 'claude setup-token' and paste that value."; exit 1 ;;
+            *) echo "::error::CLAUDE_CODE_OAUTH_TOKEN has unexpected prefix. Expected sk-ant-oat*. Got prefix: ${CLAUDE_CODE_OAUTH_TOKEN:0:10}..."; exit 1 ;;
+          esac
+          if [ ${#CLAUDE_CODE_OAUTH_TOKEN} -lt 32 ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is suspiciously short (${#CLAUDE_CODE_OAUTH_TOKEN} chars). Likely truncated paste."
+            exit 1
+          fi
+
       - name: Configure git identity
         id: git-identity
         # The runner does `git commit` itself; without an identity it errors

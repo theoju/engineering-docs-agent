@@ -25,6 +25,7 @@ from state_io import (
     save_current_run,
     save_persistent_state,
 )
+from stderr_emit import _redact_credentials
 
 
 def detect_repo(repo_root: Path) -> dict[str, str]:
@@ -1824,23 +1825,6 @@ def _stage_docs_run_changes(repo_root: Path) -> tuple[int, str]:
     if restore.returncode != 0:
         return restore.returncode, restore.stderr.strip()
     return 0, ""
-
-
-_CREDENTIAL_URL_RE = re.compile(r"(https?://)[^@/\s]*@")
-
-
-def _redact_credentials(text: str) -> str:
-    """Strip embedded credentials from URLs in failure reasons.
-
-    CCE-73 defense in depth: `git push` and `gh` auth failures can embed
-    `https://x-access-token:ghs_xxxxx@github.com/...` URLs in stderr.
-    Truncation to `_STDERR_TRUNCATE` bounds length but does not redact.
-    GitHub Actions only redacts secret patterns it has registered for the
-    run — tokens sourced via external actions or runtime-generated
-    installation tokens may slip through. Redact at the source so the same
-    string is safe in both stderr and state.json.
-    """
-    return _CREDENTIAL_URL_RE.sub(r"\1<redacted>@", text)
 
 
 def _record_failure(

@@ -1,3 +1,11 @@
+---
+status: draft
+sources:
+  - https://github.com/theoju/engineering-docs-agent/pull/91
+  - https://github.com/theoju/engineering-docs-agent/pull/79
+synthesized_into: []
+---
+
 # Setup Guide
 
 End-to-end walkthrough: from zero to a working `engineering-docs-agent` nightly docs-PR pipeline on a new host repo.
@@ -323,6 +331,24 @@ Root cause: token may be missing, wrong type (e.g. `sk-ant-api…` console key p
 
 **Fix:** the CCE-49 multi-stage assert distinguishes between these modes with distinct `::error::` messages. Re-paste from `claude setup-token`.
 
+### Symptom: workflow fails with "Unrecognized input: app-id" or similar
+
+Root cause: you set up the workflow before PR #91 (CCE-66), which migrated `actions/create-github-app-token@v3` from the deprecated `app-id` input to the current `client-id` input. The action removed the old input and any workflow still referencing `app-id` will fail at the token-mint step.
+
+**Fix:** in `.github/workflows/docs-agent-nightly.yml`, change:
+
+```yaml
+app-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}
+```
+
+to:
+
+```yaml
+client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}
+```
+
+The secret and variable names (`DOCS_AGENT_APP_CLIENT_ID`, `DOCS_AGENT_APP_PRIVATE_KEY`) remain unchanged — only the YAML input key changes. If you also had `JIRA_EMAIL` stored as a Secret, move it to a repo Variable (Settings → Secrets and variables → Actions → Variables tab) — email addresses carry no credential value and benefit from being visible in logs.
+
 ### Symptom: branch protection blocks merge with "head not up-to-date"
 
 Expected behavior when `strict=true`. Resolve by merging `origin/main` into the PR branch and pushing.
@@ -336,7 +362,7 @@ For a fresh host repo:
 - [ ] Run `claude setup-token`, copy the OAuth token.
 - [ ] Register the GitHub App (Part 1.2).
 - [ ] Download the App's private key (`.pem` file).
-- [ ] Note the App ID.
+- [ ] Note the App Client ID (the value shown on the App's General page — `Iv1.xxx` or `Iv23li…`).
 - [ ] (Optional) Generate an Atlassian API token.
 
 **Per host (Part 2 + Part 5):**
@@ -374,3 +400,4 @@ Key tickets that shaped this guide:
 - **CCE-56**: This guide.
 - **CCE-57, CCE-58**: Onboarding the next two hosts (exercises this guide; surfaces gaps).
 - **CCE-59**: Remove `pull_request paths:` filter on the actionlint workflow so it runs on every PR (unblocks the required-check + path-filter footgun).
+- **CCE-66**: Migrate `actions/create-github-app-token@v3` from the deprecated `app-id` input to `client-id`; reclassify `JIRA_EMAIL` from a repo Secret to a repo Variable.

@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/66
+  - https://github.com/theoju/engineering-docs-agent/pull/91
 synthesized_into: []
 ---
 
@@ -13,7 +14,19 @@ The nightly authoring pipeline runs automatically at 07:07 UTC via `.github/work
 
 The default `GITHUB_TOKEN` GitHub injects into every workflow run is subject to a loop-prevention rule: any commit or PR it authors suppresses both `pull_request` and `push` event triggers. That means every PR the docs-agent opens would sit inert — your pytest and diagram-gate workflows never fire, and you'd need a manual empty-commit push to wake them up.
 
-The workflow mints a GitHub App installation token instead (`actions/create-github-app-token@v3`, step id `app-token`). App-installation tokens are exempt from the suppression rule, so CI fires normally on docs-agent PRs.
+The workflow mints a GitHub App installation token using `actions/create-github-app-token@v3` (step id `app-token`). App-installation tokens are exempt from the suppression rule, so CI fires normally on docs-agent PRs.
+
+The action requires the **`client-id:`** input — the older `app-id:` input is deprecated and will be removed in a future release of that action. Use `client-id:` in all new and updated workflows:
+
+```yaml
+# .github/workflows/docs-agent-nightly.yml
+- name: Generate GitHub App token
+  id: app-token
+  uses: actions/create-github-app-token@v3
+  with:
+    client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}     # Variable, not Secret
+    private-key: ${{ secrets.DOCS_AGENT_APP_PRIVATE_KEY }}
+```
 
 Two credentials back this up — one Variable, one Secret:
 
@@ -41,6 +54,19 @@ The correct placement is on the "Run nightly authoring" step:
 Moving this reference to job-level `env:` (a common refactor instinct) causes the workflow to fail at validation time with a confusing `steps.*` context error. Keep it at step level.
 
 The `actions/checkout` step also consumes the token — via `with.token: ${{ steps.app-token.outputs.token }}` — so `git push` from the runner uses the App credential. Both usages are valid at step scope because the `app-token` step runs before them.
+
+## Jira credentials
+
+Jira enrichment requires two values at runtime. Their tier matters — one is a Variable, one is a Secret:
+
+| Name             | Tier     | Purpose                                                                                                  |
+| ---------------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `JIRA_EMAIL`     | Variable | Atlassian account email used for Jira API basic-auth. Not sensitive — set via `gh variable set JIRA_EMAIL your@email.com` or the Variables tab. |
+| `JIRA_API_TOKEN` | Secret   | Atlassian Cloud API token. Sensitive — set via `gh secret set` or the Secrets tab.                      |
+
+`JIRA_EMAIL` is a plain email address with no credential value. Storing it as a Repository Variable (not a Secret) keeps your Secrets list uncluttered and avoids unnecessary masking in log output. If you previously stored it as a Secret, move it to Variables — no code changes are required on the workflow side.
+
+Missing both values at runtime is non-fatal: the orchestrator continues, sets `jira_issues: []`, and marks the run `partial: true` with `error: "jira_auth_missing"`. The gap surfaces in `state.json` and in Slack/email notifications. See `agents/source-collector.md` §Forbidden outputs for the agent-side contract.
 
 ## Triggering manually
 

@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/68
+  - https://github.com/theoju/engineering-docs-agent/pull/91
 synthesized_into: []
 ---
 
@@ -17,6 +18,8 @@ Set both of the following in your repository's **Settings → Secrets and variab
 | ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `JIRA_API_TOKEN` | Secret   | Atlassian Cloud API token from [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) |
 | `JIRA_EMAIL`     | Variable | The email address associated with your Atlassian account                                                                                          |
+
+If you previously stored `JIRA_EMAIL` as a Repository Secret, move it to Repository Variables. No workflow changes are needed — the `${{ vars.JIRA_EMAIL }}` reference is already in the workflow. Email addresses carry no credential value, and keeping them in Secrets adds unnecessary masking noise to log output.
 
 The workflow exposes them to the runner process:
 

@@ -379,15 +379,19 @@ Key tickets that shaped this guide:
 
 Variables and secrets required at the host repo for the docs-agent nightly workflow:
 
-| Name                           | Type        | Required                                 | Purpose                                                                                        |
-| ------------------------------ | ----------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `CLAUDE_CODE_OAUTH_TOKEN`      | `secrets.*` | ✅                                       | Claude CLI auth in CI (sk-ant-oat\* token from `claude setup-token`)                           |
-| `JIRA_API_TOKEN`               | `secrets.*` | If Jira enrichment                       | Atlassian API auth (basic-auth password half)                                                  |
-| `JIRA_EMAIL`                   | `vars.*`    | If Jira enrichment                       | Atlassian basic-auth email half (public-coordinate metadata, not a credential)                 |
-| `DOCS_AGENT_APP_CLIENT_ID`     | `vars.*`    | Opt-in (host CI on docs-agent PRs)       | GitHub App Client ID (format `Iv1.xxx` or `Iv23li...`, NOT the numeric App ID)                 |
-| `DOCS_AGENT_APP_PRIVATE_KEY`   | `secrets.*` | Opt-in (paired with above)               | GitHub App private key, PEM form                                                               |
-| `SLACK_WEBHOOK_URL`            | `secrets.*` | Opt-in (Slack notifications)             | Incoming-webhook URL consumed by `agents/notifier.md` when `notifications.slack.enabled: true` |
-| `DOCS_AGENT_SKIP_OAUTH_ASSERT` | `vars.*`    | Opt-in (enterprise/Bedrock/Vertex hosts) | Set to `'true'` to skip the sk-ant-oat\* prefix check in the OAuth pre-flight step             |
+Type uses GitHub Actions expression-context prefixes: `secrets.*` → repository Secret (encrypted, set via `gh secret set`); `vars.*` → repository Variable (plain string, set via `gh variable set`).
+
+| Name                           | Type        | Set via           | Required                                 | Purpose                                                                                                                 |
+| ------------------------------ | ----------- | ----------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN`      | `secrets.*` | `gh secret set`   | ✅                                       | Claude CLI auth in CI (sk-ant-oat\* token from `claude setup-token`)                                                    |
+| `JIRA_API_TOKEN`               | `secrets.*` | `gh secret set`   | If Jira enrichment                       | Atlassian API auth (basic-auth password half — generate at https://id.atlassian.com/manage-profile/security/api-tokens) |
+| `JIRA_EMAIL`                   | `vars.*`    | `gh variable set` | If Jira enrichment                       | Atlassian basic-auth email half (public-coordinate metadata, not a credential)                                          |
+| `DOCS_AGENT_APP_CLIENT_ID`     | `vars.*`    | `gh variable set` | Opt-in (host CI on docs-agent PRs)       | GitHub App Client ID (format `Iv1.xxx` or `Iv23li...`, NOT the numeric App ID)                                          |
+| `DOCS_AGENT_APP_PRIVATE_KEY`   | `secrets.*` | `gh secret set`   | Opt-in (paired with above)               | GitHub App private key, PEM form                                                                                        |
+| `SLACK_WEBHOOK_URL`            | `secrets.*` | `gh secret set`   | Opt-in (Slack notifications)             | Incoming-webhook URL consumed by `agents/notifier.md` when `notifications.slack.enabled: true`                          |
+| `DOCS_AGENT_SKIP_OAUTH_ASSERT` | `vars.*`    | `gh variable set` | Opt-in (enterprise/Bedrock/Vertex hosts) | Set to `'true'` to skip the sk-ant-oat\* prefix check in the OAuth pre-flight step                                      |
+
+Use `--body "$VALUE"` for inline values; `--body-file path/to/file` for multi-line (e.g., PEM private keys). Append `--repo theoju/<host>` when not running inside the host repo.
 
 ### When does the App-token step matter?
 

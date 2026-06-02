@@ -13,7 +13,7 @@ It does NOT cover:
 - **22+ `add_partial(state, ...)` sites in `run()`** at `scripts/orchestrator_runner.py` lines 1015, 1049, 1052, 1056, 1058, 1076, 1116, 1119, 1122, 1145, 1151, 1154, 1179, 1182, 1206, 1209, 1288, 1306, 1317, 1346, 1349, 1399, 1452, 1455 — these record reasons silently with zero log signal
 - **3 `lint_block` direct mutations** at `scripts/orchestrator_runner.py:1223`, `1231`, `1268` that bypass `add_partial` entirely (directly mutate `state["current_run"]["partial_reasons"]` + set `partial=True`)
 - **2 `verify_runner.py` direct writes** at lines 79-81 and 101-104 (using the `setdefault().setdefault().append(r); state["current_run"]["partial"] = True` chain) — **note: line 49 is a notifier digest field, NOT a state write; out of scope**
-- **8+ raw `print(..., file=sys.stderr)` sites** at lines 643, 683, 969, 975, 981, 1493, 1498, 1503, 1508 that lack `flush=True`, vulnerable to the same GitHub Actions block-buffering bug CCE-73 fixed
+- **9 raw `print(..., file=sys.stderr)` sites** at lines 643, 683, 969, 975, 981, 1493, 1498, 1503, 1508 that lack `flush=True`, vulnerable to the same GitHub Actions block-buffering bug CCE-73 fixed (the existing exit-1 dump at line 1412 is a 10th site that is also routed through the new helper)
 - **Exit-0 partial runs** — a run that records partial reasons but completes notifier dispatch returns `0` at line 1458, leaving the workflow log with no signal that anything went wrong
 
 Operationally: if a future failure originates in any phase outside `open_or_append_pr` and the orchestrator exits 1, the existing exit-1 dump at 1412 catches it. But if the orchestrator exits 0 with a partial PR (notifier completes, PR body says WARNING-Partial), the workflow log shows green and the operator has no signal to look at state.json.
@@ -26,7 +26,7 @@ Operationally: if a future failure originates in any phase outside `open_or_appe
 2. Refactor 3 `lint_block` direct mutations (`scripts/orchestrator_runner.py:1223`, `1231`, `1268`) to use `add_partial`.
 3. Refactor 2 `verify_runner.py` direct writes (lines 79-81, 101-104) to use `add_partial`. **Leave line 49 untouched — it is a notifier digest field, not a state mutation.**
 4. Add a NEW shutdown-dump helper `_emit_shutdown_dump(state)` called from `run()`'s finally block to surface partial reasons on exit-0 partial runs. Do NOT move the existing exit-1 dump at line 1412 — keep it as a belt-and-suspenders.
-5. Replace 8+ raw `print(..., file=sys.stderr)` sites with a new `emit_log(text)` helper that locks `flush=True`.
+5. Replace 9 raw `print(..., file=sys.stderr)` sites (lines 643, 683, 969, 975, 981, 1493, 1498, 1503, 1508) with a new `emit_log(text)` helper that locks `flush=True`. Additionally route the existing exit-1 dump at line 1412-1416 through `emit_log` (10 sites total). The single intentional remaining direct `print(..., file=sys.stderr)` is `_record_failure` at line 1862, which stays direct because it must fire before any later crash.
 6. Move `_redact_credentials` from `scripts/orchestrator_runner.py:1835` into a new leaf module `scripts/stderr_emit.py`.
 7. Address 5 of 6 CCE-73 verification-panel nice-to-haves (skip #2 per validator panel — see "Decisions" below).
 
@@ -62,19 +62,21 @@ import sys
 
 _OBSERVABILITY_FLUSH = True
 
-_TOKEN_PATTERN = re.compile(
-    r"https://[^@/\s]+:[A-Za-z0-9_]+@",
-    re.IGNORECASE,
-)
+# Pattern and substitution kept identical to pre-CCE-74
+# orchestrator_runner._CREDENTIAL_URL_RE (line 1832) so callers migrated in
+# implementation step 5 (and the existing test_open_or_append_pr.py:779
+# assertion `"<redacted>" in err`) see no behavioral change. Matches both
+# http:// and https://; replaces any user[:pass] segment with `<redacted>`.
+_CREDENTIAL_URL_RE = re.compile(r"(https?://)[^@/\s]*@")
 
 
 def _redact_credentials(text: str) -> str:
-    """Replace `https://user:token@host` with `https://REDACTED@host`.
+    """Replace `https?://user[:token]@host` with `https?://<redacted>@host`.
 
-    Idempotent. Returns the input verbatim if no token pattern matches.
-    Moved from scripts/orchestrator_runner.py:1835 (CCE-73 origin).
+    Idempotent. Returns the input verbatim if no credential pattern matches.
+    Moved verbatim from scripts/orchestrator_runner.py:1832-1846 (CCE-73 origin).
     """
-    return _TOKEN_PATTERN.sub("https://REDACTED@", text)
+    return _CREDENTIAL_URL_RE.sub(r"\1<redacted>@", text)
 
 
 def emit_stderr(reason: str, *, info_only: bool = False) -> None:
@@ -190,20 +192,20 @@ def add_partial(state: dict, reason: str, *, info_only: bool = False) -> None:
 
 4. **Keep existing exit-1 dump at line 1412** unchanged. This dump fires BEFORE the `finally` block runs, surviving any `_write_step_summary` exception. Validator panel rejected moving it into the finally because `_write_step_summary` early-returns when `GITHUB_STEP_SUMMARY` is unset (line 1722-1724, local/dev runs) and silently swallows `OSError` (lines 1736-1739, read-only filesystem).
 
-5. **Add new helper `_emit_shutdown_dump(state)`** called from the `finally` block at line 1460, BEFORE `_write_step_summary`. Gates on `state.get('current_run', {}).get('partial_reasons')` being non-empty (matches `_write_step_summary`'s existing precedent at line 1726-1728 of gating on reasons list, NOT the `partial` flag — `info_only` reasons still warrant exit-time visibility). Format:
+5. **Add new helper `_emit_shutdown_dump(state)`** called from the `finally` block at line 1460, BEFORE `_write_step_summary`. Gates on `state.get('current_run', {}).get('partial_reasons')` being non-empty (matches `_write_step_summary`'s existing precedent at line 1726-1728 of gating on reasons list, NOT the `partial` flag — `info_only` reasons still warrant exit-time visibility). Format under Open Question resolution (a):
 
    ```
    docs-agent: run exit summary (reasons=3):
    docs-agent PARTIAL: lint_block: docs/foo.md line-length: line 23 exceeds 120
    docs-agent PARTIAL: source_collector_partial: true
-   docs-agent INFO: source_map_failed: PermissionError
+   docs-agent PARTIAL: source_map_failed: PermissionError
    ```
 
-   Each reason re-emitted with the same `PARTIAL` / `INFO` prefix it had at record time (preserved via state's record of `info_only` … actually `info_only` isn't stored per-reason in current state shape — see Open Question below).
+   Under Option (a) (locked below), ALL reasons in the shutdown dump share a single prefix per run: `PARTIAL` when `state["current_run"]["partial"]` is `True`, `INFO` when `partial` is `False` (info_only-only run). Per-reason `INFO` vs `PARTIAL` granularity is visible only in the per-call emit during the run, never in the shutdown dump.
 
-   `_emit_shutdown_dump` does NOT swallow OSError on stderr (different semantics from `_write_step_summary`'s digest writer — the dump is operator-facing diagnostics, not a best-effort sidecar artifact).
+   **Implementation mechanism:** `_emit_shutdown_dump` calls `print(..., file=sys.stderr, flush=_OBSERVABILITY_FLUSH)` directly — NOT via `emit_stderr()` or `emit_log()`. Both helper functions swallow `OSError`, which would make the documented "OSError propagates" contract unreachable. The shutdown dump is the operator's last-resort observability signal and must fail loudly if stderr is broken. It does still call `stderr_emit._redact_credentials` on each reason before printing (though reasons stored in state are already redacted by `add_partial`'s redact-first invariant — the call is defense-in-depth).
 
-6. **Replace 8+ raw `print(..., file=sys.stderr)` calls** at lines 643, 683, 969, 975, 981, 1493, 1498, 1503, 1508 with `emit_log(text)` calls from `stderr_emit`. Locks `flush=True` at module level. Existing line 1413 (exit-1 dump) also routes through `emit_log` for consistency, though it could stay as direct `print(...)` — preference: route through `emit_log` so the `_OBSERVABILITY_FLUSH` constant becomes the single source of truth for every stderr write in `scripts/`.
+6. **Replace 9 raw `print(..., file=sys.stderr)` calls** at lines 643, 683, 969, 975, 981, 1493, 1498, 1503, 1508 with `emit_log(text)` calls from `stderr_emit`. Additionally route the existing exit-1 dump at line 1412-1416 through `emit_log` (10 sites total). Locks `flush=True` at module level via `_OBSERVABILITY_FLUSH`. The single intentional remaining direct `print(..., file=sys.stderr)` is `_record_failure` at line 1862 (must fire before any later crash; cannot be best-effort).
 
 ### Modified: `scripts/verify_runner.py`
 
@@ -219,7 +221,7 @@ def add_partial(state: dict, reason: str, *, info_only: bool = False) -> None:
 | `docs-agent: open_or_append_pr {reason}`                  | `_record_failure` only               | `tests/orchestrator/test_open_or_append_pr.py:809` — discipline test asserts this prefix does NOT appear on happy path |
 | `docs-agent PARTIAL: {reason}`                            | `add_partial` when `info_only=False` | NEW: `tests/state_io/test_add_partial_stderr_emit.py`                                                                  |
 | `docs-agent INFO: {reason}`                               | `add_partial` when `info_only=True`  | NEW: `tests/state_io/test_add_partial_stderr_emit.py`                                                                  |
-| `docs-agent: orchestrator exiting 1; partial_reasons=...` | Existing exit-1 dump at line 1412    | Existing test at `tests/orchestrator/test_orchestrator_run.py` (verify after change)                                   |
+| `docs-agent: orchestrator exiting 1; partial_reasons=...` | Existing exit-1 dump at line 1412    | NEW: `tests/orchestrator/test_orchestrator_run.py`                                                                     |
 | `docs-agent: run exit summary (reasons=N):`               | NEW: `_emit_shutdown_dump` header    | NEW: `tests/orchestrator/test_emit_shutdown_dump.py`                                                                   |
 
 **The four `add_partial` and shutdown-dump prefixes MUST NOT contain the substring `docs-agent: open_or_append_pr`** — otherwise the discipline test at `tests/orchestrator/test_open_or_append_pr.py:809` breaks. The proposed prefixes don't collide; the spec locks this as an invariant so future renames cannot silently violate it.
@@ -256,7 +258,7 @@ checkout fails inside open_or_append_pr
               └─ stderr: "docs-agent PARTIAL: checkout_failed: ..." [LINE 2]
 ```
 
-### Exit-0 partial run path
+### Exit-0 partial run path (state["current_run"]["partial"] = True)
 
 ```
 run() completes successfully but state["current_run"]["partial_reasons"] is non-empty
@@ -265,9 +267,11 @@ run() completes successfully but state["current_run"]["partial_reasons"] is non-
       ├─ stderr: "docs-agent: run exit summary (reasons=3):"
       ├─ stderr: "docs-agent PARTIAL: lint_block: ..."
       ├─ stderr: "docs-agent PARTIAL: source_collector_partial: true"
-      └─ stderr: "docs-agent INFO: source_map_failed: ..."
+      └─ stderr: "docs-agent PARTIAL: source_map_failed: ..."
   _write_step_summary(state, repo_root)  ← unchanged (GITHUB_STEP_SUMMARY writer)
 ```
+
+Under Option (a), all shutdown-dump reasons take the `PARTIAL` prefix when `state["current_run"]["partial"]` is `True` (the common case — any non-info_only reason has flipped it). When `partial` is `False` (info_only-only run), all reasons take the `INFO` prefix. The shutdown dump is a coarse run-level signal; per-reason `PARTIAL` vs `INFO` granularity is visible only in the per-call `emit_stderr` lines during the run.
 
 ### Exit-1 path (existing dump + new shutdown-dump = belt-and-suspenders)
 
@@ -285,7 +289,7 @@ On exit-1 the operator sees TWO stderr signals: the existing single-line summary
 ## Error handling
 
 - **`emit_stderr` and `emit_log`:** OSError on stderr is caught and discarded. Diagnostic stream failure must never crash the orchestrator. State mutation in `add_partial` always succeeds; emit is best-effort.
-- **`_emit_shutdown_dump`:** does NOT swallow OSError. The shutdown dump IS the operator-facing observability signal; if stderr is broken the orchestrator should fail loudly rather than silently.
+- **`_emit_shutdown_dump`:** does NOT swallow OSError. The shutdown dump IS the operator-facing observability signal; if stderr is broken the orchestrator should fail loudly rather than silently. **Implementation note:** this is achieved by calling `print(..., file=sys.stderr, flush=_OBSERVABILITY_FLUSH)` directly rather than `emit_stderr()` / `emit_log()` — if the helpers were used, their internal OSError-swallow would make the propagation contract unreachable.
 - **`add_partial`:** redaction happens first, then state mutation, then emit. If `_redact_credentials` somehow raised (it doesn't — pure regex sub), state would not be mutated and emit would not fire — the call would propagate the exception, which is the correct failure mode for a redaction bug.
 
 ## Open question (deferred, to be resolved in writing-plans)
@@ -294,38 +298,41 @@ State.json currently stores `partial_reasons` as `list[str]` — the `info_only`
 
 **Options for the plan to resolve:**
 
-- (a) Default all shutdown-dump reasons to `PARTIAL` prefix. If `state["current_run"]["partial"]` is False but `partial_reasons` is non-empty (info_only-only run), use `INFO` for all. **Simplest; loses per-reason granularity at shutdown.**
-- (b) Add a parallel `state["current_run"]["partial_reasons_info_only"]: list[bool]` field tracked at append time. **Schema migration; full granularity.**
+- (a) **Run-level prefix (LOCKED for this spec).** Apply a single prefix to ALL reasons in the shutdown dump per run: `PARTIAL` when `state["current_run"]["partial"]` is `True` (any non-info_only reason has flipped it), `INFO` when `partial` is `False` and `partial_reasons` is non-empty (info_only-only run). Per-reason granularity is sacrificed at shutdown time; the per-call `emit_stderr` lines preserve it during the run. The shutdown dump is a coarse operator signal, not a per-reason audit. **Simplest; preserves existing state schema.**
+- (b) Add a parallel `state["current_run"]["partial_reasons_info_only"]: list[bool]` field tracked at append time. **Schema migration; full per-reason granularity in the shutdown dump.**
 - (c) Encode `info_only` into the stored reason string itself (e.g., prefix with `[INFO]`). **No schema change; pollutes the reason string.**
 
-Recommend (a) for this spec — simplest, preserves the existing state schema, and the per-reason prefix is already visible during the run (when each reason was recorded). The shutdown dump is a summary; per-reason granularity during execution is the per-call emit. Plan can revisit if operator feedback warrants.
+**Resolution: Option (a).** Preserves the existing state schema, the per-reason prefix is already visible during the run, and the shutdown dump is a summary not an audit. Plan can revisit if operator feedback warrants. This resolution is reflected in the Architecture / Data flow examples + the locked behavior of `_emit_shutdown_dump`.
 
 ## Decisions
 
-| Decision                     | Choice                                                                                          | Rationale                                                                                                                                                                                                                                                                                                                                                |
-| ---------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Module name                  | `stderr_emit.py` (NOT `observability.py`)                                                       | Matches `scripts/` purpose-descriptive convention: `state_io.py`, `gh_client.py`, `frontmatter_contract.py`, `core_manifest.py`. The module's job IS stderr emission with redaction, not telemetry broadly.                                                                                                                                              |
-| Emit signature               | `emit_stderr(reason: str, *, info_only: bool = False)`                                          | Free-text only, no state, no run_id. Leaf-module invariant. If structured emit wanted later, wrap don't retrofit.                                                                                                                                                                                                                                        |
-| Emit policy                  | **Every call**, not newly-appended only                                                         | Retry-loop sequencing is the signal CCE-73 was built to preserve. Existing `_record_failure` at line 1862 already emits unconditionally; aligning `add_partial` matches that contract. State dedup stays.                                                                                                                                                |
-| Redact location              | At `add_partial` entry, BEFORE state mutation                                                   | Extends CCE-73's 7-site "state never carries raw credentials" invariant to all 28 sites. Future `add_partial(state, f"X: {subprocess_stderr}")` cannot leak a token to state.json.                                                                                                                                                                       |
-| Exit-1 dump location         | Stays at line 1412 (unchanged)                                                                  | `_write_step_summary` early-returns and swallows OSError — cannot be the sole emit site for the highest-priority failure surface. Validator critical finding.                                                                                                                                                                                            |
-| Exit-0 shutdown dump         | New `_emit_shutdown_dump(state)` sibling helper, called BEFORE `_write_step_summary` in finally | Single emit-on-shutdown location for partial-but-exit-0 runs. Does NOT swallow OSError. Gated on `partial_reasons` non-empty (not on `partial` flag — info_only reasons still warrant visibility).                                                                                                                                                       |
-| `_record_failure`            | Keep as-is, do NOT delete or rename "reasons" param                                             | Deletion would break 16 test call sites at `tests/orchestrator/test_open_or_append_pr.py` (lines 74, 101, 130, 157, 216, 262, 455, 494, 529, 561, 590, 620, 651, 681, 708, 743). Double-emit on `open_or_append_pr` path is intentional belt-and-suspenders. Param rename (CCE-73 panel nice-to-have #2) is cosmetic and forces 8-line churn — REJECTED. |
-| `emit_log` second helper     | YES, replaces all 8+ raw stderr-print sites                                                     | Locks `flush=True` for the broader set of stderr writes, not just CCE-73 panel's named-two (lines 643, 975). Prevents copy-paste regression.                                                                                                                                                                                                             |
-| `_OBSERVABILITY_FLUSH` const | Module-level in `stderr_emit.py`, consumed by both `emit_stderr` and `emit_log`                 | Single source of truth. Spec invariant: all new stderr writes in `scripts/` route through `emit_stderr` or `emit_log`.                                                                                                                                                                                                                                   |
-| pytest mitigations           | NONE                                                                                            | Grep verified zero `capsys.readouterr().err == ""` equality assertions in `tests/`. No conftest changes needed.                                                                                                                                                                                                                                          |
-| verify_runner line 49        | LEAVE UNTOUCHED                                                                                 | Notifier digest field, not state mutation. Misreading would corrupt notifier payload schema.                                                                                                                                                                                                                                                             |
+| Decision                              | Choice                                                                                                     | Rationale                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Module name                           | `stderr_emit.py` (NOT `observability.py`)                                                                  | Matches `scripts/` purpose-descriptive convention: `state_io.py`, `gh_client.py`, `frontmatter_contract.py`, `core_manifest.py`. The module's job IS stderr emission with redaction, not telemetry broadly.                                                                                                                                              |
+| Emit signature                        | `emit_stderr(reason: str, *, info_only: bool = False)`                                                     | Free-text only, no state, no run_id. Leaf-module invariant. If structured emit wanted later, wrap don't retrofit.                                                                                                                                                                                                                                        |
+| Emit policy                           | **Every call**, not newly-appended only                                                                    | Retry-loop sequencing is the signal CCE-73 was built to preserve. Existing `_record_failure` at line 1862 already emits unconditionally; aligning `add_partial` matches that contract. State dedup stays.                                                                                                                                                |
+| Redact location                       | At `add_partial` entry, BEFORE state mutation                                                              | Extends CCE-73's 7-site "state never carries raw credentials" invariant to all 28 sites. Future `add_partial(state, f"X: {subprocess_stderr}")` cannot leak a token to state.json.                                                                                                                                                                       |
+| Exit-1 dump location                  | Stays at line 1412 (unchanged)                                                                             | `_write_step_summary` early-returns and swallows OSError — cannot be the sole emit site for the highest-priority failure surface. Validator critical finding.                                                                                                                                                                                            |
+| Exit-0 shutdown dump                  | New `_emit_shutdown_dump(state)` sibling helper, called BEFORE `_write_step_summary` in finally            | Single emit-on-shutdown location for partial-but-exit-0 runs. Does NOT swallow OSError. Gated on `partial_reasons` non-empty (not on `partial` flag — info_only reasons still warrant visibility).                                                                                                                                                       |
+| `_record_failure`                     | Keep as-is, do NOT delete or rename "reasons" param                                                        | Deletion would break 16 test call sites at `tests/orchestrator/test_open_or_append_pr.py` (lines 74, 101, 130, 157, 216, 262, 455, 494, 529, 561, 590, 620, 651, 681, 708, 743). Double-emit on `open_or_append_pr` path is intentional belt-and-suspenders. Param rename (CCE-73 panel nice-to-have #2) is cosmetic and forces 8-line churn — REJECTED. |
+| `emit_log` second helper              | YES, replaces all 9 raw stderr-print sites + the exit-1 dump (10 total)                                    | Locks `flush=True` for the broader set of stderr writes, not just CCE-73 panel's named-two (lines 643, 975). Prevents copy-paste regression.                                                                                                                                                                                                             |
+| `_emit_shutdown_dump` emit mechanism  | Direct `print(..., file=sys.stderr, flush=_OBSERVABILITY_FLUSH)` calls, NOT via `emit_stderr` / `emit_log` | `emit_stderr` / `emit_log` swallow OSError as best-effort. The shutdown dump is the last-resort observability signal and must fail loudly if stderr is broken. Direct print preserves OSError propagation. Still calls `_redact_credentials` per reason for defense-in-depth (reasons already redacted by `add_partial`).                                |
+| Open Question (info_only persistence) | Option (a) — single run-level prefix in shutdown dump (`PARTIAL` if `partial=True`, else `INFO`)           | Per-reason granularity preserved during the run via per-call emit; shutdown dump is a coarse summary. Preserves existing state schema.                                                                                                                                                                                                                   |
+| `_redact_credentials` regex           | EXACT VERBATIM copy of pre-CCE-74 `_CREDENTIAL_URL_RE` (`r"(https?://)[^@/\s]*@"` → `r"\1<redacted>@"`)    | Existing test at `tests/orchestrator/test_open_or_append_pr.py:779` asserts `<redacted>` substring; matches http:// and https://; broad user-segment match. Narrowing or changing the replacement marker is OUT OF SCOPE for CCE-74 — it would be a separate hardening ticket.                                                                           |
+| `_OBSERVABILITY_FLUSH` const          | Module-level in `stderr_emit.py`, consumed by both `emit_stderr` and `emit_log`                            | Single source of truth. Spec invariant: all new stderr writes in `scripts/` route through `emit_stderr` or `emit_log`.                                                                                                                                                                                                                                   |
+| pytest mitigations                    | NONE                                                                                                       | Grep verified zero `capsys.readouterr().err == ""` equality assertions in `tests/`. No conftest changes needed.                                                                                                                                                                                                                                          |
+| verify_runner line 49                 | LEAVE UNTOUCHED                                                                                            | Notifier digest field, not state mutation. Misreading would corrupt notifier payload schema.                                                                                                                                                                                                                                                             |
 
 ## CCE-73 verification-panel nice-to-haves (status)
 
-| #   | Nice-to-have                                                                              | Status                                                                                                                    |
-| --- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Lock `flush=True` invariant                                                               | DONE via `_OBSERVABILITY_FLUSH` module constant in `stderr_emit.py`                                                       |
-| 2   | Rename `_record_failure`'s `reasons` param to `reason_log` or make keyword-only           | **REJECTED** — cosmetic, 8-line churn, function is one helper away from deletion if future work consolidates              |
-| 3   | Reformat exit-1 dump as one-reason-per-line for grepability                               | DONE via new `_emit_shutdown_dump` (fires in finally on every exit path); existing line 1412 stays as single-line summary |
-| 4   | Migrate CCE-73 tests to `_make_subprocess_stub_with_fetch` for CCE-42 alignment           | DONE — migrate during implementation                                                                                      |
-| 5   | Add CCE-73 stderr-emission invariant note to `test_open_or_append_pr.py` module docstring | DONE — add invariant note covering both `_record_failure` and the new `add_partial` emit                                  |
-| 6   | Audit existing stderr prints at lines 643, 975 — upgrade to flush=True                    | DONE — extended to ALL 8+ raw stderr prints via `emit_log`, not just two                                                  |
+| #   | Nice-to-have                                                                              | Status                                                                                                                                                                              |
+| --- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Lock `flush=True` invariant                                                               | DONE via `_OBSERVABILITY_FLUSH` module constant in `stderr_emit.py`                                                                                                                 |
+| 2   | Rename `_record_failure`'s `reasons` param to `reason_log` or make keyword-only           | **REJECTED** — cosmetic, 8-line churn, function is one helper away from deletion if future work consolidates                                                                        |
+| 3   | Reformat exit-1 dump as one-reason-per-line for grepability                               | DONE via new `_emit_shutdown_dump` (fires in finally on every exit path); existing line 1412 stays as single-line summary                                                           |
+| 4   | Migrate CCE-73 tests to `_make_subprocess_stub_with_fetch` for CCE-42 alignment           | DONE — migrate during implementation                                                                                                                                                |
+| 5   | Add CCE-73 stderr-emission invariant note to `test_open_or_append_pr.py` module docstring | DONE — add invariant note covering both `_record_failure` and the new `add_partial` emit                                                                                            |
+| 6   | Audit existing stderr prints at lines 643, 975 — upgrade to flush=True                    | DONE — extended to ALL 9 raw stderr prints (lines 643, 683, 969, 975, 981, 1493, 1498, 1503, 1508) via `emit_log`, plus the exit-1 dump at line 1412 (10 sites total), not just two |
 
 ## Tests (regression invariants)
 
@@ -339,9 +346,20 @@ Recommend (a) for this spec — simplest, preserves the existing state schema, a
 - `test_emit_log_no_prefix_no_redaction` — `emit_log("https://x-access-token:ghs_xxx@github.com/...")` → stderr contains the raw URL (no redaction, by design for non-partial logging paths)
 - `test_emit_log_survives_oserror` — same as above for `emit_log`
 
-### New test file: `tests/contracts/test_observability_imports.py`
+### New test file: `tests/contracts/test_stderr_emit_imports.py`
 
-- `test_stderr_emit_imports_only_stdlib` — assert `stderr_emit` module has no transitive dependency on `state_io` or `orchestrator_runner` (use `importlib` introspection). Prevents future contributors from creating a `stderr_emit → state_io` cycle.
+- `test_stderr_emit_imports_only_stdlib` — assert `stderr_emit` module has no transitive dependency on `state_io` or `orchestrator_runner`. Use `importlib` introspection. Concrete sketch:
+
+  ```python
+  import importlib
+  m = importlib.import_module("stderr_emit")
+  assert "state_io" not in dir(m)
+  assert "orchestrator_runner" not in dir(m)
+  ```
+
+  Prevents future contributors from creating a `stderr_emit → state_io` cycle.
+
+- `test_no_new_raw_stderr_prints_in_orchestrator_runner` — source-level regression guard for Acceptance Criterion #8. Reads `scripts/orchestrator_runner.py` as text, regex-scans for `print\(.*file=sys\.stderr`, and asserts the only remaining matches are the single intentional `_record_failure` site near line 1862 (matched by surrounding `def _record_failure` context). Protects against future contributors adding raw stderr prints that bypass `emit_log`.
 
 ### Extended: `tests/state_io/test_add_partial_stderr_emit.py` (NEW)
 
@@ -365,10 +383,11 @@ Recommend (a) for this spec — simplest, preserves the existing state schema, a
 - `test_emit_shutdown_dump_emits_when_partial_false_but_reasons_nonempty` — info_only-only run (`partial=False`, reasons non-empty) → stderr emit (gated on reasons, not partial flag)
 - `test_emit_shutdown_dump_does_not_swallow_oserror` — monkeypatch `sys.stderr.write` → IOError; `_emit_shutdown_dump` raises (intentional, different from `emit_stderr`)
 
-### Extended: `tests/orchestrator/test_orchestrator_run.py`
+### New test file: `tests/orchestrator/test_orchestrator_run.py`
 
 - `test_run_exit_0_with_partial_reasons_emits_shutdown_dump` — orchestrator returns 0 with non-empty partial_reasons; stderr contains shutdown dump
 - `test_run_exit_1_emits_both_existing_dump_and_shutdown_dump` — orchestrator returns 1; stderr contains BOTH `"docs-agent: orchestrator exiting 1; partial_reasons=..."` (line 1412) AND `"docs-agent: run exit summary (reasons=N):"` (from `_emit_shutdown_dump` in finally) — belt-and-suspenders verification
+- `test_lint_block_add_partial_redacts_credentials` — orchestrator path that triggers `lint_block_unsafe_path` with a credential-bearing path. Assert `state["current_run"]["partial_reasons"][0]` contains `"<redacted>"` (not the raw URL) AND `capsys.readouterr().err` contains `"docs-agent PARTIAL: lint_block_unsafe_path: ...<redacted>..."`. Locks Acceptance Criterion #9's behavior-change call-out.
 
 ### Extended: `tests/verify_runner/test_verify_runner.py`
 
@@ -377,7 +396,8 @@ Recommend (a) for this spec — simplest, preserves the existing state schema, a
 
 ### Extended: existing `tests/orchestrator/test_step_summary.py`
 
-- No changes needed. Tests at lines 137 and 181 monkeypatch `_write_step_summary` to a no-op spy; since the exit-1 dump stays at orchestrator_runner.py:1412 (NOT moved into `_write_step_summary`) and the new `_emit_shutdown_dump` is a SEPARATE sibling call (called BEFORE `_write_step_summary` in finally), the spy-based tests still cover their original surface. **Document this in the spec so reviewers don't re-litigate during implementation.**
+- **Verify during implementation** that the two existing test paths (`test_run_invokes_write_step_summary_on_hard_fail` near line 137 and `test_run_invokes_write_step_summary_on_clean_success` near line 181) produce empty `partial_reasons` in the fixture path so `_emit_shutdown_dump` no-ops and does not bleed into capsys. The exit-1 dump stays at orchestrator_runner.py:1412 (NOT moved into `_write_step_summary`) and the new `_emit_shutdown_dump` is a SEPARATE sibling call (called BEFORE `_write_step_summary` in finally), so the existing spy-based assertions on `_write_step_summary` still cover their original surface.
+- If either test path turns out to accumulate `partial_reasons` (e.g., from `fakes/fake_notifier.json` returning failure), add `monkeypatch.setattr(orun, "_emit_shutdown_dump", lambda s: None)` to that test to guard against unexpected capsys bleed. Do NOT change the existing assertions on `_write_step_summary` behavior.
 
 ## Acceptance criteria
 
@@ -395,9 +415,9 @@ Recommend (a) for this spec — simplest, preserves the existing state schema, a
 
 7. **Double-emit symmetry on `open_or_append_pr` failure:** verified by `test_open_or_append_pr_checkout_failure_double_emit_symmetry`.
 
-8. **All 8+ raw stderr-print sites** in `orchestrator_runner.py` route through `emit_log`. Verified by grep at PR time + visual review (no easy lint rule).
+8. **All 9 raw stderr-print sites** (lines 643, 683, 969, 975, 981, 1493, 1498, 1503, 1508) in `orchestrator_runner.py` route through `emit_log`, plus the existing exit-1 dump at line 1412-1416 (10 sites total). The single intentional remaining direct `print(..., file=sys.stderr)` is `_record_failure` at line 1862. Verified by the automated source-scan test `test_no_new_raw_stderr_prints_in_orchestrator_runner` in `tests/contracts/test_stderr_emit_imports.py` + grep at PR time.
 
-9. **3 `lint_block` direct mutations refactored** to use `add_partial`. Behavior change: lint_block reasons now pass through redaction. Verified by a dedicated redaction test on a `lint_block_unsafe_path` containing a credential URL.
+9. **3 `lint_block` direct mutations refactored** to use `add_partial`. Behavior change: lint_block reasons now pass through redaction. Verified by `test_lint_block_add_partial_redacts_credentials` in `tests/orchestrator/test_orchestrator_run.py`.
 
 10. **2 `verify_runner.py` direct writes refactored** to use `add_partial` (lines 79-81, 101-104). Line 49 unchanged. Verified by dedicated tests in `tests/verify_runner/`.
 
@@ -405,29 +425,29 @@ Recommend (a) for this spec — simplest, preserves the existing state schema, a
 
 ## Files changed (summary)
 
-| File                                             | Change                                                                                                                                                   | Lines (approx) |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| `scripts/stderr_emit.py`                         | NEW module                                                                                                                                               | ~60            |
-| `scripts/state_io.py`                            | `add_partial` refactor (redact-first, emit-on-every-call) + import                                                                                       | ~15            |
-| `scripts/orchestrator_runner.py`                 | Delete `_redact_credentials`, refactor 3 lint_block sites, add `_emit_shutdown_dump`, replace 8+ raw stderr prints with `emit_log`, update finally block | ~80            |
-| `scripts/verify_runner.py`                       | 2 refactors (lines 79-81, 101-104); line 49 unchanged                                                                                                    | ~10            |
-| `tests/stderr_emit/test_stderr_emit.py`          | NEW test file                                                                                                                                            | ~120           |
-| `tests/contracts/test_observability_imports.py`  | NEW test file                                                                                                                                            | ~30            |
-| `tests/state_io/test_add_partial_stderr_emit.py` | NEW test file                                                                                                                                            | ~100           |
-| `tests/orchestrator/test_open_or_append_pr.py`   | Add double-emit symmetry test, migrate to `_make_subprocess_stub_with_fetch`, update module docstring                                                    | ~50            |
-| `tests/orchestrator/test_emit_shutdown_dump.py`  | NEW test file                                                                                                                                            | ~100           |
-| `tests/orchestrator/test_orchestrator_run.py`    | Add exit-0 and exit-1 dump tests                                                                                                                         | ~50            |
-| `tests/verify_runner/test_verify_runner.py`      | Add 2 add_partial-driven emit tests                                                                                                                      | ~40            |
+| File                                             | Change                                                                                                                                                                                                                    | Lines (approx) |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `scripts/stderr_emit.py`                         | NEW module                                                                                                                                                                                                                | ~60            |
+| `scripts/state_io.py`                            | `add_partial` refactor (redact-first, emit-on-every-call) + import                                                                                                                                                        | ~15            |
+| `scripts/orchestrator_runner.py`                 | Delete `_redact_credentials`, refactor 3 lint_block sites, add `_emit_shutdown_dump` (uses direct print, not emit_stderr), replace 9 raw stderr prints + the exit-1 dump (10 sites) with `emit_log`, update finally block | ~85            |
+| `scripts/verify_runner.py`                       | 2 refactors (lines 79-81, 101-104); line 49 unchanged                                                                                                                                                                     | ~10            |
+| `tests/stderr_emit/test_stderr_emit.py`          | NEW test file                                                                                                                                                                                                             | ~120           |
+| `tests/contracts/test_stderr_emit_imports.py`    | NEW test file (importlib leaf-module invariant + source-scan AC #8 guard)                                                                                                                                                 | ~50            |
+| `tests/state_io/test_add_partial_stderr_emit.py` | NEW test file                                                                                                                                                                                                             | ~100           |
+| `tests/orchestrator/test_open_or_append_pr.py`   | Add double-emit symmetry test, migrate to `_make_subprocess_stub_with_fetch`, update module docstring                                                                                                                     | ~50            |
+| `tests/orchestrator/test_emit_shutdown_dump.py`  | NEW test file                                                                                                                                                                                                             | ~100           |
+| `tests/orchestrator/test_orchestrator_run.py`    | NEW test file (exit-0 dump + exit-1 dump + lint_block redaction tests)                                                                                                                                                    | ~80            |
+| `tests/verify_runner/test_verify_runner.py`      | Add 2 add_partial-driven emit tests                                                                                                                                                                                       | ~40            |
 
-Total: ~655 lines added/modified across 11 files. ~360 lines in tests; ~165 lines in production code; ~130 lines in spec/docs.
+Total: ~715 lines added/modified across 11 files. ~420 lines in tests; ~170 lines in production code; ~130 lines in spec/docs. Increase vs initial estimate reflects expanded test_stderr_emit_imports.py (importlib + source-scan) and test_orchestrator_run.py (added lint_block redaction test).
 
 ## Implementation order (informs the plan)
 
-1. Create `scripts/stderr_emit.py` with `_redact_credentials`, `emit_stderr`, `emit_log`, `_OBSERVABILITY_FLUSH` constant. Write `tests/stderr_emit/test_stderr_emit.py` + `tests/contracts/test_observability_imports.py`. Land green.
+1. Create `scripts/stderr_emit.py` with `_redact_credentials` (verbatim copy of pre-CCE-74 `_CREDENTIAL_URL_RE` regex + `\1<redacted>@` replacement), `emit_stderr`, `emit_log`, `_OBSERVABILITY_FLUSH` constant. Create `tests/stderr_emit/` directory with `__init__.py` (match convention in `tests/state_io/`, `tests/orchestrator/`, `tests/lint/`). Confirm `tests/contracts/` directory exists (it should — `tests/contracts/test_state_io.py` already lives there). Write `tests/stderr_emit/test_stderr_emit.py` + `tests/contracts/test_stderr_emit_imports.py`. Land green.
 
 2. Refactor `state_io.add_partial` to redact-first + emit-on-every-call. Write `tests/state_io/test_add_partial_stderr_emit.py`. Land green.
 
-3. Refactor 3 `lint_block` direct mutations in `orchestrator_runner.py` to use `add_partial`. Add redaction test for `lint_block_unsafe_path`. Land green.
+3. Refactor 3 `lint_block` direct mutations in `orchestrator_runner.py` to use `add_partial`. Add `test_lint_block_add_partial_redacts_credentials` to NEW file `tests/orchestrator/test_orchestrator_run.py`: assert that `add_partial` called from the `lint_block_unsafe_path` path with a credential-bearing path produces a redacted reason in `state["current_run"]["partial_reasons"]` AND a redacted line via `emit_stderr` in stderr. Land green.
 
 4. Refactor 2 `verify_runner.py` direct writes (lines 79-81, 101-104) to use `add_partial`. Add 2 emit tests. Land green.
 
@@ -435,7 +455,7 @@ Total: ~655 lines added/modified across 11 files. ~360 lines in tests; ~165 line
 
 6. Add `_emit_shutdown_dump(state)` helper. Write `tests/orchestrator/test_emit_shutdown_dump.py`. Wire into finally block at line 1460 (BEFORE `_write_step_summary`). Add exit-0 and exit-1 dump tests in `tests/orchestrator/test_orchestrator_run.py`. Land green.
 
-7. Replace 8+ raw `print(..., file=sys.stderr)` sites in `orchestrator_runner.py` with `emit_log(...)`. No functional change; lock flush. Land green.
+7. Replace 9 raw `print(..., file=sys.stderr)` sites (lines 643, 683, 969, 975, 981, 1493, 1498, 1503, 1508) in `orchestrator_runner.py` with `emit_log(...)`. Additionally route the exit-1 dump at line 1412-1416 through `emit_log` (10 sites total). Leave `_record_failure` at line 1862 as direct `print(...)` — it stays direct intentionally. No functional change; lock flush. Verify `test_no_new_raw_stderr_prints_in_orchestrator_runner` (added in step 1) passes. Land green.
 
 8. Update `tests/orchestrator/test_open_or_append_pr.py`: add double-emit symmetry test, migrate to `_make_subprocess_stub_with_fetch`, update module docstring. Land green.
 

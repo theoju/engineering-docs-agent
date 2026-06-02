@@ -64,7 +64,9 @@ _WITH_KEY_CONTRACT: dict[str, set[str]] = {
 
 
 def _load(path: Path) -> dict:
-    yaml = ruamel.yaml.YAML(typ="rt")
+    # `ruamel` is bound to the ruamel.yaml module by importorskip above,
+    # so YAML is accessed directly on it (not via a .yaml sub-attribute).
+    yaml = ruamel.YAML(typ="rt")
     with path.open() as fh:
         return yaml.load(fh)
 
@@ -105,18 +107,66 @@ def test_03_high_value_substring_asserts(template_doc, dogfood_doc) -> None:
     raise AssertionError("not yet implemented — see CCE-80 plan task 8")
 
 
-@pytest.mark.xfail(
-    reason="CCE-80 plan task 5 lifts: literal-equals shape contract on CCE-39 baseline + App-token folded"
-)
 def test_04_literal_equals_shape_contract(template_doc, dogfood_doc) -> None:
-    raise AssertionError("not yet implemented — see CCE-80 plan task 5")
+    """Locked literal values shared by both files (CCE-39 baseline)."""
+    for doc, label in [(template_doc, "template"), (dogfood_doc, "dogfood")]:
+        conc = doc["concurrency"]
+        assert conc["group"] == "docs-agent-nightly", (
+            f"{label}: concurrency.group != docs-agent-nightly"
+        )
+        assert conc["cancel-in-progress"] is False, (
+            f"{label}: cancel-in-progress != false"
+        )
+        jobs = list(doc["jobs"].values())
+        assert len(jobs) == 1, f"{label}: expected exactly 1 job"
+        assert jobs[0]["timeout-minutes"] == 60, f"{label}: timeout-minutes != 60"
+        perms = doc["permissions"]
+        for k in ("contents", "pull-requests", "issues"):
+            assert k in perms, f"{label}: missing permissions.{k}"
+        env = jobs[0]["env"]
+        for k in ("CLAUDE_CODE_OAUTH_TOKEN", "JIRA_API_TOKEN", "JIRA_EMAIL"):
+            assert k in env, f"{label}: missing job-env {k}"
+        triggers = doc["on"]
+        assert "schedule" in triggers, f"{label}: missing schedule trigger"
+        assert "workflow_dispatch" in triggers, (
+            f"{label}: missing workflow_dispatch trigger"
+        )
 
 
-@pytest.mark.xfail(
-    reason="CCE-80 plan task 5 lifts: App-token conditional shape (template-only properties)"
-)
 def test_05_app_token_conditional_shape(template_doc, dogfood_doc) -> None:
-    raise AssertionError("not yet implemented — see CCE-80 plan task 5")
+    """Template-only property tests on the App-token wiring.
+
+    The TEMPLATE has the `if:` opt-out gate (hosts may skip the App-token step);
+    the DOGFOOD does not (we own this repo's auth). The dogfood divergence is
+    intentional — documented in _TEMPLATE_ONLY_DIVERGENCES.
+    """
+    template_jobs = list(template_doc["jobs"].values())
+    template_steps = template_jobs[0]["steps"]
+
+    app_token = next((s for s in template_steps if s.get("id") == "app-token"), None)
+    assert app_token is not None, "template missing app-token step"
+    assert "vars.DOCS_AGENT_APP_CLIENT_ID != ''" in str(app_token.get("if", "")), (
+        "template app-token step missing opt-out `if:`"
+    )
+    assert app_token.get("uses") == "actions/create-github-app-token@v3"
+    assert "client-id" in app_token["with"], (
+        "app-token must use `client-id` (not deprecated `app-id`)"
+    )
+
+    checkout = next((s for s in template_steps if s.get("id") == "checkout-host"), None)
+    assert checkout is not None, "template missing checkout-host step"
+    token_expr = "".join(str(checkout["with"]["token"]).split())
+    expected = "${{steps.app-token.outputs.token||secrets.GITHUB_TOKEN}}"
+    assert token_expr == expected, (
+        f"checkout-host token wiring mismatch: got {token_expr}, expected {expected}"
+    )
+
+    authoring = next((s for s in template_steps if s.get("id") == "docs-agent"), None)
+    assert authoring is not None, "template missing docs-agent authoring step"
+    gh_token_expr = "".join(str(authoring["env"]["GH_TOKEN"]).split())
+    assert gh_token_expr == expected, (
+        f"authoring step GH_TOKEN mismatch: got {gh_token_expr}, expected {expected}"
+    )
 
 
 @pytest.mark.xfail(
@@ -126,15 +176,27 @@ def test_06_stale_allowlist_entries(template_doc, dogfood_doc) -> None:
     raise AssertionError("not yet implemented — see CCE-80 plan task 8")
 
 
-@pytest.mark.xfail(
-    reason="CCE-80 plan task 5 lifts: run-summary `if: always()` (CCE-39 baseline)"
-)
 def test_07_run_summary_if_always(template_doc, dogfood_doc) -> None:
-    raise AssertionError("not yet implemented — see CCE-80 plan task 5")
+    """Run-summary step must have `if: always()` so partial/failed runs render."""
+    for doc, label in [(template_doc, "template"), (dogfood_doc, "dogfood")]:
+        jobs = list(doc["jobs"].values())
+        steps = jobs[0]["steps"]
+        run_summary_steps = [s for s in steps if s.get("name") == "Run summary"]
+        assert len(run_summary_steps) == 1, (
+            f"{label}: expected exactly 1 'Run summary' step"
+        )
+        if_expr = str(run_summary_steps[0].get("if", ""))
+        assert if_expr.startswith("always()"), (
+            f"{label}: run-summary if `{if_expr}` does not start with always()"
+        )
 
 
-@pytest.mark.xfail(
-    reason="CCE-80 plan task 5 lifts: on-key regression guard (catches PyYAML escape route)"
-)
 def test_08_on_key_regression(template_doc, dogfood_doc) -> None:
-    raise AssertionError("not yet implemented — see CCE-80 plan task 5")
+    """Top-level `on:` key must parse as a string-keyed mapping, NOT the YAML-1.1
+    boolean True (the PyYAML SafeLoader escape route). Regression guard.
+    """
+    for doc, label in [(template_doc, "template"), (dogfood_doc, "dogfood")]:
+        on_val = doc["on"]
+        assert isinstance(on_val, dict), (
+            f"{label}: top-level `on:` is {type(on_val).__name__}, expected dict"
+        )

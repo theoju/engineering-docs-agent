@@ -132,7 +132,7 @@ def test_rewrite_cron_round_trip_on_real_template() -> None:
     # Whatever minute is in the rendered line, the trailing `* * *"` must persist intact.
     assert '* * *"' in after
 
-    yaml = ruamel.yaml.YAML(typ="rt")
+    yaml = ruamel.YAML(typ="rt")
     yaml.load(rendered)  # raises on malformed YAML
 
     if shutil.which("actionlint") is None:

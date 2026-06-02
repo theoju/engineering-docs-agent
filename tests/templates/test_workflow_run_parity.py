@@ -71,6 +71,24 @@ def _load(path: Path) -> dict:
         return yaml.load(fh)
 
 
+def _step_signature(step: dict) -> str:
+    """Build a step's identity signature for parity comparison.
+
+    Format: `uses:<action>` for `uses:` steps (optionally suffixed `#<id>`
+    when `id:` is present); `run:<first-line>` for `run:` steps. The grammar
+    is shared by test_01 (step-signature parity) and test_06 (stale-allowlist
+    guard) — both MUST use the same encoding for the set-difference logic to
+    line up. Centralising here so the grammar can't drift between callers.
+    """
+    uses = step.get("uses")
+    sid = step.get("id")
+    if uses:
+        return f"uses:{uses}" + (f"#{sid}" if sid else "")
+    run = step.get("run", "")
+    first = (run.splitlines() or [""])[0].strip()
+    return f"run:{first}"
+
+
 @pytest.fixture(scope="module")
 def template_doc() -> dict:
     return _load(TEMPLATE)
@@ -92,17 +110,8 @@ def test_01_step_signature_parity(template_doc, dogfood_doc) -> None:
     template_steps = list(template_doc["jobs"].values())[0]["steps"]
     dogfood_steps = list(dogfood_doc["jobs"].values())[0]["steps"]
 
-    def _signature(step: dict) -> str:
-        uses = step.get("uses")
-        sid = step.get("id")
-        if uses:
-            return f"uses:{uses}" + (f"#{sid}" if sid else "")
-        run = step.get("run", "")
-        first = (run.splitlines() or [""])[0].strip()
-        return f"run:{first}"
-
-    template_sigs = {_signature(s) for s in template_steps}
-    dogfood_sigs = {_signature(s) for s in dogfood_steps}
+    template_sigs = {_step_signature(s) for s in template_steps}
+    dogfood_sigs = {_step_signature(s) for s in dogfood_steps}
 
     missing_in_template = dogfood_sigs - template_sigs - set(_ALLOWLIST)
     assert not missing_in_template, (
@@ -220,17 +229,8 @@ def test_06_stale_allowlist_entries(template_doc, dogfood_doc) -> None:
     template_steps = list(template_doc["jobs"].values())[0]["steps"]
     dogfood_steps = list(dogfood_doc["jobs"].values())[0]["steps"]
 
-    def _signature(step: dict) -> str:
-        uses = step.get("uses")
-        sid = step.get("id")
-        if uses:
-            return f"uses:{uses}" + (f"#{sid}" if sid else "")
-        run = step.get("run", "")
-        first = (run.splitlines() or [""])[0].strip()
-        return f"run:{first}"
-
-    template_sigs = {_signature(s) for s in template_steps}
-    dogfood_sigs = {_signature(s) for s in dogfood_steps}
+    template_sigs = {_step_signature(s) for s in template_steps}
+    dogfood_sigs = {_step_signature(s) for s in dogfood_steps}
 
     for key in _ALLOWLIST:
         in_template = key in template_sigs

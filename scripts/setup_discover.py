@@ -144,8 +144,6 @@ def detect_jira_hint(cwd: Path) -> dict | None:
 
     Returns a dict with `base_url` if found, else None.
     """
-    import re
-
     wf_dir = cwd / ".github" / "workflows"
     base_url: str | None = None
     has_jira_marker = False
@@ -200,7 +198,7 @@ def detect_pages_publishable(framework: str | None, ci: str | None) -> bool:
     return ci == "github_actions" and framework == "mkdocs"
 
 
-_REMOTE_PATTERN = re.compile(r"github\.com[:/]([^/]+)/([^/.]+?)(?:\.git)?/?$")
+_REMOTE_PATTERN = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 
 
 def discover_git_origin(repo_root: Path) -> dict | None:
@@ -217,7 +215,7 @@ def discover_git_origin(repo_root: Path) -> dict | None:
             text=True,
             check=False,
         )
-    except (OSError, FileNotFoundError):
+    except OSError:
         return None
     if result.returncode != 0:
         return None

@@ -279,3 +279,44 @@ def test_discover_git_origin_no_remote(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(setup_discover.subprocess, "run", fake_run)
 
     assert setup_discover.discover_git_origin(tmp_path) is None
+
+
+def test_discover_git_origin_non_github_url(tmp_path, monkeypatch) -> None:
+    """GitLab / GHE / other URLs → None (caller falls back to AskUserQuestion)."""
+    import subprocess
+
+    import setup_discover
+
+    def fake_run(cmd, **kw):
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout="https://gitlab.com/theoju/foo.git\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(setup_discover.subprocess, "run", fake_run)
+
+    assert setup_discover.discover_git_origin(tmp_path) is None
+
+
+def test_discover_git_origin_dotted_repo_name(tmp_path, monkeypatch) -> None:
+    """Repo name with a dot (e.g., my.repo) is valid on GitHub and must parse."""
+    import subprocess
+
+    import setup_discover
+
+    def fake_run(cmd, **kw):
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout="https://github.com/theoju/my.repo.git\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(setup_discover.subprocess, "run", fake_run)
+
+    assert setup_discover.discover_git_origin(tmp_path) == {
+        "owner": "theoju",
+        "repo": "my.repo",
+    }

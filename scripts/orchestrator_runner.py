@@ -25,7 +25,7 @@ from state_io import (
     save_current_run,
     save_persistent_state,
 )
-from stderr_emit import _redact_credentials
+from stderr_emit import _OBSERVABILITY_FLUSH, _redact_credentials, emit_log
 
 
 def detect_repo(repo_root: Path) -> dict[str, str]:
@@ -1455,6 +1455,10 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             save_current_run(state_path, state)
         return 0
     finally:
+        try:
+            _emit_shutdown_dump(state)
+        except OSError as exc:
+            emit_log(f"docs-agent: _emit_shutdown_dump failed: {exc}")
         _write_step_summary(state, repo_root)
 
 
@@ -1705,6 +1709,54 @@ def _format_partial_digest(partial_reasons: list[str]) -> str:
     lines = ["WARNING — Partial run", ""]
     lines.extend(f"- {r}" for r in partial_reasons)
     return "\n".join(lines)
+
+
+def _emit_shutdown_dump(state: dict) -> None:
+    """Emit a one-reason-per-line stderr summary of partial_reasons.
+
+    Called from run()'s finally block BEFORE _write_step_summary. Covers
+    the exit-0 partial run case (notifier completes, PR opens with
+    WARNING-Partial digest, run returns 0 — currently no log signal)
+    AND fires again on exit-1 alongside the existing pre-finally dump
+    at line 1412 (belt-and-suspenders).
+
+    Gating: non-empty `state['current_run']['partial_reasons']`. NOT
+    gated on `partial` — info_only reasons still warrant exit-time
+    visibility. Matches the precedent at _write_step_summary (gates on
+    reasons list, not partial flag).
+
+    Prefix policy (Open Question Option (a) — locked):
+      - PARTIAL for all reasons when state['current_run']['partial'] is True
+        (the common case: any non-info_only reason has flipped it).
+      - INFO for all reasons when partial is False (info_only-only run).
+    Per-reason PARTIAL vs INFO granularity is visible only in the per-call
+    emit during the run, never in the shutdown dump.
+
+    Implementation: uses print() directly, NOT emit_stderr/emit_log,
+    so OSError propagates to the caller. emit_stderr/emit_log are
+    best-effort (OSError-swallowed); the shutdown dump is the operator's
+    last-resort observability signal and must fail loudly if stderr is
+    broken. Still calls _redact_credentials per reason for defense-in-depth
+    (reasons are already redacted at add_partial entry, but a future
+    contributor bypassing add_partial cannot leak via the shutdown dump).
+    """
+    cr = state.get("current_run") or {}
+    reasons = cr.get("partial_reasons") or []
+    if not reasons:
+        return
+    prefix = "PARTIAL" if cr.get("partial") else "INFO"
+    print(
+        f"docs-agent: run exit summary (reasons={len(reasons)}):",
+        file=sys.stderr,
+        flush=_OBSERVABILITY_FLUSH,
+    )
+    for r in reasons:
+        safe = _redact_credentials(r)
+        print(
+            f"docs-agent {prefix}: {safe}",
+            file=sys.stderr,
+            flush=_OBSERVABILITY_FLUSH,
+        )
 
 
 def _write_step_summary(state: dict, repo_root: Path) -> None:

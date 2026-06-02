@@ -1219,18 +1219,15 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                     try:
                         rel = fail_path.resolve().relative_to(repo_root.resolve())
                     except ValueError:
-                        state["current_run"]["partial"] = True
-                        state["current_run"]["partial_reasons"].append(
-                            f"lint_block_unsafe_path: {fail['path']} (outside repo)"
+                        add_partial(
+                            state,
+                            f"lint_block_unsafe_path: {fail['path']} (outside repo)",
                         )
                         continue
                     # Reject empty / "." paths that would cause git checkout HEAD -- .
                     # to restore the entire working tree.
                     if str(rel) in (".", ""):
-                        state["current_run"]["partial"] = True
-                        state["current_run"]["partial_reasons"].append(
-                            f"lint_block_unsafe_path: empty path"
-                        )
+                        add_partial(state, "lint_block_unsafe_path: empty path")
                         continue
                     # If the file exists in HEAD, restore it (edit case).
                     # If not (create case), remove it.
@@ -1264,9 +1261,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                     else:
                         fail_path.unlink(missing_ok=True)
                         cleanup_empty_parents(fail_path, until=repo_root)
-                    state["current_run"]["partial"] = True
-                    state["current_run"]["partial_reasons"].append(
-                        f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}"
+                    add_partial(
+                        state,
+                        f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}",
                     )
 
         # Archive index regeneration

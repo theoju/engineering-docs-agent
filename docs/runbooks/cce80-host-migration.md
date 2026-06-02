@@ -8,7 +8,7 @@ Run this for each host repo currently onboarded to engineering-docs-agent
 - [ ] CCE-80 PR is open, all checks green.
 - [ ] Operator has the plugin tree checked out at the CCE-80 feature branch and has run:
   ```bash
-  claude plugin add --local /Users/theo/Projects/engineering-docs-agent
+  claude plugin add --local <path-to-plugin-checkout>  # e.g. /Users/you/Projects/engineering-docs-agent
   ```
   This makes the setup skill resolve to the feature branch's SKILL.md + scripts.
   After merge, run `claude plugin update engineering-docs-agent` to switch back
@@ -25,7 +25,7 @@ checkout step. PR author cuts the tag within 5 minutes of merge:
 gh release create v0.5.0 \
     --target main \
     --title "v0.5.0 — CCE-80 template refresh" \
-    --notes "Template absorbs 16 STALE divergences from dogfood nightly. See CCE-80 spec."
+    --notes "Template sync: OAuth assert, forensics upload, run-summary, partial-reasons steps added. Pin: v0.5.0. See CCE-80 spec for full changelog."
 gh release view v0.5.0  # verify
 ```
 
@@ -70,9 +70,9 @@ cd /path/to/host && claude
 
 **Verify:**
 
-- `.github/workflows/docs-agent-nightly.yml` exists. If the pre-CCE-80
-  `docs-agent-run.yml` is also present, delete it (`git rm` + commit). The
-  legacy `docs-agent-verify.yml` is unrelated and stays.
+- `.github/workflows/docs-agent-nightly.yml` exists. If `docs-agent-run.yml`
+  still exists (pre-CCE-80 naming), delete it: `git rm .github/workflows/docs-agent-run.yml && git commit -m "chore: drop legacy docs-agent-run.yml"`.
+  The legacy `docs-agent-verify.yml` is unrelated; leave it alone.
 - File contains `client-id:`, OAuth-assert step, forensics step, run-summary
   step, Print-partial-reasons step.
 - Cron line: `grep -E '^\s+- cron: "[0-9]+ 7 \* \* \*"' .github/workflows/docs-agent-nightly.yml`
@@ -113,7 +113,11 @@ gh run watch --repo theoju/<host>
 
 **Rollback on failure:**
 
-1. Restore `ANTHROPIC_API_KEY` secret if it was already deleted.
+1. If you already ran Step 5 partially (legacy secret deleted), re-create it:
+   `gh secret set ANTHROPIC_API_KEY --repo theoju/<host> --body "$ANTHROPIC_API_KEY"`
+   then verify with `gh secret list --repo theoju/<host>`. On a Step 4 failure
+   path with Step 5 not yet started, ANTHROPIC_API_KEY is still present — skip
+   this item.
 2. Revert the workflow file:
    ```bash
    git revert <re-scaffold-commit-sha>
@@ -128,8 +132,12 @@ gh secret delete ANTHROPIC_API_KEY --repo theoju/<host>
 gh secret list --repo theoju/<host>   # verify removal
 ```
 
-Wait 24 hours; confirm the next scheduled nightly succeeds. Document
-completion in CCE-80 Jira comments.
+Wait 24 hours so one unattended scheduled nightly run completes without
+the legacy secret. A manual dispatch at this point would not exercise the
+same code path, so skipping the wait suppresses the signal. Confirm via
+`gh run list --repo theoju/<host> --workflow docs-agent-nightly.yml --limit 1`;
+the most recent run must be `success`. Document completion in CCE-80 Jira
+comments.
 
 ## Post-runbook cleanup
 

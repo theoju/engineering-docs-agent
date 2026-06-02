@@ -142,7 +142,7 @@ jobs:
           # SP-1 / CCE-41: forensics capture mode. Per-dispatch
           # prompt/stdout/stderr/stream/meta land in this dir; the
           # upload-artifact step below persists them past the runner.
-          # See scripts/orchestrator_runner.py:357.
+          # See scripts/orchestrator_runner.py:442.
           DOCS_AGENT_DEBUG_DIR: ${{ runner.temp }}/docs-agent-debug
           # CCE-45: GH_TOKEN sourced from the GitHub App installation token
           # (or GITHUB_TOKEN fallback). Lives at step-env (not job-env) because
@@ -160,7 +160,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: docs-agent-subagent-forensics-${{ github.run_id }}
+          name: docs-agent-subagent-forensics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/docs-agent-debug/
           retention-days: 14
           if-no-files-found: warn

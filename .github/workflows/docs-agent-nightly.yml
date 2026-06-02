@@ -159,7 +159,7 @@ jobs:
         # Node 20 (deprecated June 2026); v6 is the first major on Node 24.
         uses: actions/upload-artifact@v6
         with:
-          name: docs-agent-subagent-forensics-${{ github.run_id }}
+          name: docs-agent-subagent-forensics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/docs-agent-debug/
           retention-days: 14
           if-no-files-found: warn

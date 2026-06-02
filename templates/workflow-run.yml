@@ -139,12 +139,31 @@ jobs:
       - name: Run docs-agent
         id: docs-agent
         env:
+          # SP-1 / CCE-41: forensics capture mode. Per-dispatch
+          # prompt/stdout/stderr/stream/meta land in this dir; the
+          # upload-artifact step below persists them past the runner.
+          # See scripts/orchestrator_runner.py:357.
+          DOCS_AGENT_DEBUG_DIR: ${{ runner.temp }}/docs-agent-debug
           # CCE-45: GH_TOKEN sourced from the GitHub App installation token
           # (or GITHUB_TOKEN fallback). Lives at step-env (not job-env) because
           # GitHub's runtime validator rejects `steps.*` references at job-env scope.
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           python .docs-agent-plugin/scripts/orchestrator_runner.py --repo-root .
+
+      - name: Upload subagent forensics
+        # SP-1 / CCE-41: persist forensics on success AND failure (failure is
+        # the primary use case). `if-no-files-found: warn` tolerates a runner
+        # step that fails before any dispatch happens (config invalid, state
+        # corrupted) without breaking the workflow. github.run_id is appended
+        # because v4+ disallow duplicate artifact names within a run.
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: docs-agent-subagent-forensics-${{ github.run_id }}
+          path: ${{ runner.temp }}/docs-agent-debug/
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Run summary
         if: always()

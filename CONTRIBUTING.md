@@ -2,6 +2,8 @@
 
 ## Dogfood ↔ Template Parity
 
+If you edit `.github/workflows/docs-agent-nightly.yml`, this section governs what CI will require of you.
+
 This plugin ships `templates/workflow-run.yml` (the generic workflow
 installed by the setup skill into arbitrary host repos) AND dogfoods itself
 via `.github/workflows/docs-agent-nightly.yml`. Both files are tested for
@@ -9,16 +11,11 @@ parity by `tests/templates/test_workflow_run_parity.py`.
 
 Edits to `.github/workflows/docs-agent-nightly.yml` require either:
 
-1. A corresponding update to `templates/workflow-run.yml` (the preferred
-   path for any change that should ship to host repos), or
-2. An explicit entry added to `_ALLOWLIST` in
-   `tests/templates/test_workflow_run_parity.py` with rationale (use this
-   only when the divergence is intentionally host-specific or
-   template-specific).
+1. **DEFAULT** — mirror the change to `templates/workflow-run.yml`. Use this path for any change that should ship to host repos.
+2. **EXCEPTION** — add an `_ALLOWLIST` entry in `tests/templates/test_workflow_run_parity.py` with rationale. Use this ONLY when the divergence is intentionally host-specific or template-specific.
 
 The parity test runs in CI. A failing test prints the divergence + the
-allowlist key needed to suppress it. Suppressing without rationale is a
-review-time block.
+allowlist key needed to suppress it. A reviewer must request rationale before approving any `_ALLOWLIST` addition that lacks it.
 
 ## Release tagging
 
@@ -35,3 +32,7 @@ public surface (templates, setup skill, runner contracts):
 
 Cut the tag within 5 minutes of merge — hosts re-scaffolding before the
 tag exists will fail at the plugin-vendoring checkout step.
+
+## Other conventions
+
+For branch naming (`<type>/CCE-<number>-<slug>`), commit-message format (CCE-NNN reference), and the test-running matrix, see `CLAUDE.md`.

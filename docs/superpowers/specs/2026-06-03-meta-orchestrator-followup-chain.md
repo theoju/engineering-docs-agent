@@ -3,7 +3,7 @@
 **Date:** 2026-06-03
 **Status:** Draft v2 — re-baselined against empirical ground-truth (re-audit Workflow wf_85bc7321-0bf, 2026-06-03 ~08:10 PDT)
 **Scope:** Option B′ — empirically-validated 16-task batch (B1–B16)
-**Tracking:** Will be filed as a new CCE ticket after user review approval
+**Tracking:** [CCE-83](https://designitright.atlassian.net/browse/CCE-83)
 
 ## Context
 
@@ -243,7 +243,7 @@ systematic-debugging probe → patch-spec
 | B10 | Author CCE-77 spec from scratch. Normalize Jira description (already contains AC + 7 test cases) into a spec file.                                                                                                             | 3     | administrative | critical                          | no      | **yes** | —        |
 | B11 | Implement CCE-77 fix: edit `~/.claude/skills/ship/lib/validate-git-cmd.sh` line 40 to fix `-f` over-match. Detached-target mode (no PR).                                                                                       | 3     | code-change    | critical                          | **yes** | **yes** | B10      |
 | B12 | Extend `~/.claude/skills/ship/tests/validate-git-cmd.test.sh` with the 7 acceptance test cases from CCE-77 description.                                                                                                        | 3     | code-change    | non-critical                      | no      | no      | B10      |
-| B13 | File 4 admin tickets (template-preview gate first): gate-required, paths-trigger-narrowing, runbook-polish, docstring-flag-lint. Next available keys: CCE-83, CCE-84, CCE-85, CCE-86.                                          | 4     | administrative | non-critical (after preview-gate) | no      | no      | B6       |
+| B13 | File 4 admin tickets (template-preview gate first): gate-required, paths-trigger-narrowing, runbook-polish, docstring-flag-lint. Next available keys: CCE-84, CCE-85, CCE-86, CCE-87.                                          | 4     | administrative | non-critical (after preview-gate) | no      | no      | B6       |
 | B14 | Cut release tag **v0.3.0** (NOT v0.5.0). 17 feat / 0 BREAKING since v0.2.0 = MINOR.                                                                                                                                            | 5     | operational    | critical                          | no      | no      | B6, B11  |
 | B15 | Resolve CCE-47 (release.yml live-tests on next v\* tag push) — auto-satisfied by B14.                                                                                                                                          | 5     | operational    | non-critical                      | no      | no      | B14      |
 
@@ -285,7 +285,7 @@ Total: 14 tasks (B7 and B16 dropped per validator D-A middle-path resolution). D
 
 ### Phase 4: Administrative filings
 
-**B13 (administrative with preview-gate)** — Render all 4 ticket bodies in one combined preview message: title, summary, AC, priority, parent link to CCE-80. Surface for user OK. On approval: batch-file via `mcp__plugin_atlassian_atlassian__createJiraIssue` × 4. Verify new keys land at CCE-83, CCE-84, CCE-85, CCE-86 (sequential).
+**B13 (administrative with preview-gate)** — Render all 4 ticket bodies in one combined preview message: title, summary, AC, priority, parent link to CCE-80. Surface for user OK. On approval: batch-file via `mcp__plugin_atlassian_atlassian__createJiraIssue` × 4. Verify new keys land at CCE-84, CCE-85, CCE-86, CCE-87 (sequential).
 
 ### Phase 5: Release
 

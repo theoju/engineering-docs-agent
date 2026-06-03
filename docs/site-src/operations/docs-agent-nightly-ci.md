@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/66
+  - https://github.com/theoju/engineering-docs-agent/pull/91
 synthesized_into: []
 ---
 
@@ -15,12 +16,25 @@ The default `GITHUB_TOKEN` GitHub injects into every workflow run is subject to 
 
 The workflow mints a GitHub App installation token instead (`actions/create-github-app-token@v3`, step id `app-token`). App-installation tokens are exempt from the suppression rule, so CI fires normally on docs-agent PRs.
 
-Two credentials back this up — one Variable, one Secret:
+The action uses the `client-id` input — **not** the deprecated `app-id`:
+
+```yaml
+# .github/workflows/docs-agent-nightly.yml
+- name: Generate GitHub App token
+  id: app-token
+  uses: actions/create-github-app-token@v3
+  with:
+    client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}   # Variable, not Secret
+    private-key: ${{ secrets.DOCS_AGENT_APP_PRIVATE_KEY }}
+```
+
+Three credentials back this up — two Variables, one Secret:
 
 | Name                         | Tier     | Purpose                                                                                                                                                    |
 | ---------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DOCS_AGENT_APP_CLIENT_ID`   | Variable | OAuth Client ID for `docs-agent-bot` (e.g. `Iv1.xxx` or `Iv23li...` depending on App age). Non-sensitive — set via `gh variable set` or the Variables tab. |
 | `DOCS_AGENT_APP_PRIVATE_KEY` | Secret   | PEM private key for the same App. Sensitive — set via `gh secret set` or the Secrets tab.                                                                  |
+| `JIRA_EMAIL`                 | Variable | Atlassian account email used for Jira API auth. Non-sensitive — set via `gh variable set` or the Variables tab.                                            |
 
 The App is installed on this repo only and carries `contents:write` and `pull-requests:write` scopes, matching the workflow's `permissions:` block.
 
@@ -54,6 +68,26 @@ The `reason` field is free text; it surfaces in the run summary alongside the po
 ## Concurrency
 
 One authoring run at a time. The `concurrency.group: docs-agent-nightly` block queues additional triggers rather than cancelling them (`cancel-in-progress: false`). Two parallel runs racing on the same `docs-agent/YYYY-MM-DD` branch would produce conflicting commits.
+
+## Migrating from `app-id` to `client-id`
+
+`actions/create-github-app-token@v3` deprecated its `app-id` input in favour of `client-id`. If your host was configured before this change, apply these two updates:
+
+**Rename the App credential and change its tier.** The Client ID is non-sensitive. Delete the old Secret and create a Variable with the new name:
+
+```bash
+gh secret delete DOCS_AGENT_APP_ID
+gh variable set DOCS_AGENT_APP_CLIENT_ID --body "Iv23li..."
+```
+
+**Move `JIRA_EMAIL` from Secrets to Variables.** Email addresses are not sensitive configuration:
+
+```bash
+gh secret delete JIRA_EMAIL
+gh variable set JIRA_EMAIL --body "your@email.com"
+```
+
+`scripts/preflight_host.py` validates the new auth shape at workflow startup. It emits a clear error and exits non-zero if `DOCS_AGENT_APP_CLIENT_ID` is absent or if the old `DOCS_AGENT_APP_ID` secret is still present in place of the Variable.
 
 ## Forensic artifacts
 

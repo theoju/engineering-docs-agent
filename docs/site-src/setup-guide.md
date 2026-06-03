@@ -1,3 +1,12 @@
+---
+status: draft
+sources:
+  - https://github.com/theoju/engineering-docs-agent/pull/91
+  - https://github.com/theoju/engineering-docs-agent/pull/79
+  - https://github.com/theoju/engineering-docs-agent/pull/77
+synthesized_into: []
+---
+
 # Setup Guide
 
 End-to-end walkthrough: from zero to a working `engineering-docs-agent` nightly docs-PR pipeline on a new host repo.
@@ -16,6 +25,14 @@ This guide replaces the older minimal setup notes. If you're returning after the
 | Part 5        | Optional add-ons                         | Host repo                             |
 | Part 6        | Troubleshooting                          | Reference                             |
 | Part 7        | Setup checklist                          | Copy-paste                            |
+
+> **Migration notice for existing installs:** GitHub deprecated the `app-id` input in `actions/create-github-app-token@v3`. If you configured this plugin before June 2026, three steps are required:
+>
+> 1. **Rename** the `DOCS_AGENT_APP_ID` repo **Secret** to `DOCS_AGENT_APP_CLIENT_ID` and **move it to the Variables tab** (Settings → Secrets and variables → Actions → Variables). The Client ID is not sensitive — it belongs in Variables, not Secrets.
+> 2. **Move** `JIRA_EMAIL` from Secrets to Variables if you stored it as a Secret.
+> 3. Delete the old `DOCS_AGENT_APP_ID` Secret once the Variable is confirmed set.
+>
+> `scripts/preflight_host.py` validates the new auth shape at workflow start and reports a clear error if the old configuration is still in place.
 
 ## Prerequisites
 
@@ -336,7 +353,7 @@ For a fresh host repo:
 - [ ] Run `claude setup-token`, copy the OAuth token.
 - [ ] Register the GitHub App (Part 1.2).
 - [ ] Download the App's private key (`.pem` file).
-- [ ] Note the App ID.
+- [ ] Note the **Client ID** (not the numeric App ID — the numeric App ID is no longer used by `actions/create-github-app-token@v3`).
 - [ ] (Optional) Generate an Atlassian API token.
 
 **Per host (Part 2 + Part 5):**
@@ -374,3 +391,5 @@ Key tickets that shaped this guide:
 - **CCE-56**: This guide.
 - **CCE-57, CCE-58**: Onboarding the next two hosts (exercises this guide; surfaces gaps).
 - **CCE-59**: Remove `pull_request paths:` filter on the actionlint workflow so it runs on every PR (unblocks the required-check + path-filter footgun).
+- **CCE-60**: Move setup guide from `docs/setup-guide.md` to `docs/site-src/setup-guide.md` so it appears on the published site (PR #79). The root copy is deleted; `docs/site-src/setup-guide.md` is the single authoritative source.
+- **PR #91**: Migrate `actions/create-github-app-token@v3` from the deprecated `app-id` input to `client-id`; reclassify `JIRA_EMAIL` from Secret to Variable following the principle that non-sensitive configuration must not be stored as encrypted secrets. `scripts/preflight_host.py` validates the new auth shape at workflow start.

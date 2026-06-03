@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/68
+  - https://github.com/theoju/engineering-docs-agent/pull/91
 synthesized_into: []
 ---
 
@@ -56,3 +57,14 @@ python3 scripts/orchestrator_runner.py --repo-root . --no-pr
 ```
 
 See `agents/source-collector.md` Step 5 and Forbidden outputs §6 for the agent-side contract on unauthenticated Jira calls.
+
+## Migration: `JIRA_EMAIL` from Secrets to Variables
+
+PR #91 re-classifies `JIRA_EMAIL` as a non-sensitive GitHub **Variable** (not a Secret). Non-sensitive configuration must not live in the encrypted Secrets store — it obscures the value in logs unnecessarily and makes debugging harder.
+
+If you previously stored `JIRA_EMAIL` as a repository Secret, do the following:
+
+1. **Delete** the `JIRA_EMAIL` entry under **Settings → Secrets and variables → Actions → Secrets**.
+2. **Add** `JIRA_EMAIL` under **Settings → Secrets and variables → Actions → Variables** with the same email value.
+
+The workflow snippet and table above already reflect the correct configuration. The preflight validator (`scripts/preflight_host.py`) checks for this shape on each nightly run and will surface a misconfiguration error if `JIRA_EMAIL` is still wired as a secret.

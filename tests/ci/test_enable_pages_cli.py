@@ -42,7 +42,7 @@ def _install_gh_stub(
     """
     bin_dir.mkdir(parents=True, exist_ok=True)
     stub = bin_dir / "gh"
-    capture = f'printf "%s\\n" "$@" > {argv_capture}\n' if argv_capture else ""
+    capture = f'printf "%s\\n" "$@" > "{argv_capture}"\n' if argv_capture else ""
     stub.write_text(
         f"#!/bin/sh\n"
         f"{capture}"
@@ -202,10 +202,15 @@ def test_gh_missing_prints_recovery_and_returns_zero(tmp_path):
 
 
 def test_missing_args_returns_nonzero(tmp_path):
+    empty_bin = tmp_path / "empty_bin"
+    empty_bin.mkdir()
+    env = os.environ.copy()
+    env["PATH"] = str(empty_bin)
     proc = subprocess.run(
         [sys.executable, str(_CLI)],
         capture_output=True,
         text=True,
+        env=env,
     )
     assert proc.returncode != 0
     # argparse default is exit 2 on missing required

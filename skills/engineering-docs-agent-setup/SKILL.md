@@ -35,7 +35,7 @@ Run in the host repo's working directory. Accepts `--dry-run` flag to emit propo
 
    6c. **Bootstrap GitHub Pages** for the host repo. SKIP this step if 6a did NOT write `docs-agent-pages.yml` (i.e., non-MkDocs host without `publishing.build_command`).
 
-   Pages must exist with `build_type=workflow` before the first push-triggered run of `docs-agent-pages.yml` will succeed. The setup skill performs this once during scaffolding using the user's admin `gh` auth (the workflow token lacks the required scope — see 6a). Reuse the `$OWNER`/`$REPO` resolved in step 6b (`discovery["git"]["owner"]` / `discovery["git"]["repo"]`, with `AskUserQuestion` fallback if `discovery["git"]` is `None`).
+   Pages must exist with `build_type=workflow` before the first push-triggered run of `docs-agent-pages.yml` will succeed. The setup skill performs this once during scaffolding using the user's admin `gh` auth (the workflow token lacks the required scope — see 6a). Resolve `$OWNER` and `$REPO` from `discovery["git"]["owner"]` and `discovery["git"]["repo"]` (fall back to `AskUserQuestion` if `discovery["git"]` is `None`).
 
    Run:
 

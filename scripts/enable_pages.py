@@ -15,8 +15,8 @@ Behaviors (all return exit 0 — scaffolding must never block on this):
   gh not on PATH: print "⚠ `gh` CLI not found" + manual recovery,
       return 0.
   Any other failure (401, 403, 422, 500, exit 139, exit 0 with empty
-      body, etc.): print "⚠ Could not enable Pages" + manual recovery
-      + the actual error, return 0.
+      body, gh hung (timeout) or exec error, etc.): print "⚠ Could not
+      enable Pages" + manual recovery + the actual error, return 0.
 
 Exit codes:
   0: any of the above behaviors completed.
@@ -38,6 +38,8 @@ _RECOVERY_TEMPLATE = (
     "    gh api -X POST repos/{owner}/{repo}/pages -f build_type=workflow"
 )
 
+_GH_TIMEOUT_SECONDS = 30
+
 
 def enable_pages(owner: str, repo: str) -> int:
     if not owner or not repo:
@@ -54,19 +56,30 @@ def enable_pages(owner: str, repo: str) -> int:
             + "\nContinuing with the rest of scaffolding."
         )
         return 0
-    proc = subprocess.run(
-        [
-            "gh",
-            "api",
-            "-X",
-            "POST",
-            f"repos/{owner}/{repo}/pages",
-            "-f",
-            "build_type=workflow",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            [
+                "gh",
+                "api",
+                "-X",
+                "POST",
+                f"repos/{owner}/{repo}/pages",
+                "-f",
+                "build_type=workflow",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        err_summary = f"{type(exc).__name__}: {exc}".strip()[:300]
+        print(
+            "⚠ Could not enable Pages programmatically. Run this manually before first deploy:\n"
+            + _RECOVERY_TEMPLATE.format(owner=owner, repo=repo)
+            + f"\n(gh exec error: {err_summary})\n"
+            + "Continuing with the rest of scaffolding."
+        )
+        return 0
     # Detect 409 with literal "(HTTP 409)" — matches gh's actual stderr format
     # "gh: ... (HTTP 409)" and avoids false positives from JSON bodies
     # containing `"status":"409"` or prose containing `"already exists"`.

@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "!docs/runbooks/**"
+      - "!docs/superpowers/**"
       - "scripts/verify_diagrams.py"
       - "tests/diagrams/**"
       - "tests/fixtures/diagrams/render/**"
@@ -14,6 +16,8 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "!docs/runbooks/**"
+      - "!docs/superpowers/**"
       - "scripts/verify_diagrams.py"
       - "tests/diagrams/**"
       - "tests/fixtures/diagrams/render/**"

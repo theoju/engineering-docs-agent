@@ -22,8 +22,11 @@ jobs:
       - name: Install dependencies
         # Tests put scripts/ on sys.path themselves; install the runtime deps
         # directly rather than the package (flat multi-dir layout isn't pip-installable).
+        # CCE-80: requirements-dev.txt adds ruamel.yaml for the parity test
+        # (templates/workflow-run.yml ↔ .github/workflows/docs-agent-nightly.yml).
         run: |
           python -m pip install --upgrade pip
           python -m pip install pyyaml jsonschema pytest
+          python -m pip install -r requirements-dev.txt
       - name: Run tests
         run: python -m pytest -q

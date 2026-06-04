@@ -1,3 +1,12 @@
+---
+status: draft
+sources:
+  - https://github.com/theoju/engineering-docs-agent/pull/91
+  - https://github.com/theoju/engineering-docs-agent/pull/79
+  - https://github.com/theoju/engineering-docs-agent/pull/77
+synthesized_into: []
+---
+
 # Setup Guide
 
 End-to-end walkthrough: from zero to a working `engineering-docs-agent` nightly docs-PR pipeline on a new host repo.
@@ -145,6 +154,8 @@ Open the host repo's **Settings → Secrets and variables → Actions**. You'll 
 | `JIRA_EMAIL`               | The email associated with the Jira token                         | Your Atlassian account | Only if Jira enrichment |
 
 Without `JIRA_API_TOKEN` + `JIRA_EMAIL`, the source-collector skips Jira enrichment cleanly and the run is marked partial with `source_collector_error: jira_auth_missing`. The PR still opens — partial-mode is the operational-visibility surface, not a hard failure.
+
+> **Preflight validation:** `preflight_host.py` (invoked by the setup skill) now validates the tier of every expected value. It reports a **Variables checklist** section in its onboarding output that flags any value stored in Secrets that belongs in Variables (e.g., `JIRA_EMAIL`) and vice-versa. If you see tier-mismatch warnings after running the setup skill, correct the tier using the tables above before your first nightly run.
 
 ### 2.5 Branch protection (recommended)
 
@@ -336,7 +347,7 @@ For a fresh host repo:
 - [ ] Run `claude setup-token`, copy the OAuth token.
 - [ ] Register the GitHub App (Part 1.2).
 - [ ] Download the App's private key (`.pem` file).
-- [ ] Note the App ID.
+- [ ] Note the App **Client ID** from the App's General page (the `Iv1.…` or `Iv23li…` value — the numeric App ID is no longer used).
 - [ ] (Optional) Generate an Atlassian API token.
 
 **Per host (Part 2 + Part 5):**
@@ -374,3 +385,4 @@ Key tickets that shaped this guide:
 - **CCE-56**: This guide.
 - **CCE-57, CCE-58**: Onboarding the next two hosts (exercises this guide; surfaces gaps).
 - **CCE-59**: Remove `pull_request paths:` filter on the actionlint workflow so it runs on every PR (unblocks the required-check + path-filter footgun).
+- **CCE-66**: Migrate the nightly workflow from the deprecated `app-id` input of `actions/create-github-app-token@v3` to `client-id`; reclassify `JIRA_EMAIL` from Secret to Variable (it is a username, not a credential); extend `preflight_host.py` with variable-tier detection and a Variables checklist section in the onboarding report.

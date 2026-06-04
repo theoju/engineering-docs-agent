@@ -2,23 +2,33 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/68
+  - https://github.com/theoju/engineering-docs-agent/pull/91
 synthesized_into: []
 ---
 
 # Nightly workflow: Jira authentication
 
-The nightly docs-agent workflow authenticates to Jira using two repo credentials — one Secret, one Variable — forwarded as job-level environment variables in `.github/workflows/docs-agent-nightly.yml`. Without them, every run operates in partial mode.
+The nightly docs-agent workflow authenticates to Jira using two repo credentials forwarded as job-level environment variables in `.github/workflows/docs-agent-nightly.yml`. Without them, every run operates in partial mode.
 
 ## Required credentials
 
-Set both of the following in your repository's **Settings → Secrets and variables → Actions**. The API token is sensitive and goes in the Secrets tab; the email is non-sensitive (it's already visible in commit metadata anywhere it matters) and goes in the Variables tab so it shows up plainly in workflow logs.
+Set the following in your repository's **Settings → Secrets and variables → Actions**. Use the correct tab for each — the API token is sensitive and belongs in Secrets; the email address is a basic-auth username, not a credential, and belongs in Variables.
 
-| Name             | Tier     | Value                                                                                                                                             |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `JIRA_API_TOKEN` | Secret   | Atlassian Cloud API token from [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) |
-| `JIRA_EMAIL`     | Variable | The email address associated with your Atlassian account                                                                                          |
+### Secrets
 
-The workflow exposes them to the runner process:
+| Name             | Value                                                                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JIRA_API_TOKEN` | Atlassian Cloud API token from [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) |
+
+### Variables
+
+| Name         | Value                                                    |
+| ------------ | -------------------------------------------------------- |
+| `JIRA_EMAIL` | The email address associated with your Atlassian account |
+
+`JIRA_EMAIL` is a basic-auth username — it already appears in Jira comments and git commit author lines. Storing it as a Secret masks it unnecessarily in workflow logs and makes operator debugging harder. Use Variables (the Repository Variables tab, not Secrets) for this value.
+
+The workflow exposes both to the runner process:
 
 ```yaml
 env:
@@ -27,6 +37,16 @@ env:
 ```
 
 The orchestrator passes its full environment into each subagent subprocess, so both variables reach the source-collector without additional plumbing once they are in the job environment.
+
+## Migrating JIRA_EMAIL from Secret to Variable
+
+If you set up Jira auth before PR #91 (CCE-66), you stored `JIRA_EMAIL` as a Secret. Migrate it to the correct tier:
+
+1. Go to **Settings → Secrets and variables → Actions → Variables tab**.
+2. Create a new Repository Variable named `JIRA_EMAIL` with your Atlassian email address.
+3. Delete the old `JIRA_EMAIL` entry from the **Secrets tab**.
+
+The workflow already reads `JIRA_EMAIL` from `vars.JIRA_EMAIL`, so the updated reference is in place. Only the repo-side storage tier needs to change.
 
 ## What happens when the credentials are missing
 

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pages bootstrap on first host deploy.** Replaced `actions/configure-pages@v6 enablement: true` (a no-op on first deploy because the workflow's `GITHUB_TOKEN` lacks admin scope) with a setup-time `gh api -X POST repos/.../pages -f build_type=workflow` call from the new `scripts/enable_pages.py`. The setup skill's step 6c invokes it after writing the docs-pages workflow. Graceful fallback on all error paths — scaffolding never blocks on Pages bootstrap. Originating incident: `theoju/claude-code-self-assessment` PR #121 / CCE-81. Tracker: CCE-82.
+
 ## [0.2.0] — 2026-05-27
 
 Consolidates the work merged since v0.1.4 (CCE-17 through CCE-34). The headline additions are a structured, publishable docs site; verified-citation and core-manifest authoring stages; a Playwright diagram-render CI gate; a generic GitHub Pages publish target; and discovery-driven semantic section routing for generated pages. No breaking changes to the host config surface; existing `.engineering-docs-agent/config.yml` files continue to load.

@@ -277,7 +277,7 @@ Refs CCE-85 / CCE-80 (parent)."
 
 - [ ] **Step A.4.1: Write the PR body to `/tmp/pr-body-eda-cce-77-80-hygiene.md`**
 
-(Body content drafted at PR-open time; references CCE-85 + CCE-87 acceptance criteria from their respective tickets and the 3-agent post-impl APPROVED verdicts.)
+Body content drafted at PR-open time; references CCE-85 + CCE-87 acceptance criteria from their respective tickets and the 3-agent post-impl APPROVED verdicts. **REQUIRED body section: "Ordering note: Component A (this PR) must land before Component B (CCE-84 branch-protection admin call) — once `diagram-gate` becomes a REQUIRED check on `main`, this PR's own diagram-gate run (triggered by the `.github/workflows/docs.yml` change in this PR) would have to pass first. Both pass cleanly, but documenting the load-bearing order so a future orchestrator doesn't apply CCE-84 first and accidentally block this PR."**
 
 - [ ] **Step A.4.2: Push branch and open PR**
 
@@ -374,14 +374,19 @@ The Component B work is a single admin call with deterministic verification. A 3
 
 ### Task C.1 — TDD: extend the test harness with new cases (RED first)
 
-- [ ] **Step C.1.1: Snapshot the pre-edit file**
+- [ ] **Step C.1.1: Snapshot the pre-edit file (two-tier: ephemeral + reboot-durable)**
 
 ```bash
+# Ephemeral (for in-session diff at Step C.3.1):
 cp /Users/theo/.claude/skills/ship/lib/validate-git-cmd.sh /tmp/validate-git-cmd.sh.pre-cce88
 cp /Users/theo/.claude/skills/ship/tests/validate-git-cmd.test.sh /tmp/validate-git-cmd.test.sh.pre-cce88
+
+# Reboot-durable (co-located, one-cp rollback if a future session needs it):
+cp /Users/theo/.claude/skills/ship/lib/validate-git-cmd.sh /Users/theo/.claude/skills/ship/lib/validate-git-cmd.sh.pre-cce-88-backup
+cp /Users/theo/.claude/skills/ship/tests/validate-git-cmd.test.sh /Users/theo/.claude/skills/ship/tests/validate-git-cmd.test.sh.pre-cce-88-backup
 ```
 
-These snapshots are the rollback path if the new regex breaks anything.
+The `/tmp/` snapshots are for the in-session diff record at Step C.3.1. The `.pre-cce-88-backup` copies in the skill directory survive reboots and are the canonical rollback if a regression surfaces days later (one `cp` away). The `.test.sh.orig` and `.pre-cce-88-backup` files in the tests/ directory are not test files (don't end in `.test.sh`) so the test harness skips them.
 
 - [ ] **Step C.1.2: Append new test cases to `validate-git-cmd.test.sh` (RED phase)**
 
@@ -444,7 +449,23 @@ else
   HARNESS_FAIL=$((HARNESS_FAIL+1))
 fi
 rm -f /tmp/ship-validator-stderr
+
+# Cases 31-32: git global options preceding the destructive subcommand still blocked.
+
+# Case 31: git -C <path> checkout -f blocked
+rc=$(run_validator '{"tool_name":"Bash","tool_input":{"command":"git -C /tmp/repo checkout -f main"}}')
+assert_exit "$rc" "2" "git -C <path> checkout -f blocked (CCE-88)"
+
+# Case 32: git -c key=val push -f blocked
+rc=$(run_validator '{"tool_name":"Bash","tool_input":{"command":"git -c safe.directory=* push -f origin main"}}')
+assert_exit "$rc" "2" "git -c key=val push -f blocked (CCE-88)"
+
+# Case 33: regression — git pushd (NOT a real subcommand) must NOT match push prefix
+rc=$(run_validator '{"tool_name":"Bash","tool_input":{"command":"git pushd /tmp -f"}}')
+assert_exit "$rc" "0" "git pushd -f not blocked (regex anchors on enumerated subcommands, not prefixes)"
 ```
+
+Note: Case 33 protects against substring/prefix false positives. `pushd` shares the `push` prefix; the regex requires the subcommand to be followed by `[[:space:]]+[^[:space:]]+` or directly by `[[:space:]]-f`, so `pushd ` (whose next char is `d`, not space) cannot satisfy the boundary. Re-tested in Step C.2.2.
 
 Use the Edit tool to append after the existing Case 19 (lines 102–111). The unique anchor is the closing `rm -f /tmp/ship-validator-stderr` after Case 19.
 
@@ -485,13 +506,17 @@ New:
 # Short -f (CCE-77 + CCE-88): only block when -f is a flag on a git destructive subcommand.
 # Subcommands covered: push, commit, checkout, clean, branch, tag.
 # Anchor on segment boundaries (^|;|&|||(|backtick|whitespace) to defeat substrings like "git pushd".
+# Tolerates zero or more git GLOBAL options between `git` and the subcommand
+# (e.g., `git -C /path push -f`, `git -c safe.directory=* checkout -f`).
 # Variable-assigned regex for bash 3.2.57 compatibility (inline bracket-class regex mis-parses on macOS system bash).
-GIT_DESTRUCTIVE_F_RE='(^|[[:space:]]|;|\&|\||\()git[[:space:]]+(push|commit|checkout|clean|branch|tag)([[:space:]]+[^|;&()]*)?[[:space:]]-f([[:space:]]|$)'
+GIT_DESTRUCTIVE_F_RE='(^|[[:space:]]|;|\&|\||\()git[[:space:]]+(-[a-zA-Z][a-zA-Z]*[[:space:]]+[^[:space:]]+[[:space:]]+)*(push|commit|checkout|clean|branch|tag)([[:space:]]+[^|;&()]*)?[[:space:]]-f([[:space:]]|$)'
 if [[ "$CMD" =~ $GIT_DESTRUCTIVE_F_RE ]]; then
-  subcmd="${BASH_REMATCH[2]:-unknown}"
+  subcmd="${BASH_REMATCH[3]:-unknown}"
   block "-f (on git ${subcmd})"
 fi
 ```
+
+Group numbering: group 1 = boundary, group 2 = optional global-option repetition (may be empty), group 3 = subcommand, group 4 = optional middle args. `BASH_REMATCH[3]` is the subcommand name.
 
 - [ ] **Step C.2.2: Run tests — expect ALL GREEN**
 

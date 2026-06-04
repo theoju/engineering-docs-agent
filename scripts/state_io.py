@@ -4,8 +4,12 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 from typing import Any
 import json
+import sys
 import jsonschema
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from stderr_emit import _redact_credentials, emit_stderr  # noqa: E402
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
@@ -224,16 +228,26 @@ def add_partial(state: dict, reason: str, *, info_only: bool = False) -> None:
     When info_only is True, leave current_run.partial unchanged — the reason
     is informational, not a degradation of the run's data quality.
 
-    Idempotent: a reason already present is not appended again.
+    Idempotent for state: a reason already present (after redaction) is not
+    appended again.
+
+    Side effect (CCE-74): writes one line to stderr via stderr_emit.emit_stderr
+    on EVERY call (NOT only newly-appended) so retry-loop sequencing is visible.
+    Reason string is redacted via stderr_emit._redact_credentials BEFORE being
+    stored in state AND before being emitted; state.json never carries raw
+    credentials regardless of which call site recorded the reason. Stderr emit
+    is best-effort (OSError-swallowed); state mutation always succeeds.
     """
+    safe_reason = _redact_credentials(reason)
     if "current_run" not in state:
         state["current_run"] = {"partial": False, "partial_reasons": []}
     cr = state["current_run"]
     cr.setdefault("partial_reasons", [])
-    if reason not in cr["partial_reasons"]:
-        cr["partial_reasons"].append(reason)
+    if safe_reason not in cr["partial_reasons"]:
+        cr["partial_reasons"].append(safe_reason)
     if not info_only:
         cr["partial"] = True
+    emit_stderr(safe_reason, info_only=info_only)
 
 
 def cleanup_empty_parents(path: Path, *, until: Path) -> None:

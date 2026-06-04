@@ -374,3 +374,29 @@ Key tickets that shaped this guide:
 - **CCE-56**: This guide.
 - **CCE-57, CCE-58**: Onboarding the next two hosts (exercises this guide; surfaces gaps).
 - **CCE-59**: Remove `pull_request paths:` filter on the actionlint workflow so it runs on every PR (unblocks the required-check + path-filter footgun).
+
+## Provisioning matrix (CCE-80)
+
+Variables and secrets required at the host repo for the docs-agent nightly workflow:
+
+Type uses GitHub Actions expression-context prefixes: `secrets.*` → repository Secret (encrypted, set via `gh secret set`); `vars.*` → repository Variable (plain string, set via `gh variable set`).
+
+| Name                           | Type        | Set via           | Required                                 | Purpose                                                                                                                 |
+| ------------------------------ | ----------- | ----------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN`      | `secrets.*` | `gh secret set`   | ✅                                       | Claude CLI auth in CI (sk-ant-oat\* token from `claude setup-token`)                                                    |
+| `JIRA_API_TOKEN`               | `secrets.*` | `gh secret set`   | If Jira enrichment                       | Atlassian API auth (basic-auth password half — generate at https://id.atlassian.com/manage-profile/security/api-tokens) |
+| `JIRA_EMAIL`                   | `vars.*`    | `gh variable set` | If Jira enrichment                       | Atlassian basic-auth email half (public-coordinate metadata, not a credential)                                          |
+| `DOCS_AGENT_APP_CLIENT_ID`     | `vars.*`    | `gh variable set` | Opt-in (host CI on docs-agent PRs)       | GitHub App Client ID (format `Iv1.xxx` or `Iv23li...`, NOT the numeric App ID)                                          |
+| `DOCS_AGENT_APP_PRIVATE_KEY`   | `secrets.*` | `gh secret set`   | Opt-in (paired with above)               | GitHub App private key, PEM form                                                                                        |
+| `SLACK_WEBHOOK_URL`            | `secrets.*` | `gh secret set`   | Opt-in (Slack notifications)             | Incoming-webhook URL consumed by `agents/notifier.md` when `notifications.slack.enabled: true`                          |
+| `DOCS_AGENT_SKIP_OAUTH_ASSERT` | `vars.*`    | `gh variable set` | Opt-in (enterprise/Bedrock/Vertex hosts) | Set to `'true'` to skip the sk-ant-oat\* prefix check in the OAuth pre-flight step                                      |
+
+Use `--body "$VALUE"` for inline values; `--body-file path/to/file` for multi-line (e.g., PEM private keys). Append `--repo theoju/<host>` when not running inside the host repo.
+
+### When does the App-token step matter?
+
+If `vars.DOCS_AGENT_APP_CLIENT_ID` is unset, the workflow's `app-token` step is skipped via `if:`, and `${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}` resolves to the default `GITHUB_TOKEN`. GitHub deliberately suppresses `push` and `pull_request` workflow triggers on its own commits/PRs — so **docs-agent PRs will not fire your host's CI** without the App configured. Register the App and set both `DOCS_AGENT_APP_CLIENT_ID` (Variable) + `DOCS_AGENT_APP_PRIVATE_KEY` (Secret) to enable host CI.
+
+### Migrating from earlier plugin versions
+
+Pre-CCE-80 installations used `ANTHROPIC_API_KEY` (Secret) for the runner's CLI auth. CCE-80 migrates to `CLAUDE_CODE_OAUTH_TOKEN`. See `docs/runbooks/cce80-host-migration.md` for the per-host migration steps.

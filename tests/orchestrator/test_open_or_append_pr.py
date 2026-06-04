@@ -1,10 +1,34 @@
-"""CCE-21: open_or_append_pr must distinguish three push failure modes:
-- push_refs_failed: commit didn't reach remote (fatal)
-- push_tracking_setup_failed: commit on remote but `-u` tracking failed (info-only, continue)
-- push_failed_unknown: couldn't verify remote state (fatal, conservative default)
+"""open_or_append_pr behavior tests.
 
-It must also always log push.stderr and push.stdout when push.returncode != 0
-so 'see logs' in the partial reason is actually backed by logs.
+Covers CCE-42 (append-commit on same-hour reruns), CCE-73
+(stderr-emission via _record_failure at failure source), and
+CCE-74 (downstream double-emit via add_partial in the caller's loop).
+
+CCE-73 invariant: every failure path in open_or_append_pr emits a
+'docs-agent: open_or_append_pr <reason>' line to stderr via
+_record_failure (orchestrator_runner.py:1849-1863). This fires at
+the moment of failure, before the function returns to its caller.
+
+CCE-74 invariant: every reason recorded by add_partial (state_io.py:220)
+ALSO emits a 'docs-agent PARTIAL: <reason>' or 'docs-agent INFO:
+<reason>' line to stderr. The caller of open_or_append_pr loops over
+the returned reasons and calls add_partial on each, so open_or_append_pr's
+failure path produces TWO stderr lines per reason — first the
+'docs-agent: open_or_append_pr' line, then the 'docs-agent PARTIAL'
+line. The order is locked by
+test_checkout_failure_emits_both_open_or_append_pr_and_partial_prefixes_in_order.
+
+State invariant: every reason stored in state.partial_reasons is
+redacted via stderr_emit._redact_credentials before storage. Tests
+asserting credential markers (e.g., '<redacted>' substring) verify
+both _record_failure's pre-CCE-74 redaction AND add_partial's
+post-CCE-74 redaction; they should continue to pass.
+
+Test infrastructure: _make_subprocess_stub_with_fetch (CCE-74) is the
+preferred stub for new tests — it extends _make_subprocess_stub with
+an explicit fetch_rc parameter so CCE-42 'remote branch absent'
+fallback can be driven (fetch_rc=128). Default fetch_rc=0 makes it a
+drop-in replacement for _make_subprocess_stub.
 """
 
 from __future__ import annotations
@@ -29,6 +53,42 @@ def _make_subprocess_stub(*, push_rc: int, push_stderr: str, lsremote_sha: str |
     """
 
     def _run(argv, **kwargs):
+        if "push" in argv:
+            return MagicMock(returncode=push_rc, stdout="", stderr=push_stderr)
+        if "ls-remote" in argv:
+            if lsremote_sha is None:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(
+                returncode=0,
+                stdout=f"{lsremote_sha}\trefs/heads/branchname\n",
+                stderr="",
+            )
+        if "rev-parse" in argv:
+            return MagicMock(returncode=0, stdout="localsha\n", stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    return _run
+
+
+def _make_subprocess_stub_with_fetch(
+    *,
+    push_rc: int,
+    push_stderr: str,
+    lsremote_sha: str | None,
+    fetch_rc: int = 0,
+):
+    """CCE-74 / CCE-42 aligned: _make_subprocess_stub + explicit fetch_rc.
+
+    Default fetch_rc=0 makes this a drop-in replacement for the existing
+    _make_subprocess_stub call sites (which previously fell through to
+    the 'anything else' branch with rc=0). Tests that need to drive the
+    CCE-42 'remote branch absent' fallback can pass fetch_rc=128 (the
+    git exit code for 'no such ref').
+    """
+
+    def _run(argv, **kwargs):
+        if "fetch" in argv:
+            return MagicMock(returncode=fetch_rc, stdout="", stderr="")
         if "push" in argv:
             return MagicMock(returncode=push_rc, stdout="", stderr=push_stderr)
         if "ls-remote" in argv:
@@ -115,7 +175,7 @@ def test_push_failed_stderr_included_in_reason(tmp_path: Path):
     with patch.object(
         orun.subprocess,
         "run",
-        side_effect=_make_subprocess_stub(
+        side_effect=_make_subprocess_stub_with_fetch(
             push_rc=128,
             push_stderr="fatal: unable to access 'https://github.com/...': ssl error",
             lsremote_sha=None,
@@ -546,7 +606,7 @@ def test_push_refs_failed_emits_reason_to_stderr(tmp_path: Path, capsys):
     with patch.object(
         orun.subprocess,
         "run",
-        side_effect=_make_subprocess_stub(
+        side_effect=_make_subprocess_stub_with_fetch(
             push_rc=1,
             push_stderr="fatal: remote rejected non-fast-forward",
             lsremote_sha=None,
@@ -575,7 +635,7 @@ def test_push_tracking_setup_failure_emits_info_only_reason_to_stderr(
     with patch.object(
         orun.subprocess,
         "run",
-        side_effect=_make_subprocess_stub(
+        side_effect=_make_subprocess_stub_with_fetch(
             push_rc=1,
             push_stderr="warning: failed to set up tracking; refs already pushed",
             lsremote_sha="localsha",
@@ -605,7 +665,7 @@ def test_gh_pr_list_failure_emits_reason_to_stderr(tmp_path: Path, capsys):
     with patch.object(
         orun.subprocess,
         "run",
-        side_effect=_make_subprocess_stub(
+        side_effect=_make_subprocess_stub_with_fetch(
             push_rc=0,
             push_stderr="",
             lsremote_sha="localsha",
@@ -636,7 +696,7 @@ def test_gh_pr_create_failure_emits_reason_to_stderr(tmp_path: Path, capsys):
     with patch.object(
         orun.subprocess,
         "run",
-        side_effect=_make_subprocess_stub(
+        side_effect=_make_subprocess_stub_with_fetch(
             push_rc=0,
             push_stderr="",
             lsremote_sha="localsha",
@@ -808,4 +868,75 @@ def test_happy_path_emits_no_failure_reason_to_stderr(tmp_path: Path, capsys):
     err = capsys.readouterr().err
     assert "docs-agent: open_or_append_pr" not in err, (
         f"happy path must not emit failure markers; got stderr: {err!r}"
+    )
+
+
+def test_checkout_failure_emits_both_open_or_append_pr_and_partial_prefixes_in_order(
+    tmp_path: Path, capsys
+):
+    """CCE-74: double-emit symmetry on open_or_append_pr's failure path.
+
+    Each pr_reason produces TWO stderr lines:
+      1. 'docs-agent: open_or_append_pr <reason>' — from _record_failure
+         at orchestrator_runner.py:1862 (fires at failure source).
+      2. 'docs-agent PARTIAL: <reason>' — from add_partial via the caller
+         loop at orchestrator_runner.py:1398-1399.
+
+    Both lines must appear in stderr, in this order. The open_or_append_pr
+    prefix line fires first because _record_failure runs inside
+    open_or_append_pr before its result reaches the caller's add_partial
+    loop. This locks the belt-and-suspenders contract: if a future cleanup
+    removes _record_failure's emit, this test fails.
+    """
+    # Import via the same bare-import style used in the rest of this test file
+    # (sys.path.insert at line 17 puts scripts/ on sys.path; matches the existing
+    # `import orchestrator_runner as orun` pattern at line 19).
+    from state_io import add_partial
+
+    repo_root = tmp_path
+    (repo_root / ".git").mkdir()  # Minimal git scaffold for _stage_docs_run_changes.
+
+    _default_stub = _make_subprocess_stub_with_fetch(
+        push_rc=0, push_stderr="", lsremote_sha=None
+    )
+
+    def _failing_checkout(argv, **kwargs):
+        if "checkout" in argv and "-B" in argv:
+            return MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="fatal: not a git repository",
+            )
+        return _default_stub(argv, **kwargs)
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = _failing_checkout
+        gh = _make_gh_client_stub()
+        pr_number, reasons = orun.open_or_append_pr(
+            repo_root,
+            gh,
+            branch="docs-agent/2026-06-01T22",
+            now_iso="2026-06-01T22:00:00+00:00",
+            partial=False,
+            partial_reasons=[],
+        )
+
+        # Caller loop equivalent (orchestrator_runner.py:1398-1399):
+        state: dict = {"current_run": {"partial": False, "partial_reasons": []}}
+        for reason, info_only in reasons:
+            add_partial(state, reason, info_only=info_only)
+
+    err = capsys.readouterr().err
+    # Both prefixes present:
+    assert "docs-agent: open_or_append_pr checkout_failed" in err
+    assert "docs-agent PARTIAL: checkout_failed" in err
+    # Order: open_or_append_pr prefix appears BEFORE the PARTIAL prefix
+    # (because _record_failure fires inside open_or_append_pr; add_partial
+    # fires after the function returns).
+    open_or_idx = err.index("docs-agent: open_or_append_pr checkout_failed")
+    partial_idx = err.index("docs-agent PARTIAL: checkout_failed")
+    assert open_or_idx < partial_idx, (
+        "Belt-and-suspenders: _record_failure must fire BEFORE the caller's "
+        "add_partial loop. Order regression suggests _record_failure was "
+        "moved or its emit was removed."
     )

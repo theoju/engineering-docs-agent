@@ -1,52 +1,208 @@
 # templates/workflow-run.yml — main authoring workflow
-# Drop into the host repo at .github/workflows/docs-agent-run.yml
+# Drop into the host repo at .github/workflows/docs-agent-nightly.yml (CCE-80 FN).
+# This file is rendered through scripts/scaffold_workflow.py at scaffold time,
+# which rewrites the cron minute to a deterministic per-host value in [5, 55]
+# so 100 onboarded hosts don't all fire at :07 UTC. See SKILL.md step 6.
 name: docs-agent run
 
 on:
   schedule:
-    - cron: "0 7 * * *"
+    # 07:07 UTC off-minute default; setup-skill rewrites per-host so 100 hosts don't pileup at :07.
+    - cron: "7 7 * * *"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Optional reason for manual fire (shown in run summary)"
+        required: false
+        default: "manual run"
   pull_request:
+    # TEMPLATE-ONLY (D4): real-time docs update on merge for hosts. Paired
+    # with the job-level self-loop guard below that skips docs-agent/* branches.
     types: [closed]
     branches: [main]
 
-concurrency:
-  group: docs-agent-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
-  contents: write
-  pull-requests: write
+  contents: write # commit + push docs-agent/YYYY-MM-DD branch
+  pull-requests: write # gh pr create + append-commit on existing PR
+  issues: read # gap-detector reads linked issues (no writes)
+
+concurrency:
+  # One nightly authoring run at a time per host. Manual fires queue rather
+  # than parallelize so two runs don't race on the same docs-agent/YYYY-MM-DD branch.
+  group: docs-agent-nightly
+  cancel-in-progress: false
 
 jobs:
   run:
-    if: github.event_name == 'schedule' || (github.event.pull_request.merged == true && !startsWith(github.head_ref, 'docs-agent/'))
+    # TEMPLATE-ONLY (D4 self-loop guard): paired with `pull_request.closed`.
+    # CI2 (post-validation extension): workflow_dispatch included so manual
+    # fires actually run when this gate is in effect.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && !startsWith(github.head_ref, 'docs-agent/'))
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # CCE-53: Jira basic-auth credentials surfaced so source-collector's
+      # optional Jira enrichment resolves linked-issue summaries instead of
+      # skipping with source_collector_error: jira_auth_missing.
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      JIRA_EMAIL: ${{ vars.JIRA_EMAIL }} # CCE-66: vars (not secrets) — email is public-coordinate-style metadata.
+      # TEMPLATE-ONLY: consumed by agents/notifier.md when notifications.slack.enabled: true.
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
-      - uses: actions/checkout@v5
+      # Without DOCS_AGENT_APP_CLIENT_ID set, this step is skipped and the workflow
+      # falls back to secrets.GITHUB_TOKEN. CONSEQUENCE: docs-agent PRs will NOT
+      # trigger your host CI (push/pull_request workflows). To enable host CI on
+      # docs-agent PRs, register a GitHub App named engineering-docs-agent and set
+      # vars.DOCS_AGENT_APP_CLIENT_ID + secrets.DOCS_AGENT_APP_PRIVATE_KEY.
+      - name: Generate GitHub App installation token
+        id: app-token
+        if: vars.DOCS_AGENT_APP_CLIENT_ID != ''
+        # CCE-54: v3 is the first major on Node 24.
+        # CCE-66: v3 deprecates `app-id` in favor of `client-id` (the OAuth Client
+        # ID, format Iv1.xxx or Iv23li…, NOT the numeric App ID). Stored as a repo
+        # Variable because Client IDs are not credentials.
+        uses: actions/create-github-app-token@v3
         with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v6
+          client-id: ${{ vars.DOCS_AGENT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DOCS_AGENT_APP_PRIVATE_KEY }}
+
+      - name: Checkout host repo
+        id: checkout-host
+        uses: actions/checkout@v5
         with:
-          python-version: "3.11"
+          fetch-depth: 0 # full history so state.json window math sees all merges
+          # CCE-45: checkout configures git's credential helper from this
+          # token, so the subsequent `git push` from the runner uses the
+          # App token rather than the default GITHUB_TOKEN. The `||` resolves
+          # to GITHUB_TOKEN when the App-token step is skipped via its `if:`.
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+
       - name: Check out engineering-docs-agent plugin
-        # CCE-57: the host repo is not the plugin. Vendor the plugin's
-        # scripts/ directory into the runner workspace at .docs-agent-plugin
-        # so the orchestrator step can invoke it. `ref: main` until the plugin
-        # cuts a versioned release; pin a tag/SHA here when one exists.
+        id: checkout-plugin
+        # TEMPLATE-ONLY (#13): vendor the plugin's scripts/ directory into
+        # the runner workspace at .docs-agent-plugin so the orchestrator
+        # step can invoke it. `ref: v0.5.0` per CCE-80 §5.4 (PR author cuts
+        # the tag <5 min post-merge; tag-cut gates the host migration runbook).
         uses: actions/checkout@v5
         with:
           repository: theoju/engineering-docs-agent
-          ref: main
+          ref: v0.5.0
           path: .docs-agent-plugin
-      - name: Install plugin deps
-        run: pip install pyyaml jsonschema
-      - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
-      - name: Run orchestrator
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime dependencies
+        # Matches release.yml — the flat scripts/ layout isn't pip-installable.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml jsonschema
+
+      - name: Install claude CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          which claude || (echo "claude CLI not installed" && exit 1)
+
+      - name: Assert OAuth token (sk-ant-oat*, len ≥ 32)
+        id: assert-oauth
+        if: vars.DOCS_AGENT_SKIP_OAUTH_ASSERT != 'true'
+        # Enterprise / Bedrock / Vertex hosts use different auth — set
+        # `vars.DOCS_AGENT_SKIP_OAUTH_ASSERT` to `'true'` to skip this check.
+        # CCE-49: three layered checks, cheapest first.
+        shell: bash
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is empty or unset. Set it in repo secrets."
+            exit 1
+          fi
+          case "$CLAUDE_CODE_OAUTH_TOKEN" in
+            sk-ant-oat*) ;;
+            sk-ant-api*) echo "::error::CLAUDE_CODE_OAUTH_TOKEN looks like a console API key (sk-ant-api*). The Claude CLI reads the OAuth slot (sk-ant-oat*). Run 'claude setup-token' and paste that value."; exit 1 ;;
+            *) echo "::error::CLAUDE_CODE_OAUTH_TOKEN has unexpected prefix. Expected sk-ant-oat*. Got prefix: ${CLAUDE_CODE_OAUTH_TOKEN:0:10}..."; exit 1 ;;
+          esac
+          if [ ${#CLAUDE_CODE_OAUTH_TOKEN} -lt 32 ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is suspiciously short (${#CLAUDE_CODE_OAUTH_TOKEN} chars). Likely truncated paste."
+            exit 1
+          fi
+
+      - name: Configure git identity
+        id: git-identity
+        # The runner does `git commit` itself; without an identity it errors
+        # out before reaching the PR step.
+        run: |
+          git config user.name "engineering-docs-agent[bot]"
+          git config user.email "engineering-docs-agent@users.noreply.github.com"
+
+      - name: Run docs-agent
+        id: docs-agent
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          # SP-1 / CCE-41: forensics capture mode. Per-dispatch
+          # prompt/stdout/stderr/stream/meta land in this dir; the
+          # upload-artifact step below persists them past the runner.
+          # See scripts/orchestrator_runner.py:442.
+          DOCS_AGENT_DEBUG_DIR: ${{ runner.temp }}/docs-agent-debug
+          # CCE-45: GH_TOKEN sourced from the GitHub App installation token
+          # (or GITHUB_TOKEN fallback). Lives at step-env (not job-env) because
+          # GitHub's runtime validator rejects `steps.*` references at job-env scope.
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           python .docs-agent-plugin/scripts/orchestrator_runner.py --repo-root .
+
+      - name: Upload subagent forensics
+        # SP-1 / CCE-41: persist forensics on success AND failure (failure is
+        # the primary use case). `if-no-files-found: warn` tolerates a runner
+        # step that fails before any dispatch happens (config invalid, state
+        # corrupted) without breaking the workflow. github.run_id is appended
+        # because v4+ disallow duplicate artifact names within a run.
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: docs-agent-subagent-forensics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/docs-agent-debug/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Run summary
+        if: always()
+        # CI3 (post-validation): heading text standardized to `## docs-agent-nightly`
+        # to match dogfood, even though the runner is named `docs-agent`. The heading
+        # describes the rendered workflow filename (the operator-facing identifier).
+        # workflow_dispatch.inputs.reason is user-controlled; pass via env and
+        # dereference as a shell var rather than interpolating into the script body.
+        env:
+          TRIGGER: ${{ github.event_name }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          {
+            echo "## docs-agent-nightly"
+            echo ""
+            echo "- **Run trigger:** \`$TRIGGER\`"
+            if [ "$TRIGGER" = "workflow_dispatch" ]; then
+              printf -- "- **Reason:** %s\n" "$REASON"
+            fi
+            echo "- **HEAD:** \`$(git rev-parse --short HEAD)\`"
+            echo "- **State file (post-run):**"
+            echo '  ```json'
+            if [ -f .engineering-docs-agent/state.json ]; then
+              jq -e '.' .engineering-docs-agent/state.json 2>/dev/null | sed 's/^/  /' || echo "  (invalid or empty state)"
+            else
+              echo "  (no state)"
+            fi
+            echo '  ```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Print partial-run reasons
+        # CCE-73: echo state.json.current_run.partial_reasons to stdout so
+        # they show in `gh run view --log` even when the run-summary block
+        # is collapsed. `// empty` null-safe + `|| true` so a malformed
+        # state.json doesn't fail this step.
+        if: always()
+        shell: bash
+        run: |
+          state=".engineering-docs-agent/state.json"
+          if [ -f "$state" ]; then
+            jq -r '.current_run.partial_reasons[]? // empty' "$state" || true
+          fi

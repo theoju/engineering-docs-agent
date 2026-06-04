@@ -11,6 +11,7 @@ from orchestrator_runner import detect_repo, dispatch_subagent, dispatch_validat
 from state_io import (  # noqa: E402
     ConfigError,
     StateError,
+    add_partial,
     load_config_validated,
     load_state_validated,
     save_current_run,
@@ -75,10 +76,7 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
             cwd=repo_root,
         )
         for r in verify_reasons:
-            state.setdefault("current_run", {}).setdefault(
-                "partial_reasons", []
-            ).append(r)
-            state["current_run"]["partial"] = True
+            add_partial(state, r)
         if verdict is None:
             verdict = {"verified": [], "failed": [], "build_status": "verifier_invalid"}
         _notifier_result, notifier_reasons = dispatch_validated(
@@ -98,10 +96,7 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
             cwd=repo_root,
         )
         for r in notifier_reasons:
-            state.setdefault("current_run", {}).setdefault(
-                "partial_reasons", []
-            ).append(r)
-            state["current_run"]["partial"] = True
+            add_partial(state, r)
 
         failed_urls = verdict.get("failed", [])
         build_status = verdict.get("build_status")

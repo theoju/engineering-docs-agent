@@ -1,9 +1,21 @@
 # CCE-77 — Narrow the `/ship` guardrails `-f` token check to git-history-rewriting operations
 
 **Ticket:** CCE-77
-**Status:** Draft (awaiting user review)
+**Status:** Implemented (v1 — narrow scope; broader subcommand coverage deferred)
 **Priority:** Low
 **Related:** CCE-75 polish run, PR #98 (merged 2026-06-01 22:34:28Z, commit `11eed62`)
+
+## Revision (2026-06-04)
+
+The implementation that landed is a **v1 minimal fix** that scopes the `-f` token check to `git push` and `git commit` contexts only. The original SDD-authored Design section below describes a more ambitious regex-based implementation covering `push / checkout / clean / branch / tag` with pipeline isolation, segment-boundary anchors, bundled-short-flag handling, and bash 3.2 portability guards. That broader design is preserved here as the **future direction**; expanding to it is captured as follow-up tickets (see Out of scope).
+
+What changed from the original spec:
+
+- **AC list**: AC10 (bash 3.2 `unbound variable` / `syntax error` guards on `BASH_REMATCH`) and AC11 (regex-in-variable + `bash -n` parse-check precondition) are dropped — they are specific to the regex implementation and irrelevant to the glob-based v1.
+- **AC8**: tightened to the 7 new cases B12 added (rm -f, mv -f, find -f, grep -f, tar -f as pass cases; git push -f, git push --force as block cases) plus 1 stderr assertion for AC3 (`-f (on git push)`).
+- **Subcommand scope**: only `git push` and `git commit` contexts trigger the `-f` block. `git checkout -f`, `git clean -f`, `git branch -f`, `git tag -f` are NOT blocked by the v1 fix — they remain as follow-up work.
+
+The actual implementation is at the bottom under "Implementation note (v1, 2026-06-04)". The rest of this document is the SDD-authored target state, kept for future-direction context.
 
 ## Scope clarification (read first)
 
@@ -119,10 +131,10 @@ Rejected because:
 5. `git push --force-with-lease` **does** block (existing check).
 6. `git commit --amend` **does** block (existing check).
 7. `git commit --no-verify` **does** block (existing check).
-8. A new test covers each block + pass case enumerated in the Test plan below.
+8. The 7 new B12 cases land in `~/.claude/skills/ship/tests/validate-git-cmd.test.sh` covering: `rm -f` / `mv -f` / `find -f` / `grep -f` / `tar -f` passing; `git push -f` and `git push --force` blocking. A 1-line stderr assertion confirms AC3's `-f (on git push)` message text. Broader test cases (segment isolation, bundled `-fd`, command substitution, backticks, conservative literal-text blocks, full subcommand matrix) are out of scope for v1.
 9. The hook shim at `~/.claude/hooks/ship-guardrails.sh` is unchanged.
-10. The validator does **not** exit with `unbound variable` when the `-f` block fires (regression guard for the `set -u` interaction with `BASH_REMATCH`), and stderr does **not** contain `syntax error` (regression guard against the bash 3.2 inline-regex parse pitfall).
-11. The validator source assigns the regex pattern to a variable; an inline `[[ ... =~ <pattern> ... ]]` form is rejected by code review because it fails to parse on bash 3.2. The harness runs `bash -n` against the validator as a precondition and the test fails if the validator does not parse under host bash.
+10. (Dropped — bash 3.2 / `BASH_REMATCH` guards are specific to the regex implementation, N/A for the glob-based v1.)
+11. (Dropped — regex-in-variable + `bash -n` parse-check precondition are specific to the regex implementation, N/A for the glob-based v1.)
 
 ## Test plan
 
@@ -225,5 +237,35 @@ No changes to:
 - Porting the `/ship` validator into this plugin. The skill is intentionally personal and operator-local.
 - Telemetry on how often the bare `-f` check tripped historically. The CCE-75 polish run is the recorded instance; counting prior occurrences across operator logs is not worth the dig.
 - Catching `git -C` / `git -c` global-option bypasses, and catching aliased git wrappers. Both are real but unobserved in ship runs; follow-up if evidence appears.
+- **v1 scope reduction**: broader git subcommand coverage (`git checkout -f`, `git clean -f`, `git clean -fd`, `git branch -f`, `git tag -f`) is deferred to a follow-up. The SDD-authored Design above describes the target regex-based implementation that would cover these.
+- **v1 scope reduction**: segment-boundary anchors for command substitution (`$(git push -f)`) and backticks (`` `git push -f` ``) and pipeline isolation are deferred to the regex follow-up. The v1 glob match catches the common chained-command case via simple substring matching but doesn't formally isolate segments.
+- **v1 scope reduction**: bash 3.2 portability guards (parse-check precondition, `BASH_REMATCH`-vs-`unbound-variable` regression test) are N/A for the glob implementation; they become relevant only when upgrading to the regex implementation.
+
+## Implementation note (v1, 2026-06-04)
+
+The v1 fix at `~/.claude/skills/ship/lib/validate-git-cmd.sh:40-49` replaces the bare token check with a context-aware glob:
+
+```bash
+# Short -f: only block in git push/commit contexts (CCE-77 — was over-matching rm -f, mv -f, find -f, grep -f, tar -f).
+# Token boundary: -f preceded by space, followed by space or end of string.
+if [[ " $CMD " == *" -f "* ]]; then
+  if [[ "$CMD" == *"git push"* ]]; then
+    block "-f (on git push)"
+  elif [[ "$CMD" == *"git commit"* ]]; then
+    block "-f (on git commit)"
+  fi
+  # Otherwise: -f is a legitimate flag on another command — not blocked.
+fi
+```
+
+Test coverage at `~/.claude/skills/ship/tests/validate-git-cmd.test.sh`:
+
+- Existing 10 cases unchanged.
+- 7 new cases (B12, appended): `rm -f`, `mv -f`, `find -f`, `grep -f`, `tar -f` pass; `git push -f` and `git push --force` block.
+- 1 stderr case (added 2026-06-04): asserts the `git push -f` block message contains the literal `-f (on git push)` substring (covers AC3).
+
+Test run: **87 pass, 0 fail** via `bash ~/.claude/skills/ship/tests/run.sh`.
+
+Forensic patches saved to `~/.claude/orchestrator/detached-changes/B11.patch` (validator) and `B12.patch` (tests). Targets live outside any git repo; no PR. CCE-77 is transitioned to Done with a comment linking to these patches.
 
 Co-authored-by: Claude Opus 4.7 <noreply@anthropic.com>

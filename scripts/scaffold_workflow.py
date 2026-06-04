@@ -3,12 +3,13 @@
 Rewrites the cron line to a deterministic per-host minute so 100 hosts
 don't all hit :07 UTC. Everything else is byte-for-byte copy.
 
-Usage:
+Usage::
+
     python scripts/scaffold_workflow.py --owner OWNER --repo REPO \\
         [--template PATH] [--out PATH]
 
---template defaults to the plugin's templates/workflow-run.yml; "-" reads stdin.
---out defaults to stdout.
+`--template` defaults to the plugin's templates/workflow-run.yml; `-` reads stdin.
+`--out` defaults to stdout.
 """
 
 from __future__ import annotations

@@ -1,28 +1,19 @@
 name: docs
 
 on:
+  # CCE-91 (2026-06-04): NO `paths:` filter on either trigger. diagram-gate is
+  # a required status check; with a workflow-level paths filter, PRs that
+  # don't touch the listed paths cause GitHub to skip the workflow entirely,
+  # which means the check never reports → mergeStateStatus stays BLOCKED
+  # forever. Same lesson as actionlint.yml CCE-59. Heavy steps inside the
+  # job stay gated on changed-paths detection (see the `filter` step below)
+  # so non-docs PRs only pay ~5s of detection time, not the full Playwright
+  # install. Forensic provenance: PR #108's BLOCKED state on every non-docs
+  # check, CCE-91 root cause.
   push:
     branches: [main]
-    paths:
-      - "docs/**"
-      - "!docs/runbooks/**"
-      - "!docs/superpowers/**"
-      - "scripts/verify_diagrams.py"
-      - "tests/diagrams/**"
-      - "tests/fixtures/diagrams/render/**"
-      - "requirements-docs.txt"
-      - ".github/workflows/docs.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "docs/**"
-      - "!docs/runbooks/**"
-      - "!docs/superpowers/**"
-      - "scripts/verify_diagrams.py"
-      - "tests/diagrams/**"
-      - "tests/fixtures/diagrams/render/**"
-      - "requirements-docs.txt"
-      - ".github/workflows/docs.yml"
 
 jobs:
   diagram-gate:
@@ -30,11 +21,73 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The filter step below diffs against the PR base / previous commit;
+          # fetch-depth: 0 makes that diff reachable on PR-event merge commits
+          # and on shallow push events.
+          fetch-depth: 0
+
+      - name: Detect diagram-relevant changes
+        id: filter
+        shell: bash
+        # CCE-91: match the same path set the old workflow-level `paths:`
+        # filter used. Inclusion patterns first; the two `docs/runbooks/**`
+        # and `docs/superpowers/**` exclusions short-circuit the loop. Output
+        # `relevant=true` if ANY changed file matches an include and NO
+        # exclude. Subsequent expensive steps gate on this output; the job
+        # itself always runs to ground (success or genuine gate failure) so
+        # the `diagram-gate` required check always reports a status.
+        run: |
+          set -euo pipefail
+          case "${{ github.event_name }}" in
+            pull_request) base="${{ github.event.pull_request.base.sha }}" ;;
+            push) base="${{ github.event.before }}" ;;
+            *) base="" ;;
+          esac
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            # First push to a new branch, or unknown event — treat as relevant
+            # so we never silently skip the gate on the safe side.
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "no usable base; defaulting to relevant=true"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$base" HEAD)
+          echo "Changed files:"
+          echo "$changed"
+          relevant=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              docs/runbooks/*|docs/superpowers/*)
+                continue
+                ;;
+            esac
+            case "$f" in
+              docs/*|scripts/verify_diagrams.py|tests/diagrams/*|tests/fixtures/diagrams/render/*|requirements-docs.txt|.github/workflows/docs.yml)
+                relevant=true
+                break
+                ;;
+            esac
+          done <<< "$changed"
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
+          echo "Relevant to diagram-gate: $relevant"
+
+      - name: No-op success (no diagram-relevant changes)
+        if: steps.filter.outputs.relevant != 'true'
+        run: |
+          echo "No docs/scripts/tests-diagrams files changed in this PR."
+          echo "diagram-gate reports success without running the render gate."
+          echo "If this PR touches diagram-relevant files and you're seeing"
+          echo "this skip, check the filter step's path patterns above."
+
       - name: Set up Python
+        if: steps.filter.outputs.relevant == 'true'
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
       - name: Install docs tooling
+        if: steps.filter.outputs.relevant == 'true'
         # jsonschema + pyyaml are the agent-runtime deps: the tests/diagrams
         # suite includes the runtime-isolation test, which imports
         # orchestrator_runner in a subprocess to prove it never pulls in
@@ -42,12 +95,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-docs.txt pytest pyyaml jsonschema
+
       - name: Install Chromium for Playwright
+        if: steps.filter.outputs.relevant == 'true'
         run: python -m playwright install --with-deps chromium
+
       - name: Run diagram render tests (Playwright now present)
+        if: steps.filter.outputs.relevant == 'true'
         run: python -m pytest tests/diagrams -q
+
       - name: Detect a built docs site
         id: site
+        if: steps.filter.outputs.relevant == 'true'
         # The render tests above already validate the gate's logic in CI. The
         # build + site gate below only apply where the host actually has a
         # MkDocs site; with no mkdocs.yml there is nothing to gate (generic-first
@@ -59,10 +118,12 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
             echo "no mkdocs.yml — skipping build + site gate (render tests validated the gate)"
           fi
+
       - name: Build the docs site
-        if: steps.site.outputs.present == 'true'
+        if: steps.filter.outputs.relevant == 'true' && steps.site.outputs.present == 'true'
         run: mkdocs build --strict
+
       - name: Diagram render gate (required)
-        if: steps.site.outputs.present == 'true'
+        if: steps.filter.outputs.relevant == 'true' && steps.site.outputs.present == 'true'
         # --require => a missing Playwright here is a HARD failure, never a skip.
         run: python scripts/verify_diagrams.py --site-dir site --source-dir docs/site-src --require --json

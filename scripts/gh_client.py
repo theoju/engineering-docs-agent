@@ -26,6 +26,71 @@ class GhClient:
             extract=lambda d: [f["path"] for f in d.get("files", [])],
         )
 
+    def pr_list_docs_agent_open(self) -> GhResult:
+        """List all open PRs whose head branch starts with `docs-agent/`.
+
+        CCE-89 D2: surface the candidate set for auto-close. Returns a list of
+        dicts with `number` and `headRefName` keys for the auto-closer to
+        iterate. Empty list is the no-prior-PRs case.
+        """
+        return self._run_json(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--search",
+                "head:docs-agent/",
+                "--state",
+                "open",
+                "--json",
+                "number,headRefName",
+                "-L",
+                "50",
+            ],
+            extract=lambda d: list(d) if isinstance(d, list) else [],
+        )
+
+    def pr_view_commits(self, pr_number: int) -> GhResult:
+        """Return commits + their authors for a PR.
+
+        CCE-89 D2: fuel for the human-edit guard. Each list entry has an
+        `authors` array of `{name, login, email}` dicts. The auto-closer
+        skips a PR if any author looks human (no bot match).
+        """
+        return self._run_json(
+            ["gh", "pr", "view", str(pr_number), "--json", "commits"],
+            extract=lambda d: list(d.get("commits") or []),
+        )
+
+    def pr_close(self, pr_number: int, comment: str) -> GhResult:
+        """Close a PR with an explanatory comment.
+
+        CCE-89 D2: the spec mandates a fixed comment text on auto-close so
+        operators see why the PR was closed without paging in the runbook.
+        """
+        try:
+            r = subprocess.run(
+                [
+                    "gh",
+                    "pr",
+                    "close",
+                    str(pr_number),
+                    "--comment",
+                    comment,
+                ],
+                cwd=self._cwd,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            return GhResult(ok=False, error="gh_not_installed")
+        if r.returncode != 0:
+            return GhResult(
+                ok=False,
+                error=f"gh_pr_close_failed: {(r.stderr or '')[:200]}",
+            )
+        return GhResult(ok=True, value=pr_number)
+
     def pr_list_for_branch(self, branch: str) -> GhResult:
         return self._run_json(
             [
@@ -107,11 +172,17 @@ class FakeGhClient:
         pr_view_files: GhResult | None = None,
         pr_list_for_branch: GhResult | None = None,
         pr_create: GhResult | None = None,
+        pr_list_docs_agent_open: GhResult | None = None,
+        pr_view_commits: GhResult | None = None,
+        pr_close: GhResult | None = None,
     ) -> None:
         self._canned = {
             "pr_view_files": pr_view_files,
             "pr_list_for_branch": pr_list_for_branch,
             "pr_create": pr_create,
+            "pr_list_docs_agent_open": pr_list_docs_agent_open,
+            "pr_view_commits": pr_view_commits,
+            "pr_close": pr_close,
         }
         self.calls: list[tuple[str, tuple]] = []
 
@@ -126,3 +197,15 @@ class FakeGhClient:
     def pr_create(self, branch: str, title: str, body: str) -> GhResult:
         self.calls.append(("pr_create", (branch, title, body)))
         return self._canned["pr_create"] or GhResult(ok=True, value=1)
+
+    def pr_list_docs_agent_open(self) -> GhResult:
+        self.calls.append(("pr_list_docs_agent_open", ()))
+        return self._canned["pr_list_docs_agent_open"] or GhResult(ok=True, value=[])
+
+    def pr_view_commits(self, pr_number: int) -> GhResult:
+        self.calls.append(("pr_view_commits", (pr_number,)))
+        return self._canned["pr_view_commits"] or GhResult(ok=True, value=[])
+
+    def pr_close(self, pr_number: int, comment: str) -> GhResult:
+        self.calls.append(("pr_close", (pr_number, comment)))
+        return self._canned["pr_close"] or GhResult(ok=True, value=pr_number)

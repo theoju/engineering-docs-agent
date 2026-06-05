@@ -1999,6 +1999,117 @@ def _record_failure(
     reasons.append((safe, info_only))
 
 
+_DOCS_AGENT_BOT_AUTHOR_NAMES = (
+    "engineering-docs-agent[bot]",
+    "engineering-docs-agent-bot",
+)
+_DOCS_AGENT_BOT_AUTHOR_EMAILS = ("engineering-docs-agent@users.noreply.github.com",)
+
+
+def _commit_author_is_bot(
+    author: dict,
+    bot_names: tuple[str, ...],
+    bot_emails: tuple[str, ...],
+) -> bool:
+    """A commit author qualifies as the docs-agent bot when name / login /
+    email matches any configured bot identity. Conservative — any single
+    match counts so GH's mixed name/login conventions don't false-positive.
+    """
+    name = (author.get("name") or "").strip()
+    login = (author.get("login") or "").strip()
+    email = (author.get("email") or "").strip().lower()
+    if name in bot_names or login in bot_names:
+        return True
+    if email in tuple(e.lower() for e in bot_emails):
+        return True
+    return False
+
+
+def _auto_close_superseded_docs_agent_prs(
+    gh: "GhClient",
+    *,
+    new_pr_number: int,
+    new_pr_branch: str,
+    bot_author_names: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_NAMES,
+    bot_author_emails: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_EMAILS,
+) -> list[tuple[str, bool]]:
+    """CCE-89 D2: close prior open docs-agent/* PRs superseded by the new one.
+
+    Policy: each nightly opens a fresh ``docs-agent/YYYY-MM-DDTHH`` branch,
+    never an append-commit. Any prior open docs-agent/* PR is superseded by
+    definition. The only exception is a PR with human-authored commits —
+    those stay open for human resolution.
+
+    Returns ``[(reason, info_only)]`` for the caller's add_partial loop. ALL
+    reasons are ``info_only=True`` — auto-close is cosmetic hygiene; its
+    failures must not flip the run to partial (the partial flag stays
+    driven by the authoring pipeline).
+    """
+    reasons: list[tuple[str, bool]] = []
+
+    listing = gh.pr_list_docs_agent_open()
+    if not listing.ok:
+        reasons.append((f"auto_close_list_failed: {listing.error}", True))
+        return reasons
+
+    for pr_info in listing.value or []:
+        prior_num = pr_info.get("number")
+        prior_branch = pr_info.get("headRefName", "")
+        if prior_num is None or prior_num == new_pr_number:
+            continue
+
+        # Human-edit guard: any non-bot commit → skip auto-close.
+        commits = gh.pr_view_commits(prior_num)
+        if not commits.ok:
+            reasons.append(
+                (
+                    f"auto_close_skipped:{prior_num}:commits_lookup_failed: "
+                    f"{commits.error}",
+                    True,
+                )
+            )
+            continue
+
+        any_human = False
+        for commit in commits.value or []:
+            for author in commit.get("authors") or []:
+                if not _commit_author_is_bot(
+                    author, bot_author_names, bot_author_emails
+                ):
+                    any_human = True
+                    break
+            if any_human:
+                break
+
+        if any_human:
+            reasons.append(
+                (
+                    f"auto_close_skipped:{prior_num}:human_edited: "
+                    f"branch={prior_branch}",
+                    True,
+                )
+            )
+            continue
+
+        # All-bot PR → close with the exact spec comment.
+        comment = (
+            f"Auto-closing: superseded by #{new_pr_number} "
+            f"(docs-agent freshest-only policy)"
+        )
+        close = gh.pr_close(prior_num, comment)
+        if close.ok:
+            reasons.append(
+                (
+                    f"auto_close_succeeded:{prior_num}: branch={prior_branch}",
+                    True,
+                )
+            )
+        else:
+            reasons.append((f"auto_close_failed:{prior_num}: {close.error}", True))
+
+    return reasons
+
+
 def _changed_files_in_head_commit(repo_root: Path) -> list[str]:
     """Return repo-relative paths committed by the most recent commit.
 
@@ -2150,6 +2261,15 @@ def open_or_append_pr(
     if not created.ok:
         _record_failure(reasons, f"gh_pr_create_failed: {created.error}")
         return None, reasons
+    # CCE-89 D2: now that we have a fresh PR number, close prior open
+    # docs-agent/* PRs unless human-edited. ALL reasons returned are
+    # info_only=True; auto-close is hygiene, not a partial-flipping signal.
+    close_reasons = _auto_close_superseded_docs_agent_prs(
+        gh,
+        new_pr_number=created.value,
+        new_pr_branch=branch,
+    )
+    reasons.extend(close_reasons)
     return created.value, reasons
 
 

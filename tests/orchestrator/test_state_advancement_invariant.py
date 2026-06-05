@@ -190,8 +190,10 @@ def test_pr_open_failure_returns_1_and_records_partial_reason(tmp_path, monkeypa
     captured: dict = {}
 
     def fake_open_or_append_pr(
-        repo_root, gh, *, branch, now_iso, partial, partial_reasons
+        repo_root, gh, *, branch, now_iso, partial, partial_reasons, **_kw
     ):
+        # **_kw absorbs CCE-89 D1 kwargs (lens_paths, baseline_sha, current_sha)
+        # so the existing invariant test stays focused on partial-reason routing.
         captured["partial"] = partial
         captured["partial_reasons"] = list(partial_reasons)
         return None, [("forced_failure: pr_open simulated", False)]

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **diagram-gate required-check deadlock on non-docs PRs.** Removed the workflow-level `paths:` filter from `.github/workflows/docs.yml` and replaced it with an in-job `filter` step that diffs against the PR base / push parent and gates the expensive Playwright/mkdocs steps on a `relevant` output. Without this, GitHub skipped the workflow entirely on PRs that didn't touch the listed paths — the `diagram-gate` required status check never reported, and `mergeStateStatus` stayed BLOCKED forever (originating incident: PR #108). Same invariant as `actionlint.yml` (CCE-59): required status checks must never carry a workflow-level paths filter. Tracker: CCE-91.
 - **Pages bootstrap on first host deploy.** Replaced `actions/configure-pages@v6 enablement: true` (a no-op on first deploy because the workflow's `GITHUB_TOKEN` lacks admin scope) with a setup-time `gh api -X POST repos/.../pages -f build_type=workflow` call from the new `scripts/enable_pages.py`. The setup skill's step 6c invokes it after writing the docs-pages workflow. Graceful fallback on all error paths — scaffolding never blocks on Pages bootstrap. Originating incident: `theoju/claude-code-self-assessment` PR #121 / CCE-81. Tracker: CCE-82.
 
 ## [0.2.0] — 2026-05-27

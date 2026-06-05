@@ -1369,6 +1369,12 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             existing = whats_new.read_text() if whats_new.exists() else ""
             whats_new.write_text(_compose_whats_new(existing, entry))
 
+        # CCE-89 D1: capture the prior baseline BEFORE the promotion below
+        # overwrites last_successful_run.head_sha. The PR-body composer
+        # renders "baseline X → current Y" so the operator sees the review
+        # window without opening state.json.
+        prior_baseline_sha = state.get("last_successful_run", {}).get("head_sha", "")
+
         # CCE-40: promote current_run.head_sha into last_successful_run.
         # The merge of the docs-agent PR is what actually promotes this to
         # main; until then the advance lives only on the docs-agent branch
@@ -1392,6 +1398,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
             now_iso=now,
             partial=state["current_run"]["partial"],
             partial_reasons=state["current_run"]["partial_reasons"],
+            lens_paths=config.get("docs", {}).get("lens_paths") or None,
+            baseline_sha=prior_baseline_sha,
+            current_sha=state["current_run"]["head_sha"],
         )
         for reason, info_only in pr_reasons:
             add_partial(state, reason, info_only=info_only)
@@ -1709,6 +1718,102 @@ def _format_partial_digest(partial_reasons: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _bucket_files_by_lens(
+    files: list[str], lens_paths: dict[str, str]
+) -> dict[str, int]:
+    """Bucket file paths into lens-name counts, longest-prefix-match wins.
+
+    Files outside every lens land in the `other` bucket. Output ordering
+    is lens_paths-declaration order followed by `other` (deterministic for
+    PR-body rendering).
+    """
+    if not files:
+        return {}
+    # Sort lens entries by descending path-length so a narrower lens
+    # (docs/site-src/architecture/) wins over the broader parent
+    # (docs/site-src/) on files under the narrower path.
+    sorted_lenses = sorted(lens_paths.items(), key=lambda kv: -len(kv[1]))
+    counts: dict[str, int] = {name: 0 for name in lens_paths}
+    counts["other"] = 0
+    for f in files:
+        bucket = "other"
+        for lens_name, lens_path in sorted_lenses:
+            if f.startswith(lens_path):
+                bucket = lens_name
+                break
+        counts[bucket] += 1
+    # Drop zero-count buckets for compact rendering.
+    return {k: v for k, v in counts.items() if v > 0}
+
+
+def _compose_pr_body(
+    *,
+    changed_files: list[str],
+    lens_paths: dict[str, str] | None,
+    partial: bool,
+    partial_reasons: list[str],
+    baseline_sha: str,
+    current_sha: str,
+    top_n: int = 5,
+) -> str:
+    """CCE-89 D1: compose a docs-agent PR body with operator-review enrichment.
+
+    Sections (each conditional on input):
+      - Review window header — baseline + current head SHAs.
+      - Files by lens — count per lens_name + an `other` bucket.
+      - Top-N changed pages — capped at top_n, with a `(+M more)` truncation
+        note when more files changed than the cap.
+      - Partial-reasons digest — `_format_partial_digest` output appended last.
+
+    Back-compat: with no enrichment data passed (all defaults), returns the
+    legacy `"docs-agent run"` sentinel so callers that don't yet thread the
+    new args don't render a body of empty sections.
+
+    Partial-only path: with only `partial_reasons` populated, returns the
+    bare digest — same shape as pre-CCE-89 partial PR bodies, so unit tests
+    that exercise the partial path keep passing.
+    """
+    has_files = bool(changed_files)
+    has_baseline = bool(baseline_sha) and bool(current_sha)
+    has_reasons = bool(partial_reasons)
+
+    if not has_files and not has_baseline and not has_reasons:
+        return "docs-agent run"
+
+    if not has_files and not has_baseline and has_reasons:
+        return _format_partial_digest(partial_reasons)
+
+    sections: list[str] = []
+
+    if has_baseline:
+        sections.append(
+            f"**Review window:** baseline `{baseline_sha[:8]}` → "
+            f"current `{current_sha[:8]}`"
+        )
+
+    if has_files and lens_paths:
+        counts = _bucket_files_by_lens(changed_files, lens_paths)
+        if counts:
+            rendered = ", ".join(f"{name}: {n}" for name, n in counts.items())
+            sections.append(f"**Files by lens:** {rendered}")
+
+    if has_files:
+        top = changed_files[:top_n]
+        remaining = len(changed_files) - len(top)
+        page_lines = [f"**Top {len(top)} changed pages:**"]
+        page_lines.extend(f"- `{f}`" for f in top)
+        if remaining > 0:
+            page_lines.append(f"- _(+{remaining} more)_")
+        sections.append("\n".join(page_lines))
+
+    if has_reasons:
+        digest = _format_partial_digest(partial_reasons)
+        if digest:
+            sections.append(digest)
+
+    return "\n\n".join(sections) + "\n"
+
+
 def _emit_shutdown_dump(state: dict) -> None:
     """Emit a one-reason-per-line stderr summary of partial_reasons.
 
@@ -1894,6 +1999,35 @@ def _record_failure(
     reasons.append((safe, info_only))
 
 
+def _changed_files_in_head_commit(repo_root: Path) -> list[str]:
+    """Return repo-relative paths committed by the most recent commit.
+
+    Empty list on any failure (no parent commit, git binary missing,
+    detached HEAD with no commits). The body-enrichment caller treats
+    the empty case as "no enrichment data available" and falls back
+    gracefully.
+    """
+    try:
+        r = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "diff",
+                "--name-only",
+                "HEAD~1",
+                "HEAD",
+            ],
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return []
+    if r.returncode != 0:
+        return []
+    return [line.strip() for line in r.stdout.splitlines() if line.strip()]
+
+
 def open_or_append_pr(
     repo_root: Path,
     gh: GhClient,
@@ -1902,6 +2036,9 @@ def open_or_append_pr(
     now_iso: str,
     partial: bool,
     partial_reasons: list[str],
+    lens_paths: dict[str, str] | None = None,
+    baseline_sha: str = "",
+    current_sha: str = "",
 ) -> tuple[int | None, list[tuple[str, bool]]]:
     """Open or append the docs-agent PR for `branch`.
 
@@ -1996,11 +2133,19 @@ def open_or_append_pr(
         return None, reasons
     if existing.value is not None:
         return existing.value, reasons
-    if partial:
-        digest = _format_partial_digest(partial_reasons)
-        body = digest if digest else "docs-agent run"
-    else:
-        body = "docs-agent run"
+    # CCE-89 D1: enriched PR body. _compose_pr_body falls back to the
+    # legacy "docs-agent run" sentinel when no enrichment data is passed,
+    # preserving the pre-D1 shape for callers/tests that haven't been
+    # updated.
+    changed_files = _changed_files_in_head_commit(repo_root)
+    body = _compose_pr_body(
+        changed_files=changed_files,
+        lens_paths=lens_paths,
+        partial=partial,
+        partial_reasons=partial_reasons,
+        baseline_sha=baseline_sha,
+        current_sha=current_sha,
+    )
     created = gh.pr_create(branch, commit_msg, body)
     if not created.ok:
         _record_failure(reasons, f"gh_pr_create_failed: {created.error}")

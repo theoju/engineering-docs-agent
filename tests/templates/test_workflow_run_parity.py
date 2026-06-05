@@ -181,7 +181,14 @@ def test_04_literal_equals_shape_contract(template_doc, dogfood_doc) -> None:
         for k in ("CLAUDE_CODE_OAUTH_TOKEN", "JIRA_API_TOKEN", "JIRA_EMAIL"):
             assert k in env, f"{label}: missing job-env {k}"
         triggers = doc["on"]
-        assert "schedule" in triggers, f"{label}: missing schedule trigger"
+        # The template's `schedule:` trigger is the CCE-39 baseline contract for
+        # new hosts. The dogfood's schedule may be temporarily paused (commented
+        # out) for operational reasons — currently CCE-89 (2026-06-04, see the
+        # docs-agent-nightly.yml header comment). When paused, only
+        # `workflow_dispatch` remains active so the operator can fire manually.
+        # The template MUST keep `schedule:` so hosts inherit the cron by default.
+        if label == "template":
+            assert "schedule" in triggers, f"{label}: missing schedule trigger"
         assert "workflow_dispatch" in triggers, (
             f"{label}: missing workflow_dispatch trigger"
         )

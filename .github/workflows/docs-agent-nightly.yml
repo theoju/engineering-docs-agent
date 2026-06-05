@@ -1,11 +1,21 @@
 name: docs-agent-nightly
 
 on:
-  schedule:
-    # Daily at 07:00 UTC — early enough for the team to see results
-    # before workday start in PT/ET. Off-minute 7 follows the GitHub
-    # Actions guidance to avoid the :00 schedule pileup.
-    - cron: "7 7 * * *"
+  # CCE-89 (2026-06-04): Cron paused to workflow_dispatch-only.
+  # state.json.last_successful_run.head_sha pinned at bdf0da1a (2026-05-29);
+  # no docs-agent PR has merged in 6+ days. Each nightly opened a competing
+  # snapshot against the same stale baseline rather than an incremental delta.
+  # 6 stale PRs (#85, #86, #90, #92, #94, #95) were swept on 2026-06-04.
+  # Re-enable this schedule once CCE-89's three deliverables land:
+  #   D1 — PR-body enrichment (top-N pages, file count by lens, partial_reasons inline)
+  #   D2 — auto-close-stale policy ("only the freshest run stays open")
+  #   D3 — merge-gate decision (auto-merge fully-green-non-partial OR operator-promotion runbook)
+  # Until then, fire manually via Actions UI workflow_dispatch.
+  # schedule:
+  #   # Daily at 07:00 UTC — early enough for the team to see results
+  #   # before workday start in PT/ET. Off-minute 7 follows the GitHub
+  #   # Actions guidance to avoid the :00 schedule pileup.
+  #   - cron: "7 7 * * *"
   workflow_dispatch:
     inputs:
       reason:

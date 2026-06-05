@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- **docs-agent PR-body enrichment.** Nightly PRs now render a review-window header (baseline → current head SHA), file count by lens (with `other` bucket for non-lens paths), top-5 changed pages with `(+M more)` truncation, and an inline `partial_reasons` digest when the run is partial. Operators can review a nightly in <60s without opening the diff. The composer is pure (`_compose_pr_body`); back-compat preserved via optional kwargs with safe defaults. Tracker: CCE-89 D1.
+- **docs-agent auto-close-stale policy ("freshest-only").** After a new nightly opens its PR, the orchestrator walks open `docs-agent/*` PRs and closes each one authored entirely by the bot with the comment `Auto-closing: superseded by #<new> (docs-agent freshest-only policy)`. PRs with any human-authored commit are left open for human resolution. Prevents the stale-PR pileup that accumulated 2026-05-30 to 2026-06-01 (6 PRs against a single stale baseline). All hygiene reasons are `info_only=True` — D2 failures cannot flip the run to partial. Tracker: CCE-89 D2.
+
+### Changed
+
+- **docs-agent nightly cron unpaused.** The `07:07 UTC` schedule is restored on `.github/workflows/docs-agent-nightly.yml` now that D1 + D2 provide the cadence floor. D3 (merge-gate decision: auto-merge vs operator-promote vs hybrid) remains open as a separate ticket; until it lands, the operator promotes each morning's PR manually after the enriched body provides the review signal. Tracker: CCE-89.
+
 ### Fixed
 
 - **diagram-gate required-check deadlock on non-docs PRs.** Removed the workflow-level `paths:` filter from `.github/workflows/docs.yml` and replaced it with an in-job `filter` step that diffs against the PR base / push parent and gates the expensive Playwright/mkdocs steps on a `relevant` output. Without this, GitHub skipped the workflow entirely on PRs that didn't touch the listed paths — the `diagram-gate` required status check never reported, and `mergeStateStatus` stayed BLOCKED forever (originating incident: PR #108). Same invariant as `actionlint.yml` (CCE-59): required status checks must never carry a workflow-level paths filter. Tracker: CCE-91.

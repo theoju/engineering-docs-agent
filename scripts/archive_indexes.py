@@ -30,6 +30,17 @@ from state_io import ConfigError, load_config_validated  # noqa: E402
 
 DATE_PREFIX = re.compile(r"^(\d{4})-(\d{2})-\d{2}-")
 _SUMMARY_MAX = 120
+# Inline markdown link / image -> visible text. A title or summary lifted from a
+# source doc can carry a relative link (`[x](2026-..-y.md)`); rendered into an
+# archive/ table cell that target resolves against archive/ and aborts
+# `mkdocs build --strict`. The Title cell already links to the source, so the
+# teaser text needs no navigable links — reduce them to plain text (CCE-104).
+_MD_LINK = re.compile(r"!?\[([^\]]+)\]\([^)]*\)")
+
+
+def _strip_inline_links(text: str) -> str:
+    """Reduce inline markdown links/images in `text` to their visible text."""
+    return _MD_LINK.sub(r"\1", text)
 
 
 @dataclass(frozen=True)
@@ -153,9 +164,9 @@ def render_archive_page(
         lines.append("| Title | Status | Summary |")
         lines.append("|---|---|---|")
         for e in grouped[month]:
-            title = e.title.replace("|", "\\|")
+            title = _strip_inline_links(e.title).replace("|", "\\|")
             title_cell = f"[{title}]({base}{e.source_rel_path})" if base else title
-            summary = e.summary
+            summary = _strip_inline_links(e.summary)
             if len(summary) > _SUMMARY_MAX:
                 summary = summary[:_SUMMARY_MAX] + "…"
             summary = summary.replace("|", "\\|")

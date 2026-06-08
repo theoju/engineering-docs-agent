@@ -45,3 +45,38 @@ def test_parse_frontmatter_strict_raises_value_error_on_non_mapping():
     # can distinguish it from an empty frontmatter block.
     with pytest.raises(ValueError, match="not a mapping"):
         archive_indexes.parse_frontmatter_strict("---\n- one\n- two\n---\n")
+
+
+def test_render_strips_inline_links_from_summary():
+    """CCE-104: a source summary containing a relative markdown link must not
+    leak that link into the archive table — mkdocs --strict resolves it against
+    the archive/ dir and aborts. Keep the link TEXT, drop the target."""
+    entry = archive_indexes.Entry(
+        filename="2026-05-21-x.md",
+        title="X",
+        status="draft",
+        summary="see [baseline](2026-05-21-cce16-real-baseline.md) for the numbers",
+        month="2026-05",
+        source_rel_path="docs/superpowers/measurements/2026-05-21-x.md",
+    )
+    out = archive_indexes.render_archive_page("Measurements", [entry], link_base=None)
+    assert "2026-05-21-cce16-real-baseline.md" not in out  # no broken relative link
+    assert "baseline" in out  # link text preserved as plain text
+
+
+def test_render_strips_inline_links_from_title():
+    """A title carrying a markdown link would break the wrapping [title](src) link;
+    strip it to plain text so the Title cell stays a single valid link."""
+    entry = archive_indexes.Entry(
+        filename="2026-05-21-y.md",
+        title="Adopt [thing](other.md) now",
+        status="draft",
+        summary="ok",
+        month="2026-05",
+        source_rel_path="docs/superpowers/specs/2026-05-21-y.md",
+    )
+    out = archive_indexes.render_archive_page(
+        "Specs", [entry], link_base="https://h/blob/main/"
+    )
+    assert "other.md" not in out
+    assert "Adopt thing now" in out

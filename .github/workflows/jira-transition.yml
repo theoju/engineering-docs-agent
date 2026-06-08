@@ -1,0 +1,84 @@
+name: Jira transition on merge
+
+# CCE-103 — when a CCE PR merges to main, transition its Jira issue(s) to Done.
+# Repo-local hygiene workflow (not a plugin capability). The PR title is the single
+# source of truth for which issue(s) close; the helper has zero GitHub API surface.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main] # scope to merges into main (matches the design + sibling workflows)
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to process
+        required: true
+      dry_run:
+        description: Exercise Jira read endpoints but perform no writes
+        type: boolean
+        default: true
+
+# Two events on the same PR (close → reopen → close) queue rather than race the
+# Jira API; the helper's already_done short-circuit handles the duplicate cleanly.
+concurrency:
+  group: jira-transition-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  transition:
+    runs-on: ubuntu-latest
+    # Manual dispatch always runs; the close trigger only when the PR actually merged
+    # (closed-without-merge is a clean no-op — the job is skipped, helper never runs).
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Transition Jira issue(s) to Done
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
+          JIRA_BASE_URL: https://designitright.atlassian.net
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pr_number || github.event.pull_request.number }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          # Defense-in-depth: PR_NUMBER may come from a workflow_dispatch input.
+          # Reject anything non-numeric before it reaches gh.
+          case "$PR_NUMBER" in
+            '' | *[!0-9]*) echo "invalid PR number: '$PR_NUMBER'" >&2; exit 2 ;;
+          esac
+          # Server-side fetch — do NOT trust github.event.pull_request.title from the
+          # trigger payload (avoids title-injection into the helper's key extraction).
+          data=$(gh pr view "$PR_NUMBER" --json title,number,mergeCommit,mergedAt,url)
+          title=$(echo "$data" | jq -r '.title')
+          sha=$(echo "$data" | jq -r '.mergeCommit.oid // ""')
+          merged_at=$(echo "$data" | jq -r '.mergedAt // ""')
+          url=$(echo "$data" | jq -r '.url')
+
+          # A live (non-dry-run) dispatch against an unmerged PR has no merge commit —
+          # refuse rather than post a bogus "Merged in `` at ." comment + false transition.
+          if [ "$DRY_RUN" != "true" ] && [ -z "$sha" ]; then
+            echo "refusing live transition: PR #$PR_NUMBER has no merge commit (not merged?)" >&2
+            exit 2
+          fi
+
+          dry_flag=""
+          if [ "$DRY_RUN" = "true" ]; then dry_flag="--dry-run"; fi
+
+          python3 scripts/jira_transition_on_merge.py \
+            --pr-number "$PR_NUMBER" \
+            --pr-title "$title" \
+            --merge-sha "$sha" \
+            --merged-at "$merged_at" \
+            --pr-url "$url" \
+            $dry_flag

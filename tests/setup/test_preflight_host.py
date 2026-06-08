@@ -157,3 +157,46 @@ def test_preflight_proposed_config_writes_framework_none_for_bare_host():
     out = json.loads(r.stdout)
     # Was silently coerced to "mkdocs" before CCE-64; now explicit "none".
     assert out["proposed_config"]["docs"]["framework"] == "none"
+
+
+def test_proposed_config_includes_site_block():
+    """CCE-104: preflight proposes a site: block so the setup skill persists it
+    into the host config (the missing wiring that left the rendered site empty)."""
+    from scripts.preflight_host import proposed_config
+
+    cfg = proposed_config(
+        {
+            "framework": "mkdocs",
+            "source_dir": "docs/site-src",
+            "lens_paths": {"core": "docs/site-src/"},
+        }
+    )
+    site = cfg.get("site")
+    assert site, "proposed_config must emit a site: block"
+    assert site["docs_dir"] == "docs/site-src"  # tracks the discovered source_dir
+    sections = site.get("sections") or []
+    by_gen = {s.get("generator"): s for s in sections}
+    archive = by_gen.get("archive-index")
+    assert archive and archive.get("sources"), (
+        "must propose an archive section with non-empty sources"
+    )
+    assert by_gen.get("api-extract"), "must propose an api-extract section"
+
+
+def test_proposed_config_site_honors_discovery_decision_sources():
+    """The archive sources are an override hook: when discovery supplies
+    decision_sources (a host whose decision records live elsewhere), the
+    proposed site uses them instead of the superpowers convention default."""
+    from scripts.preflight_host import proposed_config
+
+    cfg = proposed_config(
+        {
+            "framework": "mkdocs",
+            "source_dir": "docs",
+            "decision_sources": ["docs/adr", "docs/rfcs"],
+        }
+    )
+    archive = next(
+        s for s in cfg["site"]["sections"] if s.get("generator") == "archive-index"
+    )
+    assert archive["sources"] == ["docs/adr", "docs/rfcs"]

@@ -25,6 +25,63 @@ _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 _WORKFLOW_TEMPLATE = _PLUGIN_ROOT / "templates" / "workflow-run.yml"
 
 
+# Convention default for the Decision Archive sources (superpowers layout). A
+# host without these dirs degrades cleanly — generate_archive warns-and-skips a
+# missing source, so the archive section is simply empty rather than an error.
+_DEFAULT_DECISION_SOURCES = [
+    "docs/superpowers/specs",
+    "docs/superpowers/plans",
+    "docs/superpowers/measurements",
+]
+
+
+def _proposed_site(discovery: dict, source_dir: str) -> dict:
+    """The `site:` block the setup skill should persist (CCE-104).
+
+    Generic-first / convention-optimized: `docs_dir` tracks the discovered
+    `source_dir`; sections mirror templates/site.default.yaml. Archive `sources`
+    come from discovery's `decision_sources` when present — an override hook for a
+    host whose decision records live elsewhere (no detector emits it yet; the
+    hook is exercised by test) — else the superpowers convention (which
+    `generate_archive` skips cleanly when absent — graceful degradation).
+    """
+    decision_sources = discovery.get("decision_sources") or _DEFAULT_DECISION_SOURCES
+    return {
+        "docs_dir": source_dir,
+        "theme": "material",
+        "sections": [
+            {"key": "home", "path": "index.md", "title": "Home"},
+            {
+                "key": "architecture",
+                "path": "architecture/",
+                "title": "Architecture",
+                "generator": "agent-authored",
+            },
+            {
+                "key": "api",
+                "path": "api/",
+                "title": "API reference",
+                "generator": "api-extract",
+                "extractors": ["python-mkdocstrings"],
+            },
+            {"key": "operations", "path": "operations/", "title": "Operations"},
+            {
+                "key": "archive",
+                "path": "archive/",
+                "title": "Decision Archive",
+                "generator": "archive-index",
+                "sources": decision_sources,
+            },
+            {
+                "key": "whats-new",
+                "path": "whats-new.md",
+                "title": "What's New",
+                "generator": "changelog",
+            },
+        ],
+    }
+
+
 def proposed_config(discovery: dict) -> dict:
     """Compute the config dict the setup skill would write, without writing it.
 
@@ -66,6 +123,7 @@ def proposed_config(discovery: dict) -> dict:
             "slack": {"enabled": False},
             "email": {"enabled": False},
         },
+        "site": _proposed_site(discovery, source_dir),
     }
 
 

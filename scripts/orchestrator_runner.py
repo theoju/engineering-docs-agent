@@ -963,6 +963,39 @@ def _compose_whats_new(existing: str, entry: str) -> str:
     return preamble + header + entry + tail
 
 
+def run_site_generators(repo_root: Path, config: dict, state: dict) -> dict:
+    """Run the deterministic site generators when the host config has a `site:`
+    block (CCE-104). These are the spec-correct CCE-23 generators — capability D
+    (`archive_indexes.generate_archive`) and contracts (`contracts_doc.generate_contracts`,
+    a no-op until a section declares the `json-schema` extractor, CCE-105).
+
+    Best-effort like the source-map / citation stages: a generator that raises
+    records an `info_only` partial and is swallowed, so an advisory generation
+    failure never blocks the nightly PR. Generated pages land under the site's
+    `docs_dir` and are committed by the run's existing `git add -A`.
+
+    Returns ``{"archive": <ledger>|None, "contracts": <ledger>|None}`` (None =
+    not run / raised). Hosts with no `site:` block get all-None and fall through
+    to the caller's legacy ``regenerate()`` path.
+    """
+    import archive_indexes
+    import contracts_doc
+
+    result: dict = {"archive": None, "contracts": None}
+    site = config.get("site")
+    if not site:
+        return result
+    try:
+        result["archive"] = archive_indexes.generate_archive(repo_root, site)
+    except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
+        add_partial(state, f"archive_generate_failed: {exc}", info_only=True)
+    try:
+        result["contracts"] = contracts_doc.generate_contracts(repo_root, site)
+    except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
+        add_partial(state, f"contracts_generate_failed: {exc}", info_only=True)
+    return result
+
+
 def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     state_path = repo_root / ".engineering-docs-agent" / "state.json"
@@ -1267,16 +1300,24 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                         f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}",
                     )
 
-        # Archive index regeneration
-        import archive_indexes
+        # Deterministic site generators (CCE-104). When the host config carries a
+        # site: block, run the spec-correct CCE-23 generators (archive capability
+        # D + contracts); otherwise fall back to the legacy pre-S lens path so
+        # hosts that set `archive_index: true` keep working (graceful degradation).
+        if config.get("site"):
+            state["current_run"]["site_generators"] = run_site_generators(
+                repo_root, config, state
+            )
+        else:
+            import archive_indexes
 
-        for lens in lens_paths:
-            try:
-                lens_path, opts = resolve_lens(config, lens)
-            except KeyError:
-                continue
-            if opts.get("archive_index"):
-                archive_indexes.regenerate(repo_root / lens_path)
+            for lens in lens_paths:
+                try:
+                    lens_path, opts = resolve_lens(config, lens)
+                except KeyError:
+                    continue
+                if opts.get("archive_index"):
+                    archive_indexes.regenerate(repo_root / lens_path)
 
         # Source map + drift (M) — best-effort, read-only
         try:

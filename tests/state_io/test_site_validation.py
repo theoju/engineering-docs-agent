@@ -226,3 +226,19 @@ site:
 """,
             )
         )
+
+
+def test_section_overview_false_loads_green(tmp_path: Path):
+    cfg = load_config_validated(
+        _write(
+            tmp_path,
+            """
+site:
+  docs_dir: docs/site-src
+  sections:
+    - { key: home, path: index.md, title: Home, overview: false }
+""",
+        )
+    )
+    section = cfg["site"]["sections"][0]
+    assert section["overview"] is False

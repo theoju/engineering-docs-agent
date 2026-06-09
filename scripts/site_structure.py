@@ -14,6 +14,10 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import setup_discover
+from managed_block import END as _OVERVIEW_END
+from managed_block import START as _OVERVIEW_START
+
 
 def assign_group(ident: str, groups: list) -> str:
     """Return the name of the first group whose module glob matches ``ident``,
@@ -42,7 +46,7 @@ def assign_group(ident: str, groups: list) -> str:
 class ScaffoldFile:
     path: str  # repo-relative POSIX path
     content: str
-    # "home" | "section-index" | "pages" | "root-pages" | "mkdocs"
+    # "home" | "section-index" | "mkdocs" | "gen-script" | "openapi-spec"
     kind: str
 
 
@@ -85,38 +89,25 @@ def _page_stub(section: dict) -> str:
 
 
 def render_home(site: dict) -> str:
-    cards = []
-    for s in site.get("sections", []):
-        if s["key"] == "home":
-            continue
-        # Link to a resolvable .md target so mkdocs validates the link under
-        # --strict; a bare "api/" is left as an unrecognized relative link.
-        target = s["path"] if _is_page(s) else f"{s['path'].rstrip('/')}/index.md"
-        cards.append(f"-   __{s['title']}__\n\n    [Open →]({target})")
-    grid = '<div class="grid cards" markdown>\n\n' + "\n\n".join(cards) + "\n\n</div>"
     return (
         "---\ntitle: Home\nhide:\n  - toc\n---\n\n"
         "# Documentation\n\n"
         "Pick a section to get started.\n\n"
-        f"{grid}\n"
+        f"{_OVERVIEW_START}\n{_OVERVIEW_END}\n"
     )
 
 
 def plan_scaffold(site: dict) -> list[ScaffoldFile]:
+    """Plan the on-disk landing stubs. The top-level nav is NOT scaffolded as
+    a `.pages` (awesome-pages) or root `SUMMARY.md` anymore — it is generated
+    directly into `mkdocs.yml` by ``render_mkdocs_yaml`` (CCE-106), where the
+    `nav:` block's directory cross-links let literate-nav recurse into the
+    gen-files reference subtree (which lives only in the build VFS). This
+    function emits only the home page and per-section landing stubs.
+    """
     docs_dir = site["docs_dir"].rstrip("/")
     sections = site.get("sections", [])
     files: list[ScaffoldFile] = []
-
-    # Root .pages: orders the top-level nav by section title, in config order.
-    # Both title and path go through _yaml_scalar so any YAML-significant char
-    # in a configured value cannot break the generated .pages.
-    nav_lines = "\n".join(
-        f"  - {_yaml_scalar(s['title'])}: {_yaml_scalar(s['path'].rstrip('/'))}"
-        for s in sections
-    )
-    files.append(
-        ScaffoldFile(f"{docs_dir}/.pages", f"nav:\n{nav_lines}\n", "root-pages")
-    )
 
     for s in sections:
         if s["key"] == "home":
@@ -132,17 +123,11 @@ def plan_scaffold(site: dict) -> list[ScaffoldFile]:
                 ScaffoldFile(f"{docs_dir}/{path}", _page_stub(s), "section-index")
             )
             continue
-        # directory section: index stub + a .pages giving the section its title
+        # directory section: an index stub. Its title comes from the generated
+        # mkdocs.yml nav entry, not a per-dir .pages.
         files.append(
             ScaffoldFile(
                 f"{docs_dir}/{path}/index.md", _section_index_stub(s), "section-index"
-            )
-        )
-        files.append(
-            ScaffoldFile(
-                f"{docs_dir}/{path}/.pages",
-                f"title: {_yaml_scalar(s['title'])}\n",
-                "pages",
             )
         )
 
@@ -153,7 +138,7 @@ _MKDOCS_TEMPLATE = """\
 site_name: {site_name}
 docs_dir: {docs_dir}
 site_dir: site
-
+{repo_block}
 theme:
   name: {theme}
   features:
@@ -167,7 +152,8 @@ theme:
 
 plugins:
   - search
-  - awesome-pages
+  - literate-nav:
+      nav_file: SUMMARY.md
 {mkdocstrings_plugin}
 markdown_extensions:
   - admonition
@@ -241,8 +227,6 @@ def _python_plugins_block(path_root: str) -> str:
         "  - gen-files:\n"
         "      scripts:\n"
         "        - gen_ref_pages.py\n"
-        "  - literate-nav:\n"
-        "      nav_file: SUMMARY.md\n"
         "  - mkdocstrings:\n"
         "      handlers:\n"
         "        python:\n"
@@ -254,6 +238,22 @@ def _python_plugins_block(path_root: str) -> str:
     )
 
 
+def _render_nav(site: dict) -> str:
+    """Render the top-level `nav:` block from the configured sections, in
+    config order. A single-page section (path ends in .md) becomes a direct
+    page entry; a directory section becomes a trailing-slash directory
+    cross-link, which makes literate-nav recurse into that directory —
+    including the gen-files reference subtree that exists only in the build
+    VFS (a root SUMMARY.md markdown link cannot reach it). An empty sections
+    list still emits a bare `nav:` (valid YAML).
+    """
+    lines = ["nav:"]
+    for s in site.get("sections", []):
+        target = s["path"] if _is_page(s) else s["path"].rstrip("/") + "/"
+        lines.append(f"  - {_yaml_scalar(s['title'])}: {_yaml_scalar(target)}")
+    return "\n".join(lines) + "\n"
+
+
 def render_mkdocs_yaml(
     site: dict,
     *,
@@ -261,18 +261,30 @@ def render_mkdocs_yaml(
     python_detected: bool,
     python_path_root: str | None = None,
     openapi_enabled: bool = False,
+    repo_url: str | None = None,
+    edit_uri: str | None = None,
 ) -> str:
     plugins = ""
     if python_detected:
         plugins += _python_plugins_block(python_path_root or ".")
     if openapi_enabled:
         plugins += _RENDER_SWAGGER_PLUGIN
-    return _MKDOCS_TEMPLATE.format(
+    repo_lines = ""
+    if repo_url:
+        # URLs and URI paths are safe YAML bare scalars; no quoting needed.
+        repo_lines = f"repo_url: {repo_url}\n"
+        if edit_uri:
+            repo_lines += f"edit_uri: {edit_uri}\n"
+    body = _MKDOCS_TEMPLATE.format(
         site_name=_yaml_scalar(site_name),
         docs_dir=site["docs_dir"].rstrip("/"),
         theme=site.get("theme", "material"),
         mkdocstrings_plugin=plugins,
+        repo_block=repo_lines,
     )
+    # Append the generated `nav:` block last; literate-nav expands its
+    # directory cross-links at build time (see _render_nav).
+    return body + "\n" + _render_nav(site)
 
 
 def apply_scaffold(
@@ -293,6 +305,12 @@ def apply_scaffold(
     created: list[str] = []
     skipped: list[str] = []
 
+    origin = setup_discover.discover_git_origin(repo_root)
+    repo_url = edit_uri = None
+    if origin:
+        repo_url = f"https://github.com/{origin['owner']}/{origin['repo']}"
+        edit_uri = f"edit/main/{site['docs_dir'].rstrip('/')}/"
+
     planned = list(plan_scaffold(site))
     planned.append(
         ScaffoldFile(
@@ -303,6 +321,8 @@ def apply_scaffold(
                 python_detected=python_detected,
                 python_path_root=python_path_root,
                 openapi_enabled=bool(openapi_path),
+                repo_url=repo_url,
+                edit_uri=edit_uri,
             ),
             "mkdocs",
         )

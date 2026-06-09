@@ -1,11 +1,13 @@
 # Specs archive
 
-_Auto-generated; 48 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 50 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
 ## 2026-06
 
 | Title | Status | Summary |
 |---|---|---|
+| [CCE-106 — Section overviews, rich home, repo_url](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-06-08-cce106-section-overviews-and-rich-home-design.md) | draft | Phase 2b of the docs-site remediation roadmap. The 2026-06-08 holistic review |
+| [CCE-105 — Group the API reference + wire contracts](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-06-08-cce105-api-grouping-and-contracts-design.md) | draft | Phase 2a of the docs-site remediation roadmap (CCE-104 was Phase 1). Two gaps |
 | [CCE-104 — Wire `site:` + deterministic generators](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-06-08-cce104-wire-site-generators-design.md) | draft | Phase 1 of the docs-site remediation roadmap. This is a **wiring** change: the |
 | [Spec: CCE-77 / CCE-80 Cycle Hygiene — Multi-Venue Followups](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-06-04-cce77-cycle-hygiene-design.md) | — | **Date:** 2026-06-04 |
 | [CCE-103 — auto-transition Jira to Done on PR merge](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-06-04-cce103-jira-auto-transition-design.md) | — | **Status:** approved 2026-06-04 (brainstorm + 3 locked decisions); implementation plan next. |

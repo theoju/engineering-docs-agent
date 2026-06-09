@@ -60,13 +60,27 @@ def test_apply_adds_new_section_on_resync(tmp_path: Path):
 
 
 def test_apply_writes_utf8(tmp_path: Path):
-    # The home grid uses a "→" (U+2192); writing must be UTF-8 on every
-    # platform, and read-back as UTF-8 must round-trip the glyph.
+    # apply_scaffold must write files as UTF-8 on every platform and round-trip a
+    # non-ASCII glyph. The home "→" moved into the generator-filled managed block,
+    # so the UTF-8 invariant is verified here via a non-ASCII section title (into
+    # the section-index stub) and a non-ASCII site_name (into mkdocs.yml).
+    site = {
+        "docs_dir": "docs/site-src",
+        "theme": "material",
+        "sections": [
+            {"key": "home", "path": "index.md", "title": "Home"},
+            {"key": "guide", "path": "guide/", "title": "Café résumé →"},
+        ],
+    }
     site_structure.apply_scaffold(
-        tmp_path, SITE, site_name="Demo", python_detected=False
+        tmp_path, site, site_name="Démo", python_detected=False
     )
+    section = (tmp_path / "docs/site-src/guide/index.md").read_text(encoding="utf-8")
+    assert "Café résumé →" in section
+    mkdocs = (tmp_path / "mkdocs.yml").read_text(encoding="utf-8")
+    assert "Démo" in mkdocs
     home = (tmp_path / "docs/site-src/index.md").read_text(encoding="utf-8")
-    assert "→" in home
+    assert "docs-agent:overview:start" in home
 
 
 def test_apply_never_clobbers_hand_tuned_mkdocs_yml(tmp_path: Path):

@@ -93,18 +93,13 @@ _SITE_GROUPED = {
 
 
 def test_api_site_builds_strict_with_groups(tmp_path):
-    """Real-consumer guard (CCE-105): a grouped config must build under
-    mkdocs --strict and still generate every reference page. The fake-mkdocs
-    unit test proves the grouped nav-key tuples; this proves the grouped
-    literate-nav SUMMARY survives the real build pipeline (e.g. a group name
-    is not markdown-significant in a way that aborts strict mode). `pkg.calc`
-    matches the "Math" group; `pkg.util` falls through to "Other".
-
-    Note: surfacing the reference subtree (grouped or flat) in the rendered
-    *nav* is a separate, pre-existing wiring concern (literate-nav does not
-    currently consume api/reference/SUMMARY.md) tracked under CCE-106; this
-    guard deliberately asserts only what CCE-105 owns — that the grouped
-    SUMMARY builds strict and the pages generate."""
+    """Real-consumer guard (CCE-105/106): a grouped config must build under
+    mkdocs --strict, generate every reference page, AND surface the grouped
+    reference in the rendered nav. The fake-mkdocs unit test proves the
+    grouped nav-key tuples; this proves the grouped literate-nav SUMMARY
+    survives the real build pipeline and is expanded into the nav via the
+    mkdocs.yml `nav:` directory cross-link. `pkg.calc` matches the "Math"
+    group; `pkg.util` falls through to "Other"."""
     shutil.copytree(_FIXTURE, tmp_path, dirs_exist_ok=True)
     site_structure.apply_scaffold(
         tmp_path,
@@ -117,9 +112,20 @@ def test_api_site_builds_strict_with_groups(tmp_path):
     proc = _build(tmp_path)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     built = tmp_path / "site"
-    # grouping only changes nav keys, not the doc paths — both modules build
     assert (built / "api" / "reference" / "pkg" / "calc" / "index.html").exists()
     assert (built / "api" / "reference" / "pkg" / "util" / "index.html").exists()
+    # CCE-106: the grouped reference now renders in the nav (literate-nav expands
+    # the mkdocs.yml `nav:` directory cross-link, incl. the gen-files grouped SUMMARY).
+    calc_html = (
+        built / "api" / "reference" / "pkg" / "calc" / "index.html"
+    ).read_text()
+    assert "Math" in calc_html  # pkg.calc's group label in the nav sidebar
+    assert "Other" in calc_html  # pkg.util's fall-through bucket
+    # modules are reachable from a nav page
+    index_html = (built / "index.html").read_text()
+    assert "api/reference/pkg/calc/" in index_html
+    # the gen-files reference SUMMARY is consumed for nav, not a reachable nav entry
+    assert "api/reference/SUMMARY/" not in index_html
 
 
 def test_no_convention_host_skips_cleanly(tmp_path):

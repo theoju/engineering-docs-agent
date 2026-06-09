@@ -219,3 +219,6 @@ __marimo__/
 
 # engineering-docs-agent ephemeral run state (gitignored; state.json committed)
 .engineering-docs-agent/current_run.json
+
+# macOS Finder metadata
+.DS_Store

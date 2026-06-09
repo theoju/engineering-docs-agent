@@ -14,6 +14,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from managed_block import END as _OVERVIEW_END
+from managed_block import START as _OVERVIEW_START
+
 
 def assign_group(ident: str, groups: list) -> str:
     """Return the name of the first group whose module glob matches ``ident``,
@@ -85,20 +88,11 @@ def _page_stub(section: dict) -> str:
 
 
 def render_home(site: dict) -> str:
-    cards = []
-    for s in site.get("sections", []):
-        if s["key"] == "home":
-            continue
-        # Link to a resolvable .md target so mkdocs validates the link under
-        # --strict; a bare "api/" is left as an unrecognized relative link.
-        target = s["path"] if _is_page(s) else f"{s['path'].rstrip('/')}/index.md"
-        cards.append(f"-   __{s['title']}__\n\n    [Open →]({target})")
-    grid = '<div class="grid cards" markdown>\n\n' + "\n\n".join(cards) + "\n\n</div>"
     return (
         "---\ntitle: Home\nhide:\n  - toc\n---\n\n"
         "# Documentation\n\n"
         "Pick a section to get started.\n\n"
-        f"{grid}\n"
+        f"{_OVERVIEW_START}\n{_OVERVIEW_END}\n"
     )
 
 

@@ -164,6 +164,51 @@ def test_generate_overviews_api_section(tmp_path, monkeypatch):
     assert "[Widget](contracts/widget.md)" in out
 
 
+def test_generate_overviews_fills_home_block(tmp_path):
+    site = {
+        "docs_dir": "docs/site-src",
+        "sections": [
+            {"key": "home", "path": "index.md", "title": "Home"},
+            {"key": "architecture", "path": "architecture/", "title": "Architecture"},
+            {"key": "ops", "path": "operations/", "title": "Operations"},
+        ],
+    }
+    _seed_landing(
+        tmp_path,
+        "docs/site-src/index.md",
+        "---\ntitle: Home\n---\n\n# Documentation\n\nWELCOME INTRO.\n\n"
+        f"{mb.START}\n{mb.END}\n",
+    )
+    _seed_landing(tmp_path, "docs/site-src/architecture/index.md", "# Architecture\n")
+    _seed_landing(tmp_path, "docs/site-src/operations/index.md", "# Operations\n")
+    result = so.generate_overviews(tmp_path, site)
+    out = (tmp_path / "docs/site-src/index.md").read_text()
+    assert "WELCOME INTRO." in out
+    assert "docs/site-src/index.md" in result["written"]
+    assert "Architecture" in out and "Operations" in out
+    assert "architecture/index.md" in out
+
+
+def test_generate_overviews_home_without_markers_appends(tmp_path):
+    site = {
+        "docs_dir": "docs/site-src",
+        "sections": [
+            {"key": "home", "path": "index.md", "title": "Home"},
+            {"key": "ops", "path": "operations/", "title": "Operations"},
+        ],
+    }
+    _seed_landing(
+        tmp_path,
+        "docs/site-src/index.md",
+        "---\ntitle: Home\n---\n\n# Documentation\n\nOld cards.\n",
+    )
+    _seed_landing(tmp_path, "docs/site-src/operations/index.md", "# Operations\n")
+    so.generate_overviews(tmp_path, site)
+    out = (tmp_path / "docs/site-src/index.md").read_text()
+    assert "Old cards." in out
+    assert mb.START in out and "Operations" in out
+
+
 def test_generate_overviews_api_no_python_degrades(tmp_path, monkeypatch):
     site = {
         "docs_dir": "docs/site-src",

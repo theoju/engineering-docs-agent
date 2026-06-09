@@ -23,6 +23,15 @@ import site_structure  # noqa: E402
 _NO_PAGES = "_No pages yet._"
 
 
+def render_home_overview(entries: list[tuple[str, str]]) -> str:
+    """entries: list of (title, target). Render the grid-cards section directory
+    that lives inside the home's managed block."""
+    if not entries:
+        return _NO_PAGES
+    cards = [f"-   __{title}__\n\n    [Open →]({target})" for title, target in entries]
+    return '<div class="grid cards" markdown>\n\n' + "\n\n".join(cards) + "\n\n</div>"
+
+
 def render_directory_overview(children: list[tuple[str, str]]) -> str:
     """children: list of (title, summary). Render an "In this section" list +
     a count footer, or a "No pages yet." line when empty."""
@@ -192,5 +201,14 @@ def generate_overviews(repo_root: Path, site_config: dict) -> dict:
         body = render_directory_overview(_scan_children(section_dir))
         _upsert(repo_root / docs_dir / path / "index.md", body, rel, written, skipped)
 
-    _ = home_section  # home handled in Task 5
+    if home_section is not None:
+        entries: list[tuple[str, str]] = []
+        for section in site_config.get("sections", []) or []:
+            if section.get("key") == "home":
+                continue
+            path = section["path"]
+            target = path if _is_page(section) else f"{path.rstrip('/')}/index.md"
+            entries.append((section["title"], target))
+        rel = f"{docs_dir}/{home_section['path'].rstrip('/')}"
+        _upsert(repo_root / rel, render_home_overview(entries), rel, written, skipped)
     return {"written": written, "skipped": skipped}

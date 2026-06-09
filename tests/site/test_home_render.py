@@ -18,25 +18,27 @@ SITE = {
 }
 
 
-def test_home_uses_grid_cards_and_links_non_home_sections():
+def test_home_has_managed_block_markers():
+    # Grid cards now live inside the managed block (filled by generate_overviews).
+    # render_home emits an empty block so the generator can upsert cards in.
     home = site_structure.render_home(SITE)
-    assert '<div class="grid cards" markdown>' in home
-    assert "API reference" in home and "api/" in home
-    assert "Operations" in home and "operations/" in home
-    # the home section itself is not a card linking to itself
-    assert home.count("](index.md)") == 0
+    assert "docs-agent:overview:start" in home
+    assert "docs-agent:overview:end" in home
+    assert "grid cards" not in home  # cards come from the generator, not the stub
 
 
-def test_plan_scaffold_home_uses_grid_cards():
+def test_plan_scaffold_home_has_managed_block():
     files = {f.path: f for f in site_structure.plan_scaffold(SITE)}
-    assert (
-        '<div class="grid cards" markdown>' in files["docs/site-src/index.md"].content
-    )
+    content = files["docs/site-src/index.md"].content
+    assert "docs-agent:overview:start" in content
+    assert "docs-agent:overview:end" in content
 
 
 def test_home_links_resolve_to_md_targets():
     # Directory sections link to <dir>/index.md (mkdocs-validatable under
     # --strict); single-page sections link to their .md path directly.
+    # These links are now generated inside the managed block by generate_overviews;
+    # render_home itself just emits the empty marker pair.
     site = {
         "docs_dir": "docs/site-src",
         "sections": [
@@ -46,5 +48,6 @@ def test_home_links_resolve_to_md_targets():
         ],
     }
     home = site_structure.render_home(site)
-    assert "](api/index.md)" in home
-    assert "](whats-new.md)" in home
+    # The stub only contains the markers; link targets are injected by the generator.
+    assert "docs-agent:overview:start" in home
+    assert "docs-agent:overview:end" in home

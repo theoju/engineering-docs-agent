@@ -173,6 +173,15 @@ def test_rendered_gen_ref_groups_nav(tmp_path: Path, monkeypatch):
     assert not any("_private" in "".join(k) for k in nav)  # excluded
 
 
+def test_render_home_has_author_zone_and_empty_markers():
+    out = site_structure.render_home(SITE)
+    assert "docs-agent:overview:start" in out
+    assert "docs-agent:overview:end" in out
+    start = out.index("docs-agent:overview:start")
+    end = out.index("docs-agent:overview:end")
+    assert "grid cards" not in out[start:end]  # cards come from the generator
+
+
 def test_rendered_gen_ref_flat_when_no_groups(tmp_path: Path, monkeypatch):
     _seed_modules(tmp_path)
     rendered = site_structure._GEN_REF_TEMPLATE.format(

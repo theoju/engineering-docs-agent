@@ -1170,12 +1170,27 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
 
         # Page authoring: batch doc_targets per (lens, page_hint).
         import frontmatter_contract as fmc
+        import doc_routing
 
+        archive_section = doc_routing.archive_section_leaf(config.get("site") or {})
         editable_globs = config.get("docs", {}).get("agent_editable_paths", [])
         per_target: dict[tuple[str, str], list[dict]] = {}
+        doc_kind_by_target: dict[tuple[str, str], str] = {}
         for s in summaries:
             for t in s.get("doc_targets", []):
-                per_target.setdefault((t["lens"], t["page_hint"]), []).append(s)
+                hint = t["page_hint"]
+                dk = t.get("doc_kind")
+                if t.get("action") == "create":
+                    hint = doc_routing.route_create_hint(
+                        hint,
+                        dk,
+                        archive_section,
+                        available_sections_by_lens.get(t["lens"], []),
+                    )
+                key = (t["lens"], hint)
+                per_target.setdefault(key, []).append(s)
+                if dk and key not in doc_kind_by_target:
+                    doc_kind_by_target[key] = dk
 
         authored: list[str] = []
         for (lens, hint), batch_summaries in per_target.items():
@@ -1195,6 +1210,17 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                 continue
             target_path.parent.mkdir(parents=True, exist_ok=True)
             action = "edit" if target_path.exists() else "create"
+            fm_template = fmc.default_frontmatter_dict(
+                [
+                    pr.get("url")
+                    for s in batch_summaries
+                    for pr in prs
+                    if pr.get("number") == s.get("pr_number")
+                ]
+            )
+            _dk = doc_kind_by_target.get((lens, hint))
+            if _dk:
+                fm_template["doc_kind"] = _dk
             out, reasons = dispatch_validated(
                 "page-author",
                 {
@@ -1203,14 +1229,7 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
                     "lens": lens,
                     "summaries": batch_summaries,
                     "voice_samples": voice_samples,
-                    "frontmatter_template": fmc.default_frontmatter_dict(
-                        [
-                            pr.get("url")
-                            for s in batch_summaries
-                            for pr in prs
-                            if pr.get("number") == s.get("pr_number")
-                        ]
-                    ),
+                    "frontmatter_template": fm_template,
                 },
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,

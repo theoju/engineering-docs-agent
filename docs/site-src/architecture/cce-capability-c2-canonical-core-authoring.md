@@ -1,14 +1,16 @@
 ---
-description: How Capability C2 authors and maintains canonical core documentation pages using voice-matched synthesis and the source map.
+description: How Capability C2 authors and maintains canonical core documentation
+  pages using voice-matched synthesis and the source map.
 source_files:
-  - docs/site-src/core/**
-  - docs/superpowers/**
-  - scripts/audit_docs.py
-  - scripts/build_doc_source_map.py
-  - scripts/lint/frontmatter_schema.py
-  - scripts/source_map.py
+- docs/site-src/core/**
+- docs/superpowers/**
+- scripts/audit_docs.py
+- scripts/build_doc_source_map.py
+- scripts/lint/frontmatter_schema.py
+- scripts/source_map.py
 last_reviewed: '2026-05-28'
 status: draft
+doc_kind: architecture
 ---
 
 # Capability C2: Canonical Core Authoring

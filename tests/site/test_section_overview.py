@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import sys
 from pathlib import Path
 
@@ -223,6 +224,79 @@ def test_generate_overviews_home_without_markers_appends(tmp_path):
     out = (tmp_path / "docs/site-src/index.md").read_text()
     assert "Old cards." in out
     assert mb.START in out and "Operations" in out
+
+
+def test_freshness_key_prefers_last_reviewed():
+    assert so._freshness_key({"last_reviewed": "2026-05-01"}, "foo.md") == "2026-05-01"
+
+
+def test_freshness_key_coerces_date_object():
+    # YAML parses an unquoted `last_reviewed: 2026-05-01` to a datetime.date;
+    # comparing that against the "" fallback during sort would raise TypeError.
+    assert (
+        so._freshness_key({"last_reviewed": datetime.date(2026, 5, 1)}, "foo.md")
+        == "2026-05-01"
+    )
+
+
+def test_freshness_key_falls_back_to_filename_date():
+    assert so._freshness_key({}, "2026-03-15-foo.md") == "2026-03-15"
+
+
+def test_freshness_key_empty_when_no_date():
+    assert so._freshness_key({}, "foo.md") == ""
+
+
+def test_overview_orders_by_last_reviewed_desc(tmp_path):
+    # Filenames are ANTI-ALIGNED with freshness: alphabetically `aaa-stale` <
+    # `zzz-recent`, the OPPOSITE of the desired newest-first order. So this test
+    # fails under the old filename sort and passes only under the freshness sort.
+    site = _dir_site()  # home + architecture (directory section)
+    _seed_landing(tmp_path, "docs/site-src/architecture/index.md", "# Architecture\n")
+    _seed_landing(
+        tmp_path,
+        "docs/site-src/architecture/aaa-stale.md",
+        "---\nlast_reviewed: '2026-01-01'\n---\n\n# Old Page\n\nold.\n",
+    )
+    _seed_landing(
+        tmp_path,
+        "docs/site-src/architecture/zzz-recent.md",
+        "---\nlast_reviewed: '2026-05-01'\n---\n\n# New Page\n\nnew.\n",
+    )
+    so.generate_overviews(tmp_path, site)
+    out = (tmp_path / "docs/site-src/architecture/index.md").read_text()
+    assert out.index("New Page") < out.index("Old Page")
+
+
+def test_overview_undated_page_sinks_last(tmp_path):
+    # Anti-aligned: the dated page's filename (`zzz-dated`) sorts AFTER the
+    # undated one (`aaa-undated`), so a filename-sort regression would wrongly
+    # place undated first and fail this test.
+    site = _dir_site()
+    _seed_landing(tmp_path, "docs/site-src/architecture/index.md", "# Architecture\n")
+    _seed_landing(
+        tmp_path,
+        "docs/site-src/architecture/zzz-dated.md",
+        "---\nlast_reviewed: '2026-05-01'\n---\n\n# Dated Page\n\nd.\n",
+    )
+    _seed_landing(
+        tmp_path, "docs/site-src/architecture/aaa-undated.md", "# Undated Page\n\nu.\n"
+    )
+    so.generate_overviews(tmp_path, site)
+    out = (tmp_path / "docs/site-src/architecture/index.md").read_text()
+    assert out.index("Dated Page") < out.index("Undated Page")
+
+
+def test_overview_title_tiebreak_when_equal_freshness(tmp_path):
+    # Anti-aligned: filename order (`aaa` < `zzz`) is the OPPOSITE of title order
+    # (Apple < Banana), so this verifies the title tiebreak, not filename order.
+    site = _dir_site()
+    _seed_landing(tmp_path, "docs/site-src/architecture/index.md", "# Architecture\n")
+    _seed_landing(tmp_path, "docs/site-src/architecture/aaa.md", "# Banana\n\nb.\n")
+    _seed_landing(tmp_path, "docs/site-src/architecture/zzz.md", "# Apple\n\na.\n")
+    so.generate_overviews(tmp_path, site)
+    out = (tmp_path / "docs/site-src/architecture/index.md").read_text()
+    assert out.index("Apple") < out.index("Banana")  # both undated -> title asc
 
 
 def test_generate_overviews_api_no_python_degrades(tmp_path, monkeypatch):

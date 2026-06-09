@@ -173,3 +173,61 @@ def test_extra_doc_target_field_rejected(validator: Draft7Validator) -> None:
     }
     with pytest.raises(ValidationError):
         validator.validate(doc)
+
+
+def test_doc_kind_decision_accepted(validator: Draft7Validator) -> None:
+    doc = {
+        "pr_number": 1,
+        "doc_targets": [
+            {
+                "lens": "core",
+                "action": "create",
+                "page_hint": "architecture/foo.md",
+                "doc_kind": "decision",
+            }
+        ],
+    }
+    validator.validate(doc)  # must NOT raise
+
+
+def test_doc_kind_architecture_accepted(validator: Draft7Validator) -> None:
+    doc = {
+        "pr_number": 1,
+        "doc_targets": [
+            {
+                "lens": "core",
+                "action": "create",
+                "page_hint": "architecture/foo.md",
+                "doc_kind": "architecture",
+            }
+        ],
+    }
+    validator.validate(doc)
+
+
+def test_doc_kind_invalid_value_rejected(validator: Draft7Validator) -> None:
+    doc = {
+        "pr_number": 1,
+        "doc_targets": [
+            {
+                "lens": "core",
+                "action": "create",
+                "page_hint": "architecture/foo.md",
+                "doc_kind": "ops",
+            }
+        ],
+    }
+    with pytest.raises(ValidationError):
+        validator.validate(doc)
+
+
+def test_doc_kind_omitted_accepted(validator: Draft7Validator) -> None:
+    # doc_kind is optional; omitting it validates (orchestrator defaults it to
+    # "architecture" — the backward-compatible bare-host / legacy-output path).
+    doc = {
+        "pr_number": 1,
+        "doc_targets": [
+            {"lens": "core", "action": "create", "page_hint": "architecture/foo.md"}
+        ],
+    }
+    validator.validate(doc)  # must NOT raise

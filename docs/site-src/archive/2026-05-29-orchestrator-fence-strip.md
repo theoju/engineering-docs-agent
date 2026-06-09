@@ -1,8 +1,9 @@
 ---
 status: draft
 sources:
-  - https://github.com/theoju/engineering-docs-agent/pull/75
+- https://github.com/theoju/engineering-docs-agent/pull/75
 synthesized_into: []
+doc_kind: decision
 ---
 
 # Orchestrator: two-stage subagent output parse pipeline

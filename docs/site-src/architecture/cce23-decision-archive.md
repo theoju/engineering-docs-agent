@@ -1,14 +1,16 @@
 ---
-description: How the CCE-23 archive-index generator turns dated decision files into navigable, auto-maintained index pages.
+description: How the CCE-23 archive-index generator turns dated decision files into
+  navigable, auto-maintained index pages.
 source_files:
-  - scripts/archive_indexes.py
-  - scripts/orchestrator_runner.py
-  - scripts/site_structure.py
-  - scripts/state_io.py
-  - tests/fixtures/archive_indexes/**
-  - tests/orchestrator/test_archive_indexes.py
-last_reviewed: "2026-05-27"
+- scripts/archive_indexes.py
+- scripts/orchestrator_runner.py
+- scripts/site_structure.py
+- scripts/state_io.py
+- tests/fixtures/archive_indexes/**
+- tests/orchestrator/test_archive_indexes.py
+last_reviewed: '2026-05-27'
 status: draft
+doc_kind: architecture
 ---
 
 # Decision Archive Index Generator (CCE-23)

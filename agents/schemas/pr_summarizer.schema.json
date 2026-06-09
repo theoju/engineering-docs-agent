@@ -28,7 +28,8 @@
                 }
               }
             ]
-          }
+          },
+          "doc_kind": { "type": "string", "enum": ["architecture", "decision"] }
         }
       }
     },

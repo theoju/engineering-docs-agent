@@ -1,8 +1,9 @@
 ---
 status: draft
 sources:
-  - https://github.com/theoju/engineering-docs-agent/pull/50
+- https://github.com/theoju/engineering-docs-agent/pull/50
 synthesized_into: []
+doc_kind: architecture
 ---
 
 # Bootstrap fail-fast mechanisms

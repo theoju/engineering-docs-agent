@@ -1,8 +1,9 @@
 ---
 status: draft
 sources:
-  - https://github.com/theoju/engineering-docs-agent/pull/61
+- https://github.com/theoju/engineering-docs-agent/pull/61
 synthesized_into: []
+doc_kind: architecture
 ---
 
 # Lint Rules

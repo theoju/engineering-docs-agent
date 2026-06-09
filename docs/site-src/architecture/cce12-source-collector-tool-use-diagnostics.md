@@ -1,11 +1,14 @@
 ---
-description: Stream-json dispatch mode that captures the exact tool-call sequence each subagent executes at runtime, gated by `DOCS_AGENT_DEBUG_DIR` — built to diagnose the 10–20× per-run latency variance in source-collector.
+description: "Stream-json dispatch mode that captures the exact tool-call sequence\
+  \ each subagent executes at runtime, gated by `DOCS_AGENT_DEBUG_DIR` \u2014 built\
+  \ to diagnose the 10\u201320\xD7 per-run latency variance in source-collector."
 source_files:
-  - "docs/superpowers/measurements/2026-05-20-cce12-run[1-5]-*.{stream.jsonl,meta.json,stdout.txt,stderr.txt,prompt.txt}"
-  - scripts/orchestrator_runner.py
-  - tests/orchestrator/test_dispatch_subagent_stream_json.py
-last_reviewed: "2026-05-28"
+- docs/superpowers/measurements/2026-05-20-cce12-run[1-5]-*.{stream.jsonl,meta.json,stdout.txt,stderr.txt,prompt.txt}
+- scripts/orchestrator_runner.py
+- tests/orchestrator/test_dispatch_subagent_stream_json.py
+last_reviewed: '2026-05-28'
 status: draft
+doc_kind: architecture
 ---
 
 # CCE-12: Source-Collector Tool-Use Diagnostics

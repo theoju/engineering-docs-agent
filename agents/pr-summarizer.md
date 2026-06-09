@@ -57,7 +57,8 @@ docs lenses + actions should reflect it.
                 }
               }
             ]
-          }
+          },
+          "doc_kind": { "type": "string", "enum": ["architecture", "decision"] }
         }
       }
     },
@@ -190,6 +191,12 @@ breaks the run. Return ONLY the JSON object.
      4. Never create under `api/reference/` — auto-generated at build time.
      5. `page_hint` must end in `.md`, have no leading slash, and must NOT
         include the lens-path prefix (the orchestrator prepends it).
+   - `doc_kind` (optional): set `decision` when the page is an investigation,
+     postmortem, ADR, roadmap, or release note (it documents _why/what we
+     decided at a point in time_); set `architecture` for an evergreen "how it
+     works today" reference. Omit when unsure — the orchestrator treats a
+     missing value as `architecture`. A `decision` page is routed to the
+     archive section automatically; you need not change `page_hint` for it.
    - **`action: edit`** — `page_hint` is the path of the existing page
      within the lens, ending in `.md`. Example:
      `{"lens": "core", "action": "edit", "page_hint": "architecture/orchestrator.md"}`.

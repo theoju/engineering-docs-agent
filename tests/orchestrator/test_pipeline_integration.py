@@ -964,3 +964,108 @@ def test_content_validator_payload_plugin_root_is_str_not_path(tmp_path, monkeyp
     assert isinstance(plugin_root_value, str), (
         f"plugin_root must be a str for JSON, got {type(plugin_root_value).__name__}"
     )
+
+
+FAKES_ROUTING = Path(__file__).parent / "fakes_routing"
+
+# lens path `docs/site-src/` (trailing slash) mirrors the real dogfood config,
+# which is proven to satisfy the lens-paths-covered-by-agent_editable_paths
+# invariant against the "docs/site-src/**" glob.
+CONFIG_YAML_ROUTING = """
+docs:
+  framework: mkdocs
+  source_dir: docs/site-src
+  whats_new_file: docs/site-src/whats-new.md
+  agent_editable_paths: ["docs/site-src/**"]
+  lens_paths:
+    core: docs/site-src/
+sources:
+  git: { host: github }
+trigger: { cron: "0 7 * * *", on_pr_merge: false }
+gap_detection:
+  allowlist_paths: ["scripts/**"]
+  size_filter: { min_loc: 50, min_files: 3 }
+lint: { tier1: default, tier2: {}, tier3: {} }
+publishing:
+  base_url: https://example.com
+  build_workflow: deploy.yml
+  url_map_rule: standard
+  verify_timeout_seconds: 60
+notifications:
+  slack: { enabled: false }
+  email: { enabled: false }
+site:
+  docs_dir: docs/site-src
+  theme: material
+  sections:
+    - { key: architecture, path: "architecture/", title: Architecture, generator: agent-authored }
+    - { key: archive, path: "archive/", title: Decision Archive, generator: archive-index }
+"""
+
+
+def test_decision_target_routed_to_archive(tmp_path, monkeypatch):
+    import importlib
+    import json
+    import subprocess
+
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner as runner
+
+    importlib.reload(runner)
+
+    # Spy on the page-author dispatch so we can assert doc_kind is injected
+    # into the frontmatter_template (the secondary spec requirement; the dry-run
+    # write path uses default_frontmatter_text(), so the template only surfaces
+    # in the dispatch payload, not in the written file).
+    page_author_payloads: list[dict] = []
+    real_dispatch = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
+        if name == "page-author":
+            page_author_payloads.append(inputs)
+        return real_dispatch(
+            name, inputs, dry_run_dir=dry_run_dir, cwd=cwd, out_reasons=out_reasons
+        )
+
+    eda = tmp_path / ".engineering-docs-agent"
+    eda.mkdir(parents=True)
+    (eda / "config.yml").write_text(CONFIG_YAML_ROUTING)
+    (eda / "state.json").write_text(
+        json.dumps({"version": "1", "dismissed_gap_flags": {}, "cursors": {}})
+    )
+    (tmp_path / "docs/site-src/architecture").mkdir(parents=True)
+    (tmp_path / "docs/site-src/archive").mkdir(parents=True)
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ],
+        check=True,
+    )
+
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
+    runner.run(tmp_path, dry_run_dir=FAKES_ROUTING, no_pr=True)
+
+    # The decision-kind create target must land under archive/, not architecture/.
+    assert (tmp_path / "docs/site-src/archive/root-cause-sweep.md").exists()
+    assert not (tmp_path / "docs/site-src/architecture/root-cause-sweep.md").exists()
+
+    # doc_kind must be injected into the page-author frontmatter_template.
+    routed = [
+        p
+        for p in page_author_payloads
+        if str(p.get("target_path", "")).endswith("archive/root-cause-sweep.md")
+    ]
+    assert routed, "expected a page-author dispatch for the routed archive page"
+    assert routed[0]["frontmatter_template"].get("doc_kind") == "decision"

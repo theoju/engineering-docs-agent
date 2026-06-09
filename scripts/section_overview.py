@@ -45,13 +45,27 @@ def render_directory_overview(children: list[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def _freshness_key(frontmatter: dict, filename: str) -> str:
+    """ISO date string used to order a child page, newest first. Prefers the
+    ``last_reviewed`` frontmatter field (coerced to str — an unquoted YAML date
+    parses to ``datetime.date``, which must not reach a string comparison), then
+    a ``YYYY-MM-DD-`` filename prefix, then ``""`` (sorts last)."""
+    lr = frontmatter.get("last_reviewed")
+    if lr:
+        return str(lr)
+    if archive_indexes.DATE_PREFIX.match(filename):
+        return filename[:10]
+    return ""
+
+
 def _scan_children(section_dir: Path) -> list[tuple[str, str]]:
-    """(title, summary) per child *.md, excluding index.md and _*-prefixed.
-    Best-effort: a child that fails to read/parse is skipped, not raised."""
-    out: list[tuple[str, str]] = []
+    """(title, summary) per child *.md, excluding index.md and _*-prefixed,
+    ordered newest-``last_reviewed``-first (undated last), title-ascending as the
+    stable tiebreak. Best-effort: a child that fails to read is skipped, not raised."""
+    scanned: list[tuple[str, str, str]] = []  # (freshness, title, summary)
     if not section_dir.is_dir():
-        return out
-    for md in sorted(section_dir.glob("*.md")):
+        return []
+    for md in section_dir.glob("*.md"):
         if md.name == "index.md" or md.name.startswith("_"):
             continue
         try:
@@ -61,8 +75,11 @@ def _scan_children(section_dir: Path) -> list[tuple[str, str]]:
         title, summary = archive_indexes.parse_title_and_summary(text)
         title = archive_indexes._strip_inline_links(title) or md.stem
         summary = archive_indexes._strip_inline_links(summary)
-        out.append((title, summary))
-    return out
+        freshness = _freshness_key(archive_indexes.parse_frontmatter(text), md.name)
+        scanned.append((freshness, title, summary))
+    scanned.sort(key=lambda c: c[1].lower())  # title asc (stable tiebreak)
+    scanned.sort(key=lambda c: c[0], reverse=True)  # freshness desc; "" sinks last
+    return [(title, summary) for _f, title, summary in scanned]
 
 
 def _upsert(repo_root: Path, rel: str, body: str, written: list, skipped: list) -> None:

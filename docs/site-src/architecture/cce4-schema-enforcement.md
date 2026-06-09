@@ -12,8 +12,9 @@ source_files:
 - tests/orchestrator/test_pipeline_integration.py
 - tests/orchestrator/test_schema_invalid_soft_fail.py
 - tests/orchestrator/test_verify_runner.py
-last_reviewed: "2026-05-28"
+last_reviewed: '2026-05-28'
 status: draft
+doc_kind: architecture
 ---
 
 # Schema Enforcement (CCE-4)

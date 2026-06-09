@@ -46,7 +46,7 @@ def assign_group(ident: str, groups: list) -> str:
 class ScaffoldFile:
     path: str  # repo-relative POSIX path
     content: str
-    # "home" | "section-index" | "pages" | "root-pages" | "mkdocs"
+    # "home" | "section-index" | "mkdocs" | "gen-script" | "openapi-spec"
     kind: str
 
 
@@ -98,20 +98,16 @@ def render_home(site: dict) -> str:
 
 
 def plan_scaffold(site: dict) -> list[ScaffoldFile]:
+    """Plan the on-disk landing stubs. The top-level nav is NOT scaffolded as
+    a `.pages` (awesome-pages) or root `SUMMARY.md` anymore — it is generated
+    directly into `mkdocs.yml` by ``render_mkdocs_yaml`` (CCE-106), where the
+    `nav:` block's directory cross-links let literate-nav recurse into the
+    gen-files reference subtree (which lives only in the build VFS). This
+    function emits only the home page and per-section landing stubs.
+    """
     docs_dir = site["docs_dir"].rstrip("/")
     sections = site.get("sections", [])
     files: list[ScaffoldFile] = []
-
-    # Root .pages: orders the top-level nav by section title, in config order.
-    # Both title and path go through _yaml_scalar so any YAML-significant char
-    # in a configured value cannot break the generated .pages.
-    nav_lines = "\n".join(
-        f"  - {_yaml_scalar(s['title'])}: {_yaml_scalar(s['path'].rstrip('/'))}"
-        for s in sections
-    )
-    files.append(
-        ScaffoldFile(f"{docs_dir}/.pages", f"nav:\n{nav_lines}\n", "root-pages")
-    )
 
     for s in sections:
         if s["key"] == "home":
@@ -127,17 +123,11 @@ def plan_scaffold(site: dict) -> list[ScaffoldFile]:
                 ScaffoldFile(f"{docs_dir}/{path}", _page_stub(s), "section-index")
             )
             continue
-        # directory section: index stub + a .pages giving the section its title
+        # directory section: an index stub. Its title comes from the generated
+        # mkdocs.yml nav entry, not a per-dir .pages.
         files.append(
             ScaffoldFile(
                 f"{docs_dir}/{path}/index.md", _section_index_stub(s), "section-index"
-            )
-        )
-        files.append(
-            ScaffoldFile(
-                f"{docs_dir}/{path}/.pages",
-                f"title: {_yaml_scalar(s['title'])}\n",
-                "pages",
             )
         )
 
@@ -162,7 +152,7 @@ theme:
 
 plugins:
   - search
-  - literate-nav:
+  - "literate-nav":
       nav_file: SUMMARY.md
 {mkdocstrings_plugin}
 markdown_extensions:
@@ -248,6 +238,22 @@ def _python_plugins_block(path_root: str) -> str:
     )
 
 
+def _render_nav(site: dict) -> str:
+    """Render the top-level `nav:` block from the configured sections, in
+    config order. A single-page section (path ends in .md) becomes a direct
+    page entry; a directory section becomes a trailing-slash directory
+    cross-link, which makes literate-nav recurse into that directory —
+    including the gen-files reference subtree that exists only in the build
+    VFS (a root SUMMARY.md markdown link cannot reach it). An empty sections
+    list still emits a bare `nav:` (valid YAML).
+    """
+    lines = ["nav:"]
+    for s in site.get("sections", []):
+        target = s["path"] if _is_page(s) else s["path"].rstrip("/") + "/"
+        lines.append(f"  - {_yaml_scalar(s['title'])}: {_yaml_scalar(target)}")
+    return "\n".join(lines) + "\n"
+
+
 def render_mkdocs_yaml(
     site: dict,
     *,
@@ -269,13 +275,18 @@ def render_mkdocs_yaml(
         repo_lines = f"repo_url: {repo_url}\n"
         if edit_uri:
             repo_lines += f"edit_uri: {edit_uri}\n"
-    return _MKDOCS_TEMPLATE.format(
+    body = _MKDOCS_TEMPLATE.format(
         site_name=_yaml_scalar(site_name),
         docs_dir=site["docs_dir"].rstrip("/"),
         theme=site.get("theme", "material"),
         mkdocstrings_plugin=plugins,
         repo_block=repo_lines,
     )
+    # Append the generated `nav:` block last. The literate-nav plugin key is
+    # quoted ("literate-nav":) precisely so the only bare `nav:` substring in
+    # the document is this block — making it the unambiguous nav source of
+    # truth. literate-nav expands its directory cross-links at build time.
+    return body + "\n" + _render_nav(site)
 
 
 def apply_scaffold(

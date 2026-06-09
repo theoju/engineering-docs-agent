@@ -152,7 +152,7 @@ theme:
 
 plugins:
   - search
-  - "literate-nav":
+  - literate-nav:
       nav_file: SUMMARY.md
 {mkdocstrings_plugin}
 markdown_extensions:
@@ -282,10 +282,8 @@ def render_mkdocs_yaml(
         mkdocstrings_plugin=plugins,
         repo_block=repo_lines,
     )
-    # Append the generated `nav:` block last. The literate-nav plugin key is
-    # quoted ("literate-nav":) precisely so the only bare `nav:` substring in
-    # the document is this block — making it the unambiguous nav source of
-    # truth. literate-nav expands its directory cross-links at build time.
+    # Append the generated `nav:` block last; literate-nav expands its
+    # directory cross-links at build time (see _render_nav).
     return body + "\n" + _render_nav(site)
 
 

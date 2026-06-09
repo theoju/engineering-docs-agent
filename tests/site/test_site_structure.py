@@ -123,8 +123,10 @@ def test_nav_title_with_colon_is_quoted():
         "sections": [{"key": "api", "path": "api/", "title": "API: Guide"}],
     }
     out = site_structure.render_mkdocs_yaml(site, site_name="X", python_detected=False)
-    # the nav: block must parse as valid YAML with the title intact
-    nav = yaml.safe_load(out.split("nav:", 1)[1])
+    # the nav: block must parse as valid YAML with the title intact. Anchor on the
+    # top-level "\nnav:" so the indented "  - literate-nav:" plugin key (which
+    # contains the substring "nav:") cannot be mistaken for the nav block.
+    nav = yaml.safe_load(out.split("\nnav:", 1)[1])
     assert nav == [{"API: Guide": "api/"}]
 
 

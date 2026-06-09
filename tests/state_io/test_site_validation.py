@@ -159,3 +159,70 @@ site:
         )
     )
     assert cfg["site"]["sections"][0]["key"] == "archive"
+
+
+def test_api_section_accepts_groups(tmp_path: Path):
+    cfg = load_config_validated(
+        _write(
+            tmp_path,
+            """
+site:
+  docs_dir: docs/site-src
+  sections:
+    - { key: home, path: index.md, title: Home }
+    - key: api
+      path: api/
+      title: API reference
+      generator: api-extract
+      extractors: [python-mkdocstrings]
+      groups:
+        - { name: Generators, modules: [archive_indexes, contracts_doc] }
+        - { name: Lint, modules: ["lint/*"] }
+""",
+        )
+    )
+    api = next(s for s in cfg["site"]["sections"] if s["key"] == "api")
+    assert api["groups"][0]["name"] == "Generators"
+
+
+def test_api_group_with_empty_modules_is_rejected_by_schema(tmp_path: Path):
+    with pytest.raises(ConfigError):
+        load_config_validated(
+            _write(
+                tmp_path,
+                """
+site:
+  docs_dir: docs/site-src
+  sections:
+    - key: api
+      path: api/
+      title: API reference
+      generator: api-extract
+      extractors: [python-mkdocstrings]
+      groups:
+        - { name: Empty, modules: [] }
+""",
+            )
+        )
+
+
+def test_api_duplicate_group_names_rejected(tmp_path: Path):
+    with pytest.raises(ConfigError, match="duplicate group name"):
+        load_config_validated(
+            _write(
+                tmp_path,
+                """
+site:
+  docs_dir: docs/site-src
+  sections:
+    - key: api
+      path: api/
+      title: API reference
+      generator: api-extract
+      extractors: [python-mkdocstrings]
+      groups:
+        - { name: Core, modules: [state_io] }
+        - { name: Core, modules: [contracts] }
+""",
+            )
+        )

@@ -142,7 +142,23 @@
               },
               "sources": { "type": "array", "items": { "type": "string" } },
               "openapi": { "type": "string", "minLength": 1 },
-              "repo_url_base": { "type": "string" }
+              "repo_url_base": { "type": "string" },
+              "groups": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "modules"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "modules": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": { "type": "string", "minLength": 1 }
+                    }
+                  }
+                }
+              }
             }
           }
         }

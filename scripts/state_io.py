@@ -148,6 +148,14 @@ def _validate_api_sections(config: dict) -> None:
                     f"site.section '{s.get('key')}' source {sp!r} must be relative "
                     "to the repo (no absolute or '..' paths)"
                 )
+        seen_groups: set[str] = set()
+        for g in s.get("groups") or []:
+            name = g.get("name", "")
+            if name in seen_groups:
+                raise ConfigError(
+                    f"site.section '{s.get('key')}' has a duplicate group name {name!r}"
+                )
+            seen_groups.add(name)
         if "openapi" in extractors:
             path = s.get("openapi")
             if not path:

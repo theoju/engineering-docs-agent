@@ -60,6 +60,38 @@ site:
       generator: api-extract
       extractors:
         - python-mkdocstrings
+        - json-schema
+      sources:
+        - agents/schemas
+      groups:
+        - name: Orchestrator
+          modules: [orchestrator_runner, state_io, contracts, stderr_emit]
+        - name: Generators
+          modules:
+            [
+              archive_indexes,
+              contracts_doc,
+              core_manifest,
+              site_structure,
+              source_map,
+              source_drift,
+              frontmatter_contract,
+            ]
+        - name: Lint
+          modules: ["lint/*"]
+        - name: Setup
+          modules:
+            [
+              setup_discover,
+              setup_scaffold,
+              preflight_host,
+              scaffold_workflow,
+              enable_pages,
+            ]
+        - name: Verification
+          modules: [verify_citations, verify_diagrams, verify_runner]
+        - name: Integrations
+          modules: [gh_client, jira_transition_on_merge, prune_merged_branches]
     - key: operations
       path: operations/
       title: Operations

@@ -200,3 +200,27 @@ def test_proposed_config_site_honors_discovery_decision_sources():
         s for s in cfg["site"]["sections"] if s.get("generator") == "archive-index"
     )
     assert archive["sources"] == ["docs/adr", "docs/rfcs"]
+
+
+def test_proposed_site_api_flat_by_default():
+    from scripts import preflight_host
+
+    site = preflight_host._proposed_site({}, "docs")
+    api = next(s for s in site["sections"] if s["key"] == "api")
+    assert api["extractors"] == ["python-mkdocstrings"]  # no json-schema by default
+    assert "groups" not in api
+    assert "sources" not in api
+
+
+def test_proposed_site_api_honors_discovery_hooks():
+    from scripts import preflight_host
+
+    discovery = {
+        "contract_sources": ["agents/schemas"],
+        "api_groups": [{"name": "Gen", "modules": ["archive_indexes"]}],
+    }
+    site = preflight_host._proposed_site(discovery, "docs")
+    api = next(s for s in site["sections"] if s["key"] == "api")
+    assert "json-schema" in api["extractors"]
+    assert api["sources"] == ["agents/schemas"]
+    assert api["groups"][0]["name"] == "Gen"

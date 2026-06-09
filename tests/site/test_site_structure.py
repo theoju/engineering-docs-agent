@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import contextlib
+import inspect
+import io
 import sys
+import types
 from pathlib import Path
 
 import yaml
@@ -94,3 +98,90 @@ def test_title_with_colon_produces_parseable_yaml():
     # root .pages must parse (nav is a list of single-key maps)
     root = yaml.safe_load(files["docs/site-src/.pages"].content)
     assert root["nav"] == [{"API: Reference Guide": "api"}]
+
+
+_GROUPS = [
+    {"name": "Generators", "modules": ["archive_indexes", "contracts_doc"]},
+    {"name": "Lint", "modules": ["lint/*"]},
+]
+
+
+def test_assign_group_first_match_wins():
+    assert site_structure.assign_group("archive_indexes", _GROUPS) == "Generators"
+
+
+def test_assign_group_glob_matches_path_form():
+    # a "lint/*" glob must match the dotted ident "lint.lint_runner"
+    assert site_structure.assign_group("lint.lint_runner", _GROUPS) == "Lint"
+
+
+def test_assign_group_unmatched_is_other():
+    assert site_structure.assign_group("gh_client", _GROUPS) == "Other"
+
+
+def test_assign_group_empty_groups_is_flat_sentinel():
+    # no groups -> "" so the caller keeps the flat nav
+    assert site_structure.assign_group("anything", []) == ""
+
+
+def _exec_gen_ref(rendered: str, repo: Path, monkeypatch) -> dict:
+    """Exec a rendered gen_ref_pages.py against a fake mkdocs_gen_files and
+    return the captured Nav (a dict of nav_key -> doc path)."""
+    fake = types.ModuleType("mkdocs_gen_files")
+
+    class _Nav(dict):
+        def build_literate_nav(self):
+            return []
+
+    @contextlib.contextmanager
+    def _open(path, mode="r"):
+        yield io.StringIO()
+
+    fake.Nav = _Nav
+    fake.open = _open
+    fake.set_edit_path = lambda *a, **k: None
+    monkeypatch.setitem(sys.modules, "mkdocs_gen_files", fake)
+    monkeypatch.chdir(repo)
+    g = {"__name__": "gen_ref_pages"}
+    exec(compile(rendered, "gen_ref_pages.py", "exec"), g)
+    return dict(g["nav"])
+
+
+def _seed_modules(repo: Path):
+    pkg = repo / "scripts"
+    (pkg / "lint").mkdir(parents=True)
+    for name in ("archive_indexes.py", "contracts_doc.py", "gh_client.py"):
+        (pkg / name).write_text("")
+    (pkg / "lint" / "lint_runner.py").write_text("")
+    (pkg / "_private.py").write_text("")  # underscore-prefixed: excluded
+
+
+def test_rendered_gen_ref_groups_nav(tmp_path: Path, monkeypatch):
+    _seed_modules(tmp_path)
+    rendered = site_structure._GEN_REF_TEMPLATE.format(
+        scan_dir="scripts",
+        path_root="scripts",
+        out_root="api",
+        groups_literal=repr(_GROUPS),
+        assign_group_src=inspect.getsource(site_structure.assign_group),
+    )
+    nav = _exec_gen_ref(rendered, tmp_path, monkeypatch)
+    assert ("Generators", "archive_indexes") in nav
+    assert ("Generators", "contracts_doc") in nav
+    assert ("Lint", "lint", "lint_runner") in nav
+    assert ("Other", "gh_client") in nav
+    assert not any("_private" in "".join(k) for k in nav)  # excluded
+
+
+def test_rendered_gen_ref_flat_when_no_groups(tmp_path: Path, monkeypatch):
+    _seed_modules(tmp_path)
+    rendered = site_structure._GEN_REF_TEMPLATE.format(
+        scan_dir="scripts",
+        path_root="scripts",
+        out_root="api",
+        groups_literal=repr([]),
+        assign_group_src=inspect.getsource(site_structure.assign_group),
+    )
+    nav = _exec_gen_ref(rendered, tmp_path, monkeypatch)
+    assert ("archive_indexes",) in nav  # flat key, no group prefix
+    assert ("lint", "lint_runner") in nav

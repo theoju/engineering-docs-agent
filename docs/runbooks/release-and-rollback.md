@@ -70,9 +70,9 @@ skips the confirmation prompt.
 The misfire: `gh release create` **succeeds**, but `release.yml` then **fails** (for
 example, live-tests red). The tag exists; the release is unvalidated.
 
-Real precedent: the 2026-05-27 misfire during the PR #43 release attempt — its merge
-triggered a `release.yml` run that failed this way. (v0.5.0 itself did not — its run
-was green ~30s after the tag.)
+Real precedent: the 2026-05-27 misfire during the PR #43 release attempt — the `v*`
+tag push triggered a `release.yml` run (it runs `on: push: tags`) that failed this
+way. (v0.5.0 itself did not — its run was green ~30s after the tag.)
 
 Recovery:
 

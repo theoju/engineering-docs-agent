@@ -143,11 +143,50 @@ scaffold time (after `apply_scaffold`) so a freshly-scaffolded site is populated
 before the first nightly. Generated pages are committed by the run's existing
 `git add -A`.
 
+### 6i — Root literate-nav SUMMARY: surface the reference subtree in the nav
+
+**Added after the CCE-105 review surfaced a pre-existing gap** (verified
+2026-06-08): the API reference subtree never renders in the site nav — flat or
+grouped. `gen_ref_pages.py` writes `api/reference/SUMMARY.md`, but the site's
+`awesome-pages` nav driver cannot expand a subdirectory `SUMMARY.md`, so all 39
+reference pages are orphans (reachable only by search/URL) and CCE-105's
+grouping is invisible. Confirmed against the literate-nav docs + a spike:
+literate-nav only expands a subdirectory `SUMMARY.md` when reached via an
+explicit `nav:` **or a root `SUMMARY.md` cross-link** — not via `awesome-pages`.
+
+**Decision (operator, 2026-06-08): make a generated root `SUMMARY.md` the single
+nav driver, replacing `awesome-pages`.** `site_structure` generates
+`<docs_dir>/SUMMARY.md` from the `site.sections` config, in config order:
+
+- single-page sections → `* [Title](path.md)` (home, what's-new);
+- directory sections → `* [Title](dir/index.md)` for the landing, with the
+  reference cross-linked so literate-nav expands the **grouped**
+  `api/reference/SUMMARY.md` under the API section, and `api/contracts/` listed.
+
+Changes:
+
+- `plan_scaffold` stops emitting `awesome-pages` `.pages` files and instead emits
+  the root `SUMMARY.md` (idempotent: never clobber an authored SUMMARY).
+- `render_mkdocs_yaml` drops the `awesome-pages` plugin; `literate-nav`
+  (`nav_file: SUMMARY.md`) is the nav driver; `navigation.indexes` (already on)
+  carries the section-index landings.
+- Degrade-gracefully: a host with no api-extract section still gets a valid root
+  SUMMARY of its sections; an empty section is simply a landing link.
+
+**This is integration work with finicky plugin interaction — it is implemented
+TDD-first against the real consumer:** a `mkdocs build --strict` test asserts the
+grouped reference modules (e.g. a "Generators" group with `archive_indexes`)
+appear in the rendered nav and the orphan `SUMMARY/index.html` is gone. The exact
+literate-nav cross-link syntax is settled by making that test green, not by
+guesswork. Reuses the CCE-105 fixture (`tests/fixtures/api/host`) extended with a
+second module so a named group + the "Other" bucket are both rendered.
+
 ### 6h — Verify end-to-end
 
 Run `generate_overviews` against the live config to populate every section
-landing + the home block, then `mkdocs build --strict` to confirm the new
-content + links pass the real consumer tool.
+landing + the home block, regenerate the root `SUMMARY.md`, then
+`mkdocs build --strict` to confirm the overviews, the grouped reference nav, and
+all links pass the real consumer tool.
 
 ## Test plan (TDD)
 
@@ -167,6 +206,13 @@ content + links pass the real consumer tool.
   cleanly when no origin.
 - `run_site_generators` runs overviews after archive/contracts and records an
   `info_only` partial (not a hard failure) when the generator raises.
+- **Root SUMMARY:** `plan_scaffold` emits a root `SUMMARY.md` in section order
+  (not `awesome-pages` `.pages`); idempotent (never clobbers an authored
+  SUMMARY); `render_mkdocs_yaml` drops `awesome-pages` and keeps `literate-nav`.
+- **Real-consumer nav guard (CCE-105 unblock):** `mkdocs build --strict` over
+  the grouped fixture renders the grouped reference modules in the nav (a named
+  group + the "Other" bucket) and emits **no** orphan `api/reference/SUMMARY/`
+  page. This is the discriminating test the 6i syntax is implemented against.
 - Full `python3 -m pytest` green; `mkdocs build --strict` green.
 
 ## Out of scope (other phases)
@@ -192,3 +238,7 @@ content + links pass the real consumer tool.
    archive/contracts) and setup scaffold, best-effort.
 6. Every section landing + the home render populated content;
    `mkdocs build --strict` passes; full pytest green.
+7. A generated root `SUMMARY.md` drives the nav (`awesome-pages` removed); the
+   grouped API reference subtree renders in the nav under its CCE-105 groups,
+   proven by a `mkdocs build --strict` real-consumer test; no orphan
+   `api/reference/SUMMARY/` page remains.

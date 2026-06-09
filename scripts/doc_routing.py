@@ -2,7 +2,7 @@
 
 The pr-summarizer emits a per-target ``doc_kind`` ("architecture" | "decision").
 ``route_create_hint`` maps a *decision* page to the host's archive-index section
-(discovered by generator marker via ``archive_indexes._find_archive_section`` —
+(discovered by generator marker via ``archive_indexes.find_archive_section`` —
 never a hardcoded name); every other case keeps the agent's chosen hint. Pure
 functions: no I/O, no agent dependence, so the routing decision is unit-testable
 unlike the agent's semantic judgment. Generic-first: a host with no archive-index
@@ -21,7 +21,7 @@ import archive_indexes  # noqa: E402
 def archive_section_leaf(site_config: dict | None) -> str | None:
     """Leaf directory name of the section whose generator is ``archive-index``,
     or None when the host declares no such section."""
-    section = archive_indexes._find_archive_section(site_config or {})
+    section = archive_indexes.find_archive_section(site_config or {})
     if not section:
         return None
     path = str(section.get("path") or "").rstrip("/")

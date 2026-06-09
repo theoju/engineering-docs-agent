@@ -205,7 +205,13 @@ def regenerate(archive_root: Path) -> None:
             (sub / "index.md").write_text(build_index(sub), encoding="utf-8")
 
 
-def _find_archive_section(site: dict) -> dict | None:
+def find_archive_section(site: dict) -> dict | None:
+    """The host's archive-index section (by generator marker), or None.
+
+    Public because it is a cross-capability contract: ``doc_routing`` consumes it
+    to route decision-kind pages without hardcoding the section name. Keep it
+    generic — match on ``generator == "archive-index"``, never on a literal key.
+    """
     for s in site.get("sections", []) or []:
         if s.get("generator") == "archive-index":
             return s
@@ -225,7 +231,7 @@ def generate_archive(
     written: list[str] = []
     skipped: list[str] = []
 
-    section = _find_archive_section(site_config)
+    section = find_archive_section(site_config)
     if section is None:
         return {"written": written, "skipped": skipped}
     sources = section.get("sources") or []

@@ -312,7 +312,7 @@ def apply_scaffold(
         (s for s in site.get("sections", []) if s.get("generator") == "api-extract"),
         None,
     )
-    api_path = (api_section.get("path", "api").rstrip("/")) if api_section else "api"
+    api_path = api_section.get("path", "api").rstrip("/") if api_section else "api"
     api_groups = (api_section.get("groups") or []) if api_section else []
 
     if python_detected:

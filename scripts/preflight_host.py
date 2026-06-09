@@ -53,18 +53,16 @@ def _proposed_site(discovery: dict, source_dir: str) -> dict:
     (extractors: [python-mkdocstrings], no extra keys) — no error.
     """
     decision_sources = discovery.get("decision_sources") or _DEFAULT_DECISION_SOURCES
-    api_extractors = ["python-mkdocstrings"]
-    contract_sources = discovery.get("contract_sources") or []
-    if contract_sources:
-        api_extractors.append("json-schema")
     api_section: dict = {
         "key": "api",
         "path": "api/",
         "title": "API reference",
         "generator": "api-extract",
-        "extractors": api_extractors,
+        "extractors": ["python-mkdocstrings"],
     }
+    contract_sources = discovery.get("contract_sources") or []
     if contract_sources:
+        api_section["extractors"].append("json-schema")
         api_section["sources"] = contract_sources
     api_groups = discovery.get("api_groups") or []
     if api_groups:

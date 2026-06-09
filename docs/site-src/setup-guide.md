@@ -1,3 +1,10 @@
+---
+status: draft
+sources:
+  - https://github.com/theoju/engineering-docs-agent/pull/77
+synthesized_into: []
+---
+
 # Setup Guide
 
 End-to-end walkthrough: from zero to a working `engineering-docs-agent` nightly docs-PR pipeline on a new host repo.
@@ -68,6 +75,26 @@ Skip if you don't use Jira. If you do, the source-collector subagent enriches PR
 1. Open https://id.atlassian.com/manage-profile/security/api-tokens
 2. Click **Create API token** and name it `engineering-docs-agent`.
 3. Copy the token. You'll paste it into each host as the `JIRA_API_TOKEN` Secret. Your account email goes in the `JIRA_EMAIL` repo Variable (Variable, not Secret — emails are not sensitive and Variables show up plainly in logs for debugging).
+
+### 1.4 Jira naming conventions (branches, commits, PRs)
+
+If your team uses Jira, follow these naming patterns so the `/ship` skill's `extract-jira-key.sh` picks up CCE keys automatically, and the Jira-transition workflow (`.github/workflows/jira-transition.yml`) closes the right issue on merge.
+
+**Branch naming:**
+
+```
+<type>/CCE-<number>-<short-slug>
+```
+
+Examples: `feat/CCE-12-jira-input-wiring`, `fix/CCE-7-empty-path-guard`.
+
+**Commit messages:** include `CCE-<number>` in the subject line or a trailer. Hardening commits that close multiple tickets may list them in the body.
+
+**PR titles:** prefix or include `CCE-<number>` so the Atlassian GitHub integration auto-links the PR to the issue. The transition workflow reads the PR title only — body/branch/commit mentions are deliberately ignored to avoid closing tickets referenced in passing.
+
+Failure to follow this pattern means `extract-jira-key.sh` finds no key and the auto-transition is silently skipped. The Jira issue stays open and must be closed manually.
+
+For the full operations reference, see [Jira conventions](operations/jira-conventions.md).
 
 ## Part 2 — Per-host setup
 
@@ -374,6 +401,7 @@ Key tickets that shaped this guide:
 - **CCE-56**: This guide.
 - **CCE-57, CCE-58**: Onboarding the next two hosts (exercises this guide; surfaces gaps).
 - **CCE-59**: Remove `pull_request paths:` filter on the actionlint workflow so it runs on every PR (unblocks the required-check + path-filter footgun).
+- **CCE-77**: Replaced the placeholder setup-guide stub with this comprehensive guide; added Jira naming conventions (branch/commit/PR-title format) to CLAUDE.md so `extract-jira-key.sh` picks up keys automatically.
 
 ## Provisioning matrix (CCE-80)
 

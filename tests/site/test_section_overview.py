@@ -8,6 +8,7 @@ sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
 import managed_block as mb  # noqa: E402
 import section_overview as so  # noqa: E402
+import setup_discover  # noqa: E402
 
 
 def _dir_site():
@@ -112,3 +113,71 @@ def test_overview_replaces_block_preserves_author_prose(tmp_path):
     assert "HAND-WRITTEN FOOTER." in out
     assert "STALE GENERATED" not in out
     assert "**R** — routing." in out
+
+
+def test_render_api_overview_groups_with_counts():
+    groups = [{"name": "Math", "modules": ["pkg.calc"]}]
+    body = so.render_api_overview(
+        idents=["pkg.calc", "pkg.util"],
+        groups=groups,
+        contract_links=[("Widget", "contracts/widget.md")],
+    )
+    assert "**Math** — 1 module" in body
+    assert "**Other** — 1 module" in body
+    assert "[Widget](contracts/widget.md)" in body
+
+
+def test_render_api_overview_flat_when_no_groups():
+    body = so.render_api_overview(idents=["a", "b", "c"], groups=[], contract_links=[])
+    assert "3 modules" in body
+
+
+def test_generate_overviews_api_section(tmp_path, monkeypatch):
+    site = {
+        "docs_dir": "docs/site-src",
+        "sections": [
+            {
+                "key": "api",
+                "path": "api/",
+                "title": "API reference",
+                "generator": "api-extract",
+                "groups": [{"name": "Math", "modules": ["pkg.calc"]}],
+            },
+        ],
+    }
+    _seed_landing(tmp_path, "docs/site-src/api/index.md", "# API reference\n")
+    _seed_landing(
+        tmp_path, "docs/site-src/api/contracts/widget.md", "# Widget\n\nA widget.\n"
+    )
+    _seed_landing(tmp_path, "pkg/calc.py", "def add(a, b):\n    return a + b\n")
+    _seed_landing(tmp_path, "pkg/util.py", "def slug(s):\n    return s\n")
+    monkeypatch.setattr(
+        setup_discover,
+        "detect_python",
+        lambda root: {"detected": True, "scan_dir": "pkg", "path_root": "."},
+    )
+    result = so.generate_overviews(tmp_path, site)
+    out = (tmp_path / "docs/site-src/api/index.md").read_text()
+    assert "docs/site-src/api/index.md" in result["written"]
+    assert "**Math** — 1 module" in out
+    assert "**Other** — 1 module" in out
+    assert "[Widget](contracts/widget.md)" in out
+
+
+def test_generate_overviews_api_no_python_degrades(tmp_path, monkeypatch):
+    site = {
+        "docs_dir": "docs/site-src",
+        "sections": [
+            {"key": "api", "path": "api/", "title": "API", "generator": "api-extract"},
+        ],
+    }
+    _seed_landing(tmp_path, "docs/site-src/api/index.md", "# API\n")
+    monkeypatch.setattr(
+        setup_discover,
+        "detect_python",
+        lambda root: {"detected": False, "scan_dir": None, "path_root": None},
+    )
+    result = so.generate_overviews(tmp_path, site)
+    out = (tmp_path / "docs/site-src/api/index.md").read_text()
+    assert mb.START in out
+    assert "_No pages yet._" in out or "modules" in out

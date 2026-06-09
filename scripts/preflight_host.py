@@ -44,8 +44,31 @@ def _proposed_site(discovery: dict, source_dir: str) -> dict:
     host whose decision records live elsewhere (no detector emits it yet; the
     hook is exercised by test) — else the superpowers convention (which
     `generate_archive` skips cleanly when absent — graceful degradation).
+
+    `contract_sources` and `api_groups` are degrade-gracefully discovery override
+    hooks (no detector emits them yet; exercised by tests), mirroring the existing
+    `decision_sources` hook. When `contract_sources` is provided, the `json-schema`
+    extractor is appended and `sources` is set on the api section; when `api_groups`
+    is provided, `groups` is set. A bare host without these keys gets the flat default
+    (extractors: [python-mkdocstrings], no extra keys) — no error.
     """
     decision_sources = discovery.get("decision_sources") or _DEFAULT_DECISION_SOURCES
+    api_extractors = ["python-mkdocstrings"]
+    contract_sources = discovery.get("contract_sources") or []
+    if contract_sources:
+        api_extractors.append("json-schema")
+    api_section: dict = {
+        "key": "api",
+        "path": "api/",
+        "title": "API reference",
+        "generator": "api-extract",
+        "extractors": api_extractors,
+    }
+    if contract_sources:
+        api_section["sources"] = contract_sources
+    api_groups = discovery.get("api_groups") or []
+    if api_groups:
+        api_section["groups"] = api_groups
     return {
         "docs_dir": source_dir,
         "theme": "material",
@@ -57,13 +80,7 @@ def _proposed_site(discovery: dict, source_dir: str) -> dict:
                 "title": "Architecture",
                 "generator": "agent-authored",
             },
-            {
-                "key": "api",
-                "path": "api/",
-                "title": "API reference",
-                "generator": "api-extract",
-                "extractors": ["python-mkdocstrings"],
-            },
+            api_section,
             {"key": "operations", "path": "operations/", "title": "Operations"},
             {
                 "key": "archive",

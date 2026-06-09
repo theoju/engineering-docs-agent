@@ -65,7 +65,11 @@ def _scan_children(section_dir: Path) -> list[tuple[str, str]]:
     return out
 
 
-def _upsert(landing: Path, body: str, rel: str, written: list, skipped: list) -> None:
+def _upsert(repo_root: Path, rel: str, body: str, written: list, skipped: list) -> None:
+    """Upsert the managed block of ``repo_root / rel`` with ``body``, recording
+    ``rel`` in ``written`` (content changed) or ``skipped`` (unchanged or the
+    existing file's markers are malformed)."""
+    landing = repo_root / rel
     existing = landing.read_text(encoding="utf-8") if landing.exists() else ""
     try:
         new = managed_block.upsert_managed_block(existing, body)
@@ -190,21 +194,14 @@ def generate_overviews(repo_root: Path, site_config: dict) -> dict:
                 section.get("groups") or [],
                 _contract_links(repo_root, docs_dir, api_path),
             )
-            _upsert(
-                repo_root / docs_dir / api_path / "index.md",
-                body,
-                rel,
-                written,
-                skipped,
-            )
+            _upsert(repo_root, rel, body, written, skipped)
             continue
         if _is_page(section):
             continue
         path = section["path"].rstrip("/")
-        section_dir = repo_root / docs_dir / path
         rel = f"{docs_dir}/{path}/index.md"
-        body = render_directory_overview(_scan_children(section_dir))
-        _upsert(repo_root / docs_dir / path / "index.md", body, rel, written, skipped)
+        body = render_directory_overview(_scan_children(repo_root / docs_dir / path))
+        _upsert(repo_root, rel, body, written, skipped)
 
     if home_section is not None:
         entries: list[tuple[str, str]] = []
@@ -215,5 +212,5 @@ def generate_overviews(repo_root: Path, site_config: dict) -> dict:
             target = path if _is_page(section) else f"{path.rstrip('/')}/index.md"
             entries.append((section["title"], target))
         rel = f"{docs_dir}/{home_section['path'].rstrip('/')}"
-        _upsert(repo_root / rel, render_home_overview(entries), rel, written, skipped)
+        _upsert(repo_root, rel, render_home_overview(entries), written, skipped)
     return {"written": written, "skipped": skipped}

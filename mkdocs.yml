@@ -1,6 +1,8 @@
 site_name: engineering-docs-agent
 docs_dir: docs/site-src
 site_dir: site
+repo_url: https://github.com/theoju/engineering-docs-agent
+edit_uri: edit/main/docs/site-src/
 
 theme:
   name: material
@@ -15,12 +17,11 @@ theme:
 
 plugins:
   - search
-  - awesome-pages
+  - literate-nav:
+      nav_file: SUMMARY.md
   - gen-files:
       scripts:
         - gen_ref_pages.py
-  - literate-nav:
-      nav_file: SUMMARY.md
   - mkdocstrings:
       handlers:
         python:
@@ -42,3 +43,11 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.details
+
+nav:
+  - Home: index.md
+  - Architecture: architecture/
+  - API reference: api/
+  - Operations: operations/
+  - Decision Archive: archive/
+  - What's New: whats-new.md

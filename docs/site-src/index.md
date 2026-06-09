@@ -8,6 +8,7 @@ hide:
 
 Pick a section to get started.
 
+<!-- docs-agent:overview:start -->
 <div class="grid cards" markdown>
 
 -   __Architecture__
@@ -31,3 +32,4 @@ Pick a section to get started.
     [Open →](whats-new.md)
 
 </div>
+<!-- docs-agent:overview:end -->

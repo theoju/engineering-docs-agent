@@ -1,11 +1,13 @@
 # Plans archive
 
-_Auto-generated; 52 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 54 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
 ## 2026-06
 
 | Title | Status | Summary |
 |---|---|---|
+| [CCE-106 — Section Overviews, Rich Home, repo_url + Root literate-nav SUMMARY Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-06-08-cce106-section-overviews-and-rich-home.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
+| [CCE-105 — API Reference Grouping + Contracts Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-06-08-cce105-api-grouping-and-contracts.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-77 — Narrow `/ship` Guardrails `-f` Token Check Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-06-04-cce77-ship-guardrails-fix.md) | — | > **Status (2026-06-04):** CCE-77 shipped a minimal **v1 glob-based** fix (token-boundary `" $CMD " == *" -f "*` gated b… |
 | [CCE-77 / CCE-80 Cycle Hygiene Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-06-04-cce77-cycle-hygiene-plan.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [Meta-Orchestrator Follow-Up Chain Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-06-03-meta-orchestrator-followup-chain-plan.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowe… |

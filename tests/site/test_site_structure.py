@@ -173,6 +173,24 @@ def test_rendered_gen_ref_groups_nav(tmp_path: Path, monkeypatch):
     assert not any("_private" in "".join(k) for k in nav)  # excluded
 
 
+def test_render_mkdocs_yaml_includes_repo_url_when_given():
+    out = site_structure.render_mkdocs_yaml(
+        SITE,
+        site_name="X",
+        python_detected=False,
+        repo_url="https://github.com/o/n",
+        edit_uri="edit/main/docs/site-src/",
+    )
+    assert "repo_url: https://github.com/o/n" in out
+    assert "edit_uri: edit/main/docs/site-src/" in out
+
+
+def test_render_mkdocs_yaml_omits_repo_url_when_absent():
+    out = site_structure.render_mkdocs_yaml(SITE, site_name="X", python_detected=False)
+    assert "repo_url:" not in out
+    assert "edit_uri:" not in out
+
+
 def test_render_home_has_author_zone_and_empty_markers():
     out = site_structure.render_home(SITE)
     assert "docs-agent:overview:start" in out

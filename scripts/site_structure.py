@@ -14,6 +14,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import setup_discover
 from managed_block import END as _OVERVIEW_END
 from managed_block import START as _OVERVIEW_START
 
@@ -147,7 +148,7 @@ _MKDOCS_TEMPLATE = """\
 site_name: {site_name}
 docs_dir: {docs_dir}
 site_dir: site
-
+{repo_block}
 theme:
   name: {theme}
   features:
@@ -255,17 +256,26 @@ def render_mkdocs_yaml(
     python_detected: bool,
     python_path_root: str | None = None,
     openapi_enabled: bool = False,
+    repo_url: str | None = None,
+    edit_uri: str | None = None,
 ) -> str:
     plugins = ""
     if python_detected:
         plugins += _python_plugins_block(python_path_root or ".")
     if openapi_enabled:
         plugins += _RENDER_SWAGGER_PLUGIN
+    repo_lines = ""
+    if repo_url:
+        # URLs and URI paths are safe YAML bare scalars; no quoting needed.
+        repo_lines = f"repo_url: {repo_url}\n"
+        if edit_uri:
+            repo_lines += f"edit_uri: {edit_uri}\n"
     return _MKDOCS_TEMPLATE.format(
         site_name=_yaml_scalar(site_name),
         docs_dir=site["docs_dir"].rstrip("/"),
         theme=site.get("theme", "material"),
         mkdocstrings_plugin=plugins,
+        repo_block=repo_lines,
     )
 
 
@@ -287,6 +297,12 @@ def apply_scaffold(
     created: list[str] = []
     skipped: list[str] = []
 
+    origin = setup_discover.discover_git_origin(repo_root)
+    repo_url = edit_uri = None
+    if origin:
+        repo_url = f"https://github.com/{origin['owner']}/{origin['repo']}"
+        edit_uri = f"edit/main/{site['docs_dir'].rstrip('/')}/"
+
     planned = list(plan_scaffold(site))
     planned.append(
         ScaffoldFile(
@@ -297,6 +313,8 @@ def apply_scaffold(
                 python_detected=python_detected,
                 python_path_root=python_path_root,
                 openapi_enabled=bool(openapi_path),
+                repo_url=repo_url,
+                edit_uri=edit_uri,
             ),
             "mkdocs",
         )

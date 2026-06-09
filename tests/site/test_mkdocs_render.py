@@ -13,13 +13,14 @@ import site_structure  # noqa: E402
 SITE = {"docs_dir": "docs/site-src", "theme": "material", "sections": []}
 
 
-def test_mkdocs_yaml_has_material_and_awesome_pages():
+def test_mkdocs_yaml_has_material_and_literate_nav():
     out = site_structure.render_mkdocs_yaml(
         SITE, site_name="Demo", python_detected=False
     )
     assert "name: material" in out
     assert "navigation.sections" in out
-    assert "awesome-pages" in out
+    assert "literate-nav" in out
+    assert "awesome-pages" not in out
     assert "docs_dir: docs/site-src" in out
     # the mermaid custom fence python tag must be present verbatim
     assert "!!python/name:pymdownx.superfences.fence_code_format" in out
@@ -61,7 +62,8 @@ def test_mkdocs_yaml_is_parseable_yaml():
         plugins = [
             list(p.keys())[0] if isinstance(p, dict) else p for p in loaded["plugins"]
         ]
-        assert "search" in plugins and "awesome-pages" in plugins
+        assert "search" in plugins and "literate-nav" in plugins
+        assert "awesome-pages" not in plugins
         assert ("mkdocstrings" in plugins) is python_detected
 
 

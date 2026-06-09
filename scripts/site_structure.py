@@ -162,7 +162,8 @@ theme:
 
 plugins:
   - search
-  - awesome-pages
+  - literate-nav:
+      nav_file: SUMMARY.md
 {mkdocstrings_plugin}
 markdown_extensions:
   - admonition
@@ -236,8 +237,6 @@ def _python_plugins_block(path_root: str) -> str:
         "  - gen-files:\n"
         "      scripts:\n"
         "        - gen_ref_pages.py\n"
-        "  - literate-nav:\n"
-        "      nav_file: SUMMARY.md\n"
         "  - mkdocstrings:\n"
         "      handlers:\n"
         "        python:\n"

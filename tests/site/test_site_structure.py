@@ -212,3 +212,22 @@ def test_rendered_gen_ref_flat_when_no_groups(tmp_path: Path, monkeypatch):
     nav = _exec_gen_ref(rendered, tmp_path, monkeypatch)
     assert ("archive_indexes",) in nav  # flat key, no group prefix
     assert ("lint", "lint_runner") in nav
+
+
+def test_mkdocs_yaml_drops_awesome_pages():
+    out = site_structure.render_mkdocs_yaml(SITE, site_name="X", python_detected=False)
+    assert "awesome-pages" not in out
+
+
+def test_mkdocs_yaml_has_literate_nav_even_without_python():
+    out = site_structure.render_mkdocs_yaml(SITE, site_name="X", python_detected=False)
+    assert "literate-nav" in out
+    assert "nav_file: SUMMARY.md" in out
+
+
+def test_mkdocs_yaml_python_still_has_gen_files_and_mkdocstrings():
+    out = site_structure.render_mkdocs_yaml(
+        SITE, site_name="X", python_detected=True, python_path_root="."
+    )
+    assert "gen-files" in out and "mkdocstrings" in out
+    assert out.count("literate-nav") == 1  # not duplicated

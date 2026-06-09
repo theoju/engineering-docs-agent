@@ -42,6 +42,22 @@ def test_render_directory_overview_empty_is_no_pages():
     assert body.strip() == "_No pages yet._"
 
 
+def test_render_directory_overview_singular_page_grammar():
+    body = so.render_directory_overview([("Routing", "x.")])
+    assert "1 page" in body
+    assert "1 pages" not in body
+
+
+def test_render_api_overview_explicit_other_group_not_duplicated():
+    # An operator-declared group literally named "Other" must not collide with
+    # the implicit unmatched bucket into two lines / a double-counted total.
+    groups = [{"name": "Other", "modules": ["pkg.calc"]}]
+    body = so.render_api_overview(
+        idents=["pkg.calc", "pkg.util"], groups=groups, contract_links=[]
+    )
+    assert body.count("**Other**") == 1
+
+
 def test_generate_overviews_directory_section(tmp_path):
     site = _dir_site()
     _seed_landing(

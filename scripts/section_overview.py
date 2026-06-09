@@ -41,7 +41,7 @@ def render_directory_overview(children: list[tuple[str, str]]) -> str:
     for title, summary in children:
         lines.append(f"- **{title}** — {summary}" if summary else f"- **{title}**")
     lines.append("")
-    lines.append(f"_{len(children)} pages · regenerated nightly_")
+    lines.append(f"_{_plural(len(children), 'page')} · regenerated nightly_")
     return "\n".join(lines)
 
 
@@ -99,7 +99,12 @@ def render_api_overview(
         for ident in idents:
             name = site_structure.assign_group(ident, groups) or "Other"
             counts[name] = counts.get(name, 0) + 1
-        order = [g["name"] for g in groups] + ["Other"]
+        # "Other" is the implicit unmatched bucket; only append it when no
+        # operator-declared group already carries that name, so a collision
+        # renders one merged line, not a duplicated/double-counted pair.
+        order = [g["name"] for g in groups]
+        if "Other" not in order:
+            order.append("Other")
         lines.append("**Components**")
         lines.append("")
         for name in order:

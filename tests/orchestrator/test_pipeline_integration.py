@@ -1003,7 +1003,7 @@ site:
 """
 
 
-def test_decision_target_routed_to_archive(tmp_path):
+def test_decision_target_routed_to_archive(tmp_path, monkeypatch):
     import importlib
     import json
     import subprocess
@@ -1012,6 +1012,20 @@ def test_decision_target_routed_to_archive(tmp_path):
     import orchestrator_runner as runner
 
     importlib.reload(runner)
+
+    # Spy on the page-author dispatch so we can assert doc_kind is injected
+    # into the frontmatter_template (the secondary spec requirement; the dry-run
+    # write path uses default_frontmatter_text(), so the template only surfaces
+    # in the dispatch payload, not in the written file).
+    page_author_payloads: list[dict] = []
+    real_dispatch = runner.dispatch_subagent
+
+    def spying(name, inputs, *, dry_run_dir, cwd=None, out_reasons=None):
+        if name == "page-author":
+            page_author_payloads.append(inputs)
+        return real_dispatch(
+            name, inputs, dry_run_dir=dry_run_dir, cwd=cwd, out_reasons=out_reasons
+        )
 
     eda = tmp_path / ".engineering-docs-agent"
     eda.mkdir(parents=True)
@@ -1040,8 +1054,18 @@ def test_decision_target_routed_to_archive(tmp_path):
         check=True,
     )
 
+    monkeypatch.setattr(runner, "dispatch_subagent", spying)
     runner.run(tmp_path, dry_run_dir=FAKES_ROUTING, no_pr=True)
 
     # The decision-kind create target must land under archive/, not architecture/.
     assert (tmp_path / "docs/site-src/archive/root-cause-sweep.md").exists()
     assert not (tmp_path / "docs/site-src/architecture/root-cause-sweep.md").exists()
+
+    # doc_kind must be injected into the page-author frontmatter_template.
+    routed = [
+        p
+        for p in page_author_payloads
+        if str(p.get("target_path", "")).endswith("archive/root-cause-sweep.md")
+    ]
+    assert routed, "expected a page-author dispatch for the routed archive page"
+    assert routed[0]["frontmatter_template"].get("doc_kind") == "decision"

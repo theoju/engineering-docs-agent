@@ -1,0 +1,88 @@
+# Release & Rollback Runbook
+
+Version-agnostic operational guide for cutting, validating, rolling back, and
+recovering a release of the engineering-docs-agent plugin. Examples use `v0.5.0`
+(cut 2026-06-04) as the worked case.
+
+For the one-time CCE-80 host-migration steps, see
+[`cce80-host-migration.md`](cce80-host-migration.md).
+
+## The two release clocks
+
+Cutting a release starts two independent clocks. Operators repeatedly conflate
+them — do not. "The release passed" (Clock 1) does not mean "the hosts have it"
+(Clock 2).
+
+| Clock                      | What you are waiting on                                                | Typical duration                 | How to check                                                                   |
+| -------------------------- | ---------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------ |
+| **1 — release validation** | `release.yml` live-tests run after the tag is pushed                   | ~5–10 min                        | `gh run watch --workflow release.yml`                                          |
+| **2 — host pickup**        | Tag-pinned host repos pull the new ref on their next nightly cron tick | up to ~24h (next 07:07 UTC tick) | `gh run list --repo theoju/<host> --workflow docs-agent-nightly.yml --limit 1` |
+
+Notes:
+
+- **Clock 2 is daily, not hourly.** The nightly cron is `7 7 * * *` (07:07 UTC) in
+  `templates/workflow-run.yml`. A host pinned to a tag (the default `ref:` in
+  `templates/workflow-run.yml`) does not pick up a new release until the next 07:07
+  UTC tick — worst case ~24h after the tag is cut.
+- **Main-tracking hosts skip Clock 2's tag dependency.** A host installed via
+  `claude plugin update` (main-tracking, not tag-pinned) picks up `main` on its next
+  nightly with no tag wait.
+
+**Worked example — v0.5.0:**
+
+- Tag pushed `2026-06-04T15:33Z`; `release.yml` went green ~30s later — Clock 1
+  closed in under a minute on that cut (the ~5–10 min figure is the upper bound when
+  the live-tests exercise the full matrix).
+- Tag-pinned hosts became eligible at the next 07:07 UTC tick — Clock 2.
+
+## Rollback playbook
+
+Use when a cut release is bad enough that hosts must not pick it up.
+
+### Decide first: roll back vs. cut a forward patch
+
+| Situation                                                                 | Action                                                                                          |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Tag is broken and **no host has picked it up yet** (still within Clock 2) | **Roll back** — delete the tag before the next 07:07 UTC tick.                                  |
+| Hosts have **already** picked it up, or the fix is small                  | **Cut a forward patch** (e.g. `v0.5.1`). Rolling back a consumed tag strands hosts mid-version. |
+
+### Roll back a tag
+
+```bash
+gh release delete <tag> --cleanup-tag --yes   # e.g. gh release delete v0.5.0 --cleanup-tag --yes
+gh release view <tag> || echo "confirmed deleted"  # deleted: exits non-zero, "release not found" on stderr
+```
+
+`--cleanup-tag` deletes the underlying git tag as well as the GitHub release; `--yes`
+skips the confirmation prompt.
+
+### Post-rollback hygiene
+
+- **Main-tracking hosts** self-heal: their next nightly pulls `main`, which no longer
+  references the deleted tag. No action needed.
+- **Tag-pinned hosts** need a **downgrade PR** re-pinning `ref:` in their
+  `.github/workflows/docs-agent-nightly.yml` to the prior good tag. Until that lands,
+  their plugin-vendoring checkout step fails (the tag is gone).
+- **Post a comment on the closing Jira ticket** recording the rollback and the reason.
+
+## Tag-cut-misfire recovery
+
+The misfire: `gh release create` **succeeds**, but `release.yml` then **fails** (for
+example, live-tests red). The tag exists; the release is unvalidated.
+
+Real precedent: the 2026-05-27 misfire during the PR #43 release attempt — its merge
+triggered a `release.yml` run that failed this way. (v0.5.0 itself did not — its run
+was green ~30s after the tag.)
+
+Recovery:
+
+1. **Leave the tag in place.** Do not reflexively delete it — deleting mid-validation
+   destroys the audit trail and confuses any host that already polled.
+2. **Post the partial state on the closing Jira ticket:** "Tag `<tag>` cut at
+   `<time>`; `release.yml` run `<id>` failed at `<step>`. Validation incomplete." This
+   leaves the next triager a visible breadcrumb on a still-open concern.
+3. **Decide by severity:**
+   - Live-tests red for an **environmental/flaky** reason → re-run `release.yml`
+     (`gh run rerun <id>`); no new tag needed.
+   - Live-tests red for a **real defect** → cut a forward patch with the fix
+     (`v0.5.1`), or roll back per the playbook above if no host has picked up yet.

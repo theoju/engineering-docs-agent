@@ -2,18 +2,49 @@
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-06-09
+
+Consolidates the 20 changes merged since v0.5.0 (CCE-66, CCE-83, CCE-86, CCE-89 through CCE-108). The headline is the structured docs-site upgrade — a config-driven `site:` block with deterministic generators, a service/component-grouped API reference backed by JSON-Schema contracts, per-section overview pages, a richer home page, and freshness-sorted architecture/archive routing. Alongside: the SDD fidelity verification ladder, Jira auto-transition on merge, and the docs-agent nightly cadence controls. No breaking changes to the host config surface; existing `.engineering-docs-agent/config.yml` files continue to load.
+
 ### Added
 
+- **Config-driven `site:` block + deterministic generators.** The setup skill and orchestrator now read a `site:` config block (`sources`, `extractors`, `docs_dir`) and run deterministic page generators wired end-to-end into scaffolding and the nightly run. Generic-first: hosts without the convention skip cleanly. Tracker: CCE-104.
+- **Grouped API reference with JSON-Schema contracts.** The API reference groups entries by service/component instead of a flat list, and each subagent contract is backed by a JSON Schema in `agents/schemas/`. Tracker: CCE-105.
+- **Section overviews, rich home page, and repo-URL linking.** Each published section gets an auto-generated overview index; the home page surfaces GitHub integration and recent activity; source links resolve against a configured/derived repo URL base; the API reference is grouped in the nav. Tracker: CCE-106.
+- **Architecture-index freshness sort + architecture-vs-archive routing.** Decision-kind `create` pages route deterministically to the archive section; architecture indexes sort newest-first. Tracker: CCE-107.
+- **SDD fidelity verification ladder.** A declare-then-discharge gate (Tier 0 git baseline diff, Tier 1 consumer-tool run, Tier 2 red/green, plus a reviewer gate) that verifies subagent self-reports against external authority. Canonical doc + dependency-injected reference implementation under `docs/superpowers/templates/`. Tracker: CCE-92 (pattern: CCE-93/CCE-94).
+- **Jira auto-transition on PR merge.** A merged CCE PR transitions its Jira issue(s) to Done via `.github/workflows/jira-transition.yml`; the PR title is the single source of truth for keys. Comments-then-transitions, fails loud, dry-run via `workflow_dispatch`. Repo-local hygiene (not scaffolded onto hosts). Tracker: CCE-103.
+- **In-repo branch-prune helper.** `scripts/prune_merged_branches.py` removes local `[gone]` refs and `worktree-*` orphans left after `gh pr merge --delete-branch`; dry-run by default. Tracker: CCE-90.
 - **docs-agent PR-body enrichment.** Nightly PRs now render a review-window header (baseline → current head SHA), file count by lens (with `other` bucket for non-lens paths), top-5 changed pages with `(+M more)` truncation, and an inline `partial_reasons` digest when the run is partial. Operators can review a nightly in <60s without opening the diff. The composer is pure (`_compose_pr_body`); back-compat preserved via optional kwargs with safe defaults. Tracker: CCE-89 D1.
 - **docs-agent auto-close-stale policy ("freshest-only").** After a new nightly opens its PR, the orchestrator walks open `docs-agent/*` PRs and closes each one authored entirely by the bot with the comment `Auto-closing: superseded by #<new> (docs-agent freshest-only policy)`. PRs with any human-authored commit are left open for human resolution. Prevents the stale-PR pileup that accumulated 2026-05-30 to 2026-06-01 (6 PRs against a single stale baseline). All hygiene reasons are `info_only=True` — D2 failures cannot flip the run to partial. Tracker: CCE-89 D2.
 
 ### Changed
 
 - **docs-agent nightly cron unpaused.** The `07:07 UTC` schedule is restored on `.github/workflows/docs-agent-nightly.yml` now that D1 + D2 provide the cadence floor. D3 (merge-gate decision: auto-merge vs operator-promote vs hybrid) remains open as a separate ticket; until it lands, the operator promotes each morning's PR manually after the enriched body provides the review signal. Tracker: CCE-89.
+- **`archive_indexes.find_archive_section` promoted to public API.** The cross-capability section-lookup helper is now public (was `_find_archive_section`); `doc_routing` consumes it without reaching into a private name. Both callers updated atomically. Tracker: CCE-108.
+- **CI / process hygiene.** Narrowed `docs.yml` paths and added docstring lint as part of the CCE-77/CCE-80 cycle cleanup; paused-then-archived 6 stale docs-agent PRs and codified the freshest-only cadence invariant. Trackers: CCE-77/CCE-80, CCE-89.
 
 ### Fixed
 
 - **diagram-gate required-check deadlock on non-docs PRs.** Removed the workflow-level `paths:` filter from `.github/workflows/docs.yml` and replaced it with an in-job `filter` step that diffs against the PR base / push parent and gates the expensive Playwright/mkdocs steps on a `relevant` output. Without this, GitHub skipped the workflow entirely on PRs that didn't touch the listed paths — the `diagram-gate` required status check never reported, and `mergeStateStatus` stayed BLOCKED forever (originating incident: PR #108). Same invariant as `actionlint.yml` (CCE-59): required status checks must never carry a workflow-level paths filter. Tracker: CCE-91.
+
+### Docs
+
+- **Release & rollback runbook.** New `docs/runbooks/release-and-rollback.md` (two-clock SLA, rollback playbook, tag-cut-misfire recovery) plus a CHANGELOG-as-release-artifact step and cross-link in the CCE-80 runbook. Tracker: CCE-86.
+- **Plan-verification + meta-orchestrator conventions.** Plan steps must verify with the real consumer tool (not `test -f`); the meta-orchestrator spec and the Phase 4 closeout are documented. Trackers: CCE-83, CCE-66.
+
+## [0.5.0] — 2026-06-04
+
+Synchronizes `templates/workflow-run.yml` with the live dogfood nightly workflow, absorbing 16 stale divergences accumulated since the template was last touched (CCE-39 / 41 / 45 / 49 / 53 / 66 / 73). Hosts onboarded via the setup skill now receive a parity-checked workflow with App-token plumbing, OAuth pre-flight assertions, forensics upload, run-summary writer, partial-reasons stderr echo, and a per-host deterministic cron.
+
+### Added
+
+- **Deterministic per-host cron rewriter.** `scripts/scaffold_workflow.py` computes `sha256(owner/repo) % 51 + 5`, so re-scaffolding the same host always produces the same cron minute (no operator-visible diff churn). Invoked by the setup skill's step 6b.
+- **Workflow parity tests.** `tests/templates/test_workflow_run_parity.py` — 8 structural parity tests comparing against the live dogfood workflow via `ruamel.yaml` (guards against PyYAML's `on:` key collapse).
+- **Host-migration runbook + provisioning matrix.** `docs/runbooks/cce80-host-migration.md` and the `setup-guide.md` provisioning matrix (all 7 vars/secrets). `CONTRIBUTING.md` codifies the dogfood↔template parity gate and release-tagging cadence.
+
+### Fixed
+
 - **Pages bootstrap on first host deploy.** Replaced `actions/configure-pages@v6 enablement: true` (a no-op on first deploy because the workflow's `GITHUB_TOKEN` lacks admin scope) with a setup-time `gh api -X POST repos/.../pages -f build_type=workflow` call from the new `scripts/enable_pages.py`. The setup skill's step 6c invokes it after writing the docs-pages workflow. Graceful fallback on all error paths — scaffolding never blocks on Pages bootstrap. Originating incident: `theoju/claude-code-self-assessment` PR #121 / CCE-81. Tracker: CCE-82.
 
 ## [0.2.0] — 2026-05-27

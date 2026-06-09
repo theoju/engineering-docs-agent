@@ -34,11 +34,16 @@ def test_plan_scaffold_home_has_managed_block():
     assert "docs-agent:overview:end" in content
 
 
-def test_home_links_resolve_to_md_targets():
-    # Directory sections link to <dir>/index.md (mkdocs-validatable under
-    # --strict); single-page sections link to their .md path directly.
-    # These links are now generated inside the managed block by generate_overviews;
-    # render_home itself just emits the empty marker pair.
+def test_home_links_resolve_to_md_targets(tmp_path):
+    # The home section directory (now generated INTO the managed block by
+    # generate_overviews) must resolve directory sections to <dir>/index.md
+    # (mkdocs --strict-validatable) and single-page sections to their .md path
+    # directly (NOT <page>.md/index.md). This coverage moved out of render_home
+    # when the cards moved into the generator — it is verified here against the
+    # real generator output.
+    import managed_block as mb
+    import section_overview
+
     site = {
         "docs_dir": "docs/site-src",
         "sections": [
@@ -47,7 +52,11 @@ def test_home_links_resolve_to_md_targets():
             {"key": "whats-new", "path": "whats-new.md", "title": "What's New"},
         ],
     }
-    home = site_structure.render_home(site)
-    # The stub only contains the markers; link targets are injected by the generator.
-    assert "docs-agent:overview:start" in home
-    assert "docs-agent:overview:end" in home
+    home = tmp_path / "docs/site-src/index.md"
+    home.parent.mkdir(parents=True, exist_ok=True)
+    home.write_text(f"# Documentation\n\n{mb.START}\n{mb.END}\n", encoding="utf-8")
+    section_overview.generate_overviews(tmp_path, site)
+    out = home.read_text(encoding="utf-8")
+    assert "](api/index.md)" in out  # directory section -> index.md
+    assert "](whats-new.md)" in out  # single-page section -> direct .md
+    assert "](whats-new.md/index.md)" not in out

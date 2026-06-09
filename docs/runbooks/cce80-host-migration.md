@@ -19,7 +19,20 @@ Run this for each host repo currently onboarded to engineering-docs-agent
 
 The plugin checkout in `templates/workflow-run.yml` pins `ref: v0.5.0`.
 Hosts re-scaffolded BEFORE the tag exists will fail at the plugin-vendoring
-checkout step. PR author cuts the tag within 5 minutes of merge:
+checkout step.
+
+First, update the CHANGELOG — it is a release-day artifact, not an afterthought.
+Add the entry to `CHANGELOG.md` and commit it on `main` via the release PR so the
+tag captures it:
+
+```
+## [0.5.0] — 2026-06-04
+### Changed
+- CCE-80: template/workflow-run.yml parity refresh (OAuth assert, forensics
+  upload, run-summary, partial-reasons steps).
+```
+
+Then the PR author cuts the tag within 5 minutes of merge:
 
 ```bash
 gh release create v0.5.0 \
@@ -30,6 +43,10 @@ gh release view v0.5.0  # verify
 ```
 
 Do not begin per-host migration until `gh release view v0.5.0` succeeds.
+
+> **If this release goes bad** — rolling back the tag, the two release clocks
+> (validation vs ~24h host pickup), and tag-cut-misfire recovery — see
+> [`release-and-rollback.md`](release-and-rollback.md).
 
 ## Per-host: ADIS, CCSA, data-importer (in this order)
 

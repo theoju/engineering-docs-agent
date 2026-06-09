@@ -80,3 +80,22 @@ def test_render_strips_inline_links_from_title():
     )
     assert "other.md" not in out
     assert "Adopt thing now" in out
+
+
+def test_find_archive_section_returns_section_by_generator_marker():
+    # CCE-108: the helper is public (no underscore) — it is a cross-capability
+    # contract consumed by doc_routing, so it must be a public name.
+    site = {
+        "sections": [
+            {"key": "architecture", "generator": "agent-authored"},
+            {"key": "archive", "path": "archive/", "generator": "archive-index"},
+        ]
+    }
+    section = archive_indexes.find_archive_section(site)
+    assert section is not None
+    assert section["key"] == "archive"
+
+
+def test_find_archive_section_returns_none_when_no_archive_index_section():
+    assert archive_indexes.find_archive_section({"sections": []}) is None
+    assert archive_indexes.find_archive_section({}) is None

@@ -13,27 +13,36 @@ Cutting a release starts two independent clocks. Operators repeatedly conflate
 them — do not. "The release passed" (Clock 1) does not mean "the hosts have it"
 (Clock 2).
 
-| Clock                      | What you are waiting on                                                | Typical duration                 | How to check                                                                   |
-| -------------------------- | ---------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------ |
-| **1 — release validation** | `release.yml` live-tests run after the tag is pushed                   | ~5–10 min                        | `gh run watch --workflow release.yml`                                          |
-| **2 — host pickup**        | Tag-pinned host repos pull the new ref on their next nightly cron tick | up to ~24h (next 07:07 UTC tick) | `gh run list --repo theoju/<host> --workflow docs-agent-nightly.yml --limit 1` |
+| Clock                      | What you are waiting on                                                                                                    | Typical duration                   | How to check                                                                   |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------ |
+| **1 — release validation** | `release.yml` live-tests run after the tag is pushed                                                                       | ~5–10 min                          | `gh run watch --workflow release.yml`                                          |
+| **2 — host pickup**        | Hosts run the new code on their next nightly tick — automatically if main-tracking, only after a pin-bump PR if tag-pinned | up to ~24h once the ref is current | `gh run list --repo theoju/<host> --workflow docs-agent-nightly.yml --limit 1` |
 
 Notes:
 
+- **A tag-pinned host does NOT auto-upgrade.** Its plugin checkout is frozen at
+  whatever `ref: vX.Y.Z` its `.github/workflows/docs-agent-nightly.yml` carries (the
+  template default in `templates/workflow-run.yml` is a pinned tag). It keeps running
+  that version every nightly until someone merges a **pin-bump PR** changing `ref:` to
+  the new tag. The cron only governs _when_ an already-current pin runs — it never
+  changes the pin. So for a tag-pinned host, Clock 2 = pin-bump PR + the next 07:07 UTC
+  tick, not the tick alone.
+- **A main-tracking host auto-upgrades.** A host whose checkout uses `ref: main` (or
+  that was installed via `claude plugin update`) picks up the latest `main` commit on
+  its next nightly with no pin change — Clock 2 is then purely the cron wait. The
+  currently-onboarded hosts (`advanced-data-import-system`, `claude-code-self-assessment`)
+  are configured this way, so they pick up a release automatically once it lands on `main`.
 - **Clock 2 is daily, not hourly.** The nightly cron is `7 7 * * *` (07:07 UTC) in
-  `templates/workflow-run.yml`. A host pinned to a tag (the default `ref:` in
-  `templates/workflow-run.yml`) does not pick up a new release until the next 07:07
-  UTC tick — worst case ~24h after the tag is cut.
-- **Main-tracking hosts skip Clock 2's tag dependency.** A host installed via
-  `claude plugin update` (main-tracking, not tag-pinned) picks up `main` on its next
-  nightly with no tag wait.
+  `templates/workflow-run.yml` — worst case ~24h from a current ref to the run.
 
 **Worked example — v0.5.0:**
 
 - Tag pushed `2026-06-04T15:33Z`; `release.yml` went green ~30s later — Clock 1
   closed in under a minute on that cut (the ~5–10 min figure is the upper bound when
   the live-tests exercise the full matrix).
-- Tag-pinned hosts became eligible at the next 07:07 UTC tick — Clock 2.
+- The onboarded hosts track `main`, so they picked up the released commit at the next
+  07:07 UTC tick — Clock 2. (A tag-pinned host would instead have needed a pin-bump PR
+  to `v0.5.0` first.)
 
 ## Rollback playbook
 

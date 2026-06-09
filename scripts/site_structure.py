@@ -8,9 +8,34 @@ clobbers existing (authored) content.
 
 from __future__ import annotations
 
+import fnmatch
+import inspect
 import json
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def assign_group(ident: str, groups: list) -> str:
+    """Return the name of the first group whose module glob matches ``ident``,
+    else "Other". An empty ``groups`` returns "" so the caller keeps the flat
+    nav. Globs match against both the dotted ident ("a.b") and its path form
+    ("a/b"), so a "lint/*" pattern matches a "lint.lint_runner" module.
+
+    This function is embedded verbatim into the generated gen_ref_pages.py
+    (see _GEN_REF_TEMPLATE) via inspect.getsource -- keep it self-contained:
+    use only the stdlib ``fnmatch`` imported at the template's top, and no
+    brace literals (so str.format on the template is safe).
+    """
+    if not groups:
+        return ""
+    path_form = ident.replace(".", "/")
+    for group in groups:
+        for pattern in group.get("modules", []):
+            if fnmatch.fnmatchcase(ident, pattern) or fnmatch.fnmatchcase(
+                path_form, pattern
+            ):
+                return group["name"]
+    return "Other"
 
 
 @dataclass(frozen=True)

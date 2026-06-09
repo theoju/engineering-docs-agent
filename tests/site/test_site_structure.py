@@ -94,3 +94,27 @@ def test_title_with_colon_produces_parseable_yaml():
     # root .pages must parse (nav is a list of single-key maps)
     root = yaml.safe_load(files["docs/site-src/.pages"].content)
     assert root["nav"] == [{"API: Reference Guide": "api"}]
+
+
+_GROUPS = [
+    {"name": "Generators", "modules": ["archive_indexes", "contracts_doc"]},
+    {"name": "Lint", "modules": ["lint/*"]},
+]
+
+
+def test_assign_group_first_match_wins():
+    assert site_structure.assign_group("archive_indexes", _GROUPS) == "Generators"
+
+
+def test_assign_group_glob_matches_path_form():
+    # a "lint/*" glob must match the dotted ident "lint.lint_runner"
+    assert site_structure.assign_group("lint.lint_runner", _GROUPS) == "Lint"
+
+
+def test_assign_group_unmatched_is_other():
+    assert site_structure.assign_group("gh_client", _GROUPS) == "Other"
+
+
+def test_assign_group_empty_groups_is_flat_sentinel():
+    # no groups -> "" so the caller keeps the flat nav
+    assert site_structure.assign_group("anything", []) == ""

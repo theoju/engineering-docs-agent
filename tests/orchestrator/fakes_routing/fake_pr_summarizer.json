@@ -1,0 +1,15 @@
+{
+  "pr_number": 1,
+  "what_changed": "Root-cause sweep",
+  "why": "Parsing failed",
+  "breaking": false,
+  "doc_targets": [
+    {
+      "lens": "core",
+      "action": "create",
+      "page_hint": "architecture/root-cause-sweep.md",
+      "doc_kind": "decision"
+    }
+  ],
+  "notes": null
+}

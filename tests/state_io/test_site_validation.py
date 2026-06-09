@@ -204,3 +204,25 @@ site:
 """,
             )
         )
+
+
+def test_api_duplicate_group_names_rejected(tmp_path: Path):
+    with pytest.raises(ConfigError, match="duplicate group name"):
+        load_config_validated(
+            _write(
+                tmp_path,
+                """
+site:
+  docs_dir: docs/site-src
+  sections:
+    - key: api
+      path: api/
+      title: API reference
+      generator: api-extract
+      extractors: [python-mkdocstrings]
+      groups:
+        - { name: Core, modules: [state_io] }
+        - { name: Core, modules: [contracts] }
+""",
+            )
+        )

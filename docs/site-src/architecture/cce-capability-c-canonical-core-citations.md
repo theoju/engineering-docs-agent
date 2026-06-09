@@ -1,19 +1,20 @@
 ---
-description: How the engineering-docs-agent links documentation pages to their
-  source files through inline citations, pin tokens, and source-drift detection.
+description: How the engineering-docs-agent links documentation pages to their source
+  files through inline citations, pin tokens, and source-drift detection.
 source_files:
-  - backend/connectors/base.py
-  - core/**
-  - docs/site-src/core/**
-  - docs/superpowers/**
-  - scripts/audit_docs.py
-  - scripts/verify_citations.py
-  - scripts/verify_docs_diagrams.py
-  - scripts/{verify_docs_diagrams,audit_docs,build_doc_source_map}.py
-  - site-src/core/**
-  - tests/orchestrator/test_source_map_stage.py
-last_reviewed: "2026-05-27"
+- backend/connectors/base.py
+- core/**
+- docs/site-src/core/**
+- docs/superpowers/**
+- scripts/audit_docs.py
+- scripts/verify_citations.py
+- scripts/verify_docs_diagrams.py
+- scripts/{verify_docs_diagrams,audit_docs,build_doc_source_map}.py
+- site-src/core/**
+- tests/orchestrator/test_source_map_stage.py
+last_reviewed: '2026-05-27'
 status: draft
+doc_kind: architecture
 ---
 
 # Capability C — Canonical Core Citations

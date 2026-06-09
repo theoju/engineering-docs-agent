@@ -1,12 +1,17 @@
 ---
-description: Roadmap and preparation summary for the CCE-5 through CCE-9 batch — orchestrator hardening, state I/O validation, test harness foundation, and v0.1.0 release prep.
+description: "Roadmap and preparation summary for the CCE-5 through CCE-9 batch \u2014\
+  \ orchestrator hardening, state I/O validation, test harness foundation, and v0.1.0\
+  \ release prep."
 source_files:
-  - release/*
-  - scripts/orchestrator_runner.py
-  - scripts/state_io.py
-  - tests/conftest.py
-last_reviewed: "2026-05-28"
+- release/*
+- scripts/orchestrator_runner.py
+- scripts/state_io.py
+- tests/conftest.py
+last_reviewed: '2026-05-28'
 status: draft
+doc_kind: decision
+sources: []
+synthesized_into: []
 ---
 
 # CCE-5 through CCE-9: Batch Prep Roadmap

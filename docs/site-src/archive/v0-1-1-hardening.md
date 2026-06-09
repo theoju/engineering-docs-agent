@@ -1,27 +1,33 @@
 ---
-description: The v0.1.1 stabilization release — tightening cross-stage typed contracts, hardening state and frontmatter I/O for malformed input, rounding out the GitHub client error paths, and completing the Tier-1 lint rule set. No new capabilities; correctness only.
+description: "The v0.1.1 stabilization release \u2014 tightening cross-stage typed\
+  \ contracts, hardening state and frontmatter I/O for malformed input, rounding out\
+  \ the GitHub client error paths, and completing the Tier-1 lint rule set. No new\
+  \ capabilities; correctness only."
 source_files:
-  - scripts/archive_indexes.py
-  - scripts/contracts.py
-  - scripts/gh_client.py
-  - scripts/lint/diagrams.py
-  - scripts/lint/duplicate_content.py
-  - scripts/lint/framework_build.py
-  - scripts/lint/lint_runner.py
-  - scripts/lint/reading_grade.py
-  - scripts/orchestrator_runner.py
-  - scripts/setup_discover.py
-  - scripts/state_io.py
-  - scripts/verify_runner.py
-  - templates/*.schema.json
-  - tests/contracts/test_contracts.py
-  - tests/contracts/test_state_io.py
-  - tests/gh/test_gh_client.py
-  - tests/orchestrator/test_pipeline_integration.py
-  - tests/orchestrator/test_verify_runner.py
-  - tests/setup/test_setup_discover.py
-last_reviewed: "2026-05-28"
+- scripts/archive_indexes.py
+- scripts/contracts.py
+- scripts/gh_client.py
+- scripts/lint/diagrams.py
+- scripts/lint/duplicate_content.py
+- scripts/lint/framework_build.py
+- scripts/lint/lint_runner.py
+- scripts/lint/reading_grade.py
+- scripts/orchestrator_runner.py
+- scripts/setup_discover.py
+- scripts/state_io.py
+- scripts/verify_runner.py
+- templates/*.schema.json
+- tests/contracts/test_contracts.py
+- tests/contracts/test_state_io.py
+- tests/gh/test_gh_client.py
+- tests/orchestrator/test_pipeline_integration.py
+- tests/orchestrator/test_verify_runner.py
+- tests/setup/test_setup_discover.py
+last_reviewed: '2026-05-28'
 status: draft
+doc_kind: decision
+sources: []
+synthesized_into: []
 ---
 
 # v0.1.1 Hardening

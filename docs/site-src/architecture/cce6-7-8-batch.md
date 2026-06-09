@@ -1,10 +1,12 @@
 ---
-description: Dispatch layer and orchestrator run-loop introduced in the CCE-6/7/8 batch
+description: Dispatch layer and orchestrator run-loop introduced in the CCE-6/7/8
+  batch
 source_files:
-  - scripts/dispatch_subagent.py
-  - scripts/orchestrator_runner.py
+- scripts/dispatch_subagent.py
+- scripts/orchestrator_runner.py
 last_reviewed: '2026-05-28'
 status: draft
+doc_kind: architecture
 ---
 
 # CCE-6 / 7 / 8 Batch: Dispatch and Orchestration Layer

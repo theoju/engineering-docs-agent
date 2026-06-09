@@ -1,14 +1,17 @@
 ---
-description: How the source-map generator and drift detector track which docs pages are affected by source-code changes, and how the orchestrator scopes citation verification using the map.
+description: How the source-map generator and drift detector track which docs pages
+  are affected by source-code changes, and how the orchestrator scopes citation verification
+  using the map.
 source_files:
-  - "**/"
-  - agents/schemas/*.json
-  - scripts/contracts.py
-  - scripts/orchestrator_runner.py
-  - scripts/source_drift.py
-  - scripts/source_map.py
+- '**/'
+- agents/schemas/*.json
+- scripts/contracts.py
+- scripts/orchestrator_runner.py
+- scripts/source_drift.py
+- scripts/source_map.py
 last_reviewed: '2026-05-27'
 status: draft
+doc_kind: architecture
 ---
 
 # Source Map and Drift Detection (CCE-23)

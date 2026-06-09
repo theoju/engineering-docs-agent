@@ -1,13 +1,19 @@
 ---
-description: "Two independent silent-failure modes in the source-collector dispatch path and their fixes — phantom schema fields (closed by `additionalProperties: false`) and explanatory-output-style hook injection (closed by `--setting-sources project,local`)."
+description: "Two independent silent-failure modes in the source-collector dispatch\
+  \ path and their fixes \u2014 phantom schema fields (closed by `additionalProperties:\
+  \ false`) and explanatory-output-style hook injection (closed by `--setting-sources\
+  \ project,local`)."
 source_files:
-  - scripts/orchestrator_runner.py
-  - tests/orchestrator/test_dispatch_rescue.py
-  - tests/orchestrator/test_dispatch_subagent.py
-  - tests/orchestrator/test_dispatch_validated.py
-  - tests/schemas/test_source_collector_schema.py
-last_reviewed: "2026-05-28"
+- scripts/orchestrator_runner.py
+- tests/orchestrator/test_dispatch_rescue.py
+- tests/orchestrator/test_dispatch_subagent.py
+- tests/orchestrator/test_dispatch_validated.py
+- tests/schemas/test_source_collector_schema.py
+last_reviewed: '2026-05-28'
 status: draft
+doc_kind: decision
+sources: []
+synthesized_into: []
 ---
 
 # CCE-15: Source Collector Root Cause Sweep

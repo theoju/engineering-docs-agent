@@ -1,11 +1,14 @@
 ---
-description: Architecture of the GitHub Pages publish target introduced in CCE-32 — workflow structure, Node 24 action pins, Jekyll bypass, and publish-verifier integration.
+description: "Architecture of the GitHub Pages publish target introduced in CCE-32\
+  \ \u2014 workflow structure, Node 24 action pins, Jekyll bypass, and publish-verifier\
+  \ integration."
 source_files:
-  - docs/superpowers/plans/*.md
-  - templates/*.yml
-  - tests/ci/test_workflow_node_runtime.py
-last_reviewed: "2026-05-28"
+- docs/superpowers/plans/*.md
+- templates/*.yml
+- tests/ci/test_workflow_node_runtime.py
+last_reviewed: '2026-05-28'
 status: draft
+doc_kind: architecture
 ---
 
 # GitHub Pages Publish Target (CCE-32)

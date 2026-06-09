@@ -1,13 +1,17 @@
 ---
-description: How the agent produces a navigable docs site by combining a per-run code-to-docs source map, frontmatter-driven archive indexes for ADRs/specs/plans, and a Mermaid render gate — each layer driven by config and detection, never by hardcoded paths.
+description: "How the agent produces a navigable docs site by combining a per-run\
+  \ code-to-docs source map, frontmatter-driven archive indexes for ADRs/specs/plans,\
+  \ and a Mermaid render gate \u2014 each layer driven by config and detection, never\
+  \ by hardcoded paths."
 source_files:
-  - agents/schemas/*.json
-  - docs/superpowers/**
-  - scripts/build_doc_source_map.py
-  - scripts/generate_archive_indexes.py
-  - scripts/verify_docs_diagrams.py
-last_reviewed: "2026-05-28"
+- agents/schemas/*.json
+- docs/superpowers/**
+- scripts/build_doc_source_map.py
+- scripts/generate_archive_indexes.py
+- scripts/verify_docs_diagrams.py
+last_reviewed: '2026-05-28'
 status: draft
+doc_kind: architecture
 ---
 
 # Structured Docs Site Generation

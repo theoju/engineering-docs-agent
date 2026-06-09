@@ -1,17 +1,20 @@
 ---
-description: How the CCE-23 API reference generation capability works — the scripts, extractors, and site build path that turn Python modules, JSON schemas, and OpenAPI specs into a published reference section.
+description: "How the CCE-23 API reference generation capability works \u2014 the\
+  \ scripts, extractors, and site build path that turn Python modules, JSON schemas,\
+  \ and OpenAPI specs into a published reference section."
 source_files:
-  - <docs_dir>/gen_ref_pages.py
-  - <import_paths>/*.py
-  - api/contracts/*.md
-  - api/reference/*.md
-  - scripts/contracts_doc.py
-  - scripts/setup_discover.py
-  - scripts/site_structure.py
-  - scripts/state_io.py
-  - tests/site/test_api_build_smoke.py
-last_reviewed: "2026-05-27"
+- <docs_dir>/gen_ref_pages.py
+- <import_paths>/*.py
+- api/contracts/*.md
+- api/reference/*.md
+- scripts/contracts_doc.py
+- scripts/setup_discover.py
+- scripts/site_structure.py
+- scripts/state_io.py
+- tests/site/test_api_build_smoke.py
+last_reviewed: '2026-05-27'
 status: draft
+doc_kind: architecture
 ---
 
 # CCE-23: API Reference Generation

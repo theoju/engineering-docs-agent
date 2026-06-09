@@ -1,17 +1,21 @@
 ---
-description: A Claude Code plugin that turns merged PRs, Jira issues, and commits into a nightly docs-update PR — seven specialized subagents handle voice-matched authoring, tiered linting, gap detection, and post-merge publish verification, running against any host repo.
+description: "A Claude Code plugin that turns merged PRs, Jira issues, and commits\
+  \ into a nightly docs-update PR \u2014 seven specialized subagents handle voice-matched\
+  \ authoring, tiered linting, gap detection, and post-merge publish verification,\
+  \ running against any host repo."
 source_files:
-  - .claude/hooks/doc_drift.py
-  - docs-agent/*
-  - docs/site-src/*
-  - docs/site-src/archive/adrs/*.md
-  - scripts/build_doc_source_map.py
-  - scripts/lint/<rule>.py
-  - scripts/lint/frontmatter_schema.py
-  - scripts/lint/lint_runner.py
-  - scripts/lint/stub_redirect.py
+- .claude/hooks/doc_drift.py
+- docs-agent/*
+- docs/site-src/*
+- docs/site-src/archive/adrs/*.md
+- scripts/build_doc_source_map.py
+- scripts/lint/<rule>.py
+- scripts/lint/frontmatter_schema.py
+- scripts/lint/lint_runner.py
+- scripts/lint/stub_redirect.py
 last_reviewed: 2026-05-28
 status: draft
+doc_kind: architecture
 ---
 
 # Engineering Docs Agent

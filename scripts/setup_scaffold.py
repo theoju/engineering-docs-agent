@@ -74,6 +74,9 @@ def main() -> int:
 
     result["contracts"] = contracts_doc.generate_contracts(args.repo_root, site)
     result["core_manifest"] = core_manifest.write_core_manifest(args.repo_root, site)
+    import section_overview  # noqa: E402 - deferred to keep top-level imports minimal
+
+    result["overviews"] = section_overview.generate_overviews(args.repo_root, site)
     print(json.dumps(result, indent=2))
     return 0
 

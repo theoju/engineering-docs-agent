@@ -974,14 +974,16 @@ def run_site_generators(repo_root: Path, config: dict, state: dict) -> dict:
     failure never blocks the nightly PR. Generated pages land under the site's
     `docs_dir` and are committed by the run's existing `git add -A`.
 
-    Returns ``{"archive": <ledger>|None, "contracts": <ledger>|None}`` (None =
-    not run / raised). Hosts with no `site:` block get all-None and fall through
-    to the caller's legacy ``regenerate()`` path.
+    Returns ``{"archive": <ledger>|None, "contracts": <ledger>|None,
+    "overviews": <ledger>|None}`` (None = not run / raised). Hosts with no
+    `site:` block get all-None and fall through to the caller's legacy
+    ``regenerate()`` path.
     """
     import archive_indexes
     import contracts_doc
+    import section_overview
 
-    result: dict = {"archive": None, "contracts": None}
+    result: dict = {"archive": None, "contracts": None, "overviews": None}
     site = config.get("site")
     if not site:
         return result
@@ -993,6 +995,10 @@ def run_site_generators(repo_root: Path, config: dict, state: dict) -> dict:
         result["contracts"] = contracts_doc.generate_contracts(repo_root, site)
     except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
         add_partial(state, f"contracts_generate_failed: {exc}", info_only=True)
+    try:
+        result["overviews"] = section_overview.generate_overviews(repo_root, site)
+    except Exception as exc:  # noqa: BLE001 - advisory stage, never block the PR
+        add_partial(state, f"overview_generate_failed: {exc}", info_only=True)
     return result
 
 

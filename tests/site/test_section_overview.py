@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import sys
 from pathlib import Path
 
@@ -225,9 +226,6 @@ def test_generate_overviews_home_without_markers_appends(tmp_path):
     assert mb.START in out and "Operations" in out
 
 
-import datetime
-
-
 def test_freshness_key_prefers_last_reviewed():
     assert so._freshness_key({"last_reviewed": "2026-05-01"}, "foo.md") == "2026-05-01"
 
@@ -250,16 +248,19 @@ def test_freshness_key_empty_when_no_date():
 
 
 def test_overview_orders_by_last_reviewed_desc(tmp_path):
+    # Filenames are ANTI-ALIGNED with freshness: alphabetically `aaa-stale` <
+    # `zzz-recent`, the OPPOSITE of the desired newest-first order. So this test
+    # fails under the old filename sort and passes only under the freshness sort.
     site = _dir_site()  # home + architecture (directory section)
     _seed_landing(tmp_path, "docs/site-src/architecture/index.md", "# Architecture\n")
     _seed_landing(
         tmp_path,
-        "docs/site-src/architecture/old.md",
+        "docs/site-src/architecture/aaa-stale.md",
         "---\nlast_reviewed: '2026-01-01'\n---\n\n# Old Page\n\nold.\n",
     )
     _seed_landing(
         tmp_path,
-        "docs/site-src/architecture/new.md",
+        "docs/site-src/architecture/zzz-recent.md",
         "---\nlast_reviewed: '2026-05-01'\n---\n\n# New Page\n\nnew.\n",
     )
     so.generate_overviews(tmp_path, site)
@@ -268,15 +269,18 @@ def test_overview_orders_by_last_reviewed_desc(tmp_path):
 
 
 def test_overview_undated_page_sinks_last(tmp_path):
+    # Anti-aligned: the dated page's filename (`zzz-dated`) sorts AFTER the
+    # undated one (`aaa-undated`), so a filename-sort regression would wrongly
+    # place undated first and fail this test.
     site = _dir_site()
     _seed_landing(tmp_path, "docs/site-src/architecture/index.md", "# Architecture\n")
     _seed_landing(
         tmp_path,
-        "docs/site-src/architecture/dated.md",
+        "docs/site-src/architecture/zzz-dated.md",
         "---\nlast_reviewed: '2026-05-01'\n---\n\n# Dated Page\n\nd.\n",
     )
     _seed_landing(
-        tmp_path, "docs/site-src/architecture/undated.md", "# Undated Page\n\nu.\n"
+        tmp_path, "docs/site-src/architecture/aaa-undated.md", "# Undated Page\n\nu.\n"
     )
     so.generate_overviews(tmp_path, site)
     out = (tmp_path / "docs/site-src/architecture/index.md").read_text()
@@ -284,10 +288,12 @@ def test_overview_undated_page_sinks_last(tmp_path):
 
 
 def test_overview_title_tiebreak_when_equal_freshness(tmp_path):
+    # Anti-aligned: filename order (`aaa` < `zzz`) is the OPPOSITE of title order
+    # (Apple < Banana), so this verifies the title tiebreak, not filename order.
     site = _dir_site()
     _seed_landing(tmp_path, "docs/site-src/architecture/index.md", "# Architecture\n")
-    _seed_landing(tmp_path, "docs/site-src/architecture/b.md", "# Banana\n\nb.\n")
-    _seed_landing(tmp_path, "docs/site-src/architecture/a.md", "# Apple\n\na.\n")
+    _seed_landing(tmp_path, "docs/site-src/architecture/aaa.md", "# Banana\n\nb.\n")
+    _seed_landing(tmp_path, "docs/site-src/architecture/zzz.md", "# Apple\n\na.\n")
     so.generate_overviews(tmp_path, site)
     out = (tmp_path / "docs/site-src/architecture/index.md").read_text()
     assert out.index("Apple") < out.index("Banana")  # both undated -> title asc

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import inspect
+import io
 import sys
+import types
 from pathlib import Path
 
 import yaml
@@ -119,11 +122,6 @@ def test_assign_group_unmatched_is_other():
 def test_assign_group_empty_groups_is_flat_sentinel():
     # no groups -> "" so the caller keeps the flat nav
     assert site_structure.assign_group("anything", []) == ""
-
-
-import types
-import contextlib
-import io
 
 
 def _exec_gen_ref(rendered: str, repo: Path, monkeypatch) -> dict:

@@ -1403,6 +1403,7 @@ def run(
                     doc_kind_by_target[key] = dk
 
         authored: list[str] = []
+        authored_lens: dict[str, str] = {}
         for (lens, hint), batch_summaries in per_target.items():
             try:
                 lens_path, _opts = resolve_lens(config, lens)
@@ -1463,6 +1464,7 @@ def run(
                 continue
             if out.get("ok"):
                 authored.append(str(target_path))
+                authored_lens[str(target_path)] = lens
                 if dry_run_dir and not target_path.exists():
                     target_path.write_text(
                         fmc.default_frontmatter_text()
@@ -1545,6 +1547,62 @@ def run(
                         state,
                         f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}",
                     )
+
+        # CCE-110 layer 3: factual-accuracy fact-checker (warn layer). One
+        # dispatch per surviving authored page that cites >=1 resolvable repo
+        # source. Findings are operator-facing warnings only: info_only
+        # reasons, a PR-body section, and the run record — never a partial
+        # flag, never a dropped page.
+        fact_warnings: list[str] = []
+        fact_pages = [p for p in authored if Path(p).exists()]
+        if fact_pages:
+            lint_dir = str(_PLUGIN_ROOT / "scripts" / "lint")
+            if lint_dir not in sys.path:
+                sys.path.insert(0, lint_dir)
+            import citation_exists as _citation_exists
+
+            for page in fact_pages:
+                page_path = Path(page)
+                try:
+                    page_text = page_path.read_text()
+                except OSError:
+                    continue
+                cited_sources = _citation_exists.resolve_cited_sources(
+                    page_text, repo_root
+                )
+                if not cited_sources:
+                    continue
+                try:
+                    page_rel = str(page_path.resolve().relative_to(repo_root.resolve()))
+                except ValueError:
+                    page_rel = page
+                fc_out, fc_reasons = dispatch_validated(
+                    "fact-checker",
+                    {
+                        "page_path": page_rel,
+                        "cited_sources": cited_sources,
+                        "lens": authored_lens.get(page, ""),
+                        "plugin_root": str(_PLUGIN_ROOT),
+                    },
+                    dry_run_dir=dry_run_dir,
+                    cwd=repo_root,
+                )
+                for r in fc_reasons:
+                    add_partial(state, r, info_only=True)
+                if fc_out is None:
+                    add_partial(
+                        state,
+                        f"fact_checker_unavailable: {page_rel}",
+                        info_only=True,
+                    )
+                    continue
+                if fc_out.get("verdict") == "contradiction":
+                    for finding in fc_out.get("findings", []):
+                        claim = (finding.get("claim") or "").strip()
+                        src = (finding.get("source_path") or "").strip()
+                        suffix = f" (vs `{src}`)" if src else ""
+                        fact_warnings.append(f"`{page_rel}`: {claim}{suffix}")
+        state["current_run"]["fact_check_warnings"] = fact_warnings
 
         # Deterministic site generators (CCE-104). When the host config carries a
         # site: block, run the spec-correct CCE-23 generators (archive capability

@@ -166,3 +166,90 @@ def test_page_author_receives_source_paths(init_host, tmp_path, monkeypatch):
         "plain_listed.py",
         "scripts/real_module.py",
     ]
+
+
+CITED_PAGE = """\
+---
+status: draft
+sources: []
+synthesized_into: null
+---
+# Page
+
+This page cites `scripts/real_module.py` in prose.
+"""
+
+UNCITED_PAGE = CITED_PAGE.replace(
+    " cites `scripts/real_module.py` in", " has no citations in"
+)
+
+
+def _precreate_page(tmp_path: Path, text: str) -> Path:
+    page = tmp_path / "docs" / "site-src" / "core" / "page.md"
+    page.write_text(text)  # exists -> orchestrator takes the edit path
+    return page
+
+
+def test_fact_checker_dispatched_for_cited_page(init_host, tmp_path, read_current_run):
+    state_path = _host_with_module(init_host, tmp_path)
+    _precreate_page(tmp_path, CITED_PAGE)
+    fakes = tmp_path / "fakes"
+    _write_fakes(fakes)
+
+    rc = orchestrator_runner.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0
+    cr = read_current_run(state_path)
+    assert len(cr["fact_check_warnings"]) == 1
+    warning = cr["fact_check_warnings"][0]
+    assert "docs/site-src/core/page.md" in warning
+    assert "page says X but code does Y" in warning
+    assert "scripts/real_module.py" in warning
+    assert cr["partial"] is False  # warn layer never flips partial
+
+
+def test_fact_checker_skipped_for_page_without_citations(
+    init_host, tmp_path, read_current_run
+):
+    state_path = _host_with_module(init_host, tmp_path)
+    _precreate_page(tmp_path, UNCITED_PAGE)
+    fakes = tmp_path / "fakes"
+    _write_fakes(fakes, with_fact_checker=False)  # dispatch would log a reason
+
+    rc = orchestrator_runner.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0
+    cr = read_current_run(state_path)
+    assert cr["fact_check_warnings"] == []
+    assert not any("fact_checker" in r for r in cr["partial_reasons"])
+
+
+def test_fact_checker_failure_is_info_only(init_host, tmp_path, read_current_run):
+    state_path = _host_with_module(init_host, tmp_path)
+    _precreate_page(tmp_path, CITED_PAGE)
+    fakes = tmp_path / "fakes"
+    _write_fakes(fakes, with_fact_checker=False)  # missing fixture = dispatch None
+
+    rc = orchestrator_runner.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0
+    cr = read_current_run(state_path)
+    assert cr["fact_check_warnings"] == []
+    assert any(
+        r.startswith("fact_checker_unavailable: docs/site-src/core/page.md")
+        for r in cr["partial_reasons"]
+    )
+    assert cr["partial"] is False  # info_only: never flips partial
+
+
+def test_fact_checker_consistent_verdict_yields_no_warnings(
+    init_host, tmp_path, read_current_run
+):
+    state_path = _host_with_module(init_host, tmp_path)
+    _precreate_page(tmp_path, CITED_PAGE)
+    fakes = tmp_path / "fakes"
+    _write_fakes(fakes)
+    (fakes / "fake_fact_checker.json").write_text(
+        json.dumps({"ok": True, "verdict": "consistent", "findings": []})
+    )
+
+    rc = orchestrator_runner.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0
+    assert read_current_run(state_path)["fact_check_warnings"] == []

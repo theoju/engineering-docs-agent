@@ -206,3 +206,108 @@ def test_always_admits_at_least_one_pr(tmp_path):
     assert any(
         "time_budget_exceeded: admitted 1/3" in r for r in cr["partial_reasons"]
     ), cr["partial_reasons"]
+
+
+def _write_fakes_with_prs(src: Path, dst: Path, prs: list[dict]) -> None:
+    """Copy a fakes dir and overwrite its source-collector PRs."""
+    dst.mkdir(parents=True, exist_ok=True)
+    for f in src.iterdir():
+        (dst / f.name).write_text(f.read_text())
+    sc = json.loads((src / "fake_source_collector.json").read_text())
+    sc["prs"] = prs
+    (dst / "fake_source_collector.json").write_text(json.dumps(sc))
+
+
+def test_truncated_run_advances_to_last_processed_pr(tmp_path):
+    # Fake merge_shas + bogus last_sha → ordering passes through; cursor = PR2.merge_sha.
+    state_path = _init_host(
+        tmp_path, {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
+    )
+    clock = _fake_clock([0, 50, 150])  # admit 2 of 3
+    rc = runner.run(
+        tmp_path,
+        dry_run_dir=FAKES_MULTI,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=clock,
+    )
+    assert rc == 0
+    written = json.loads(state_path.read_text())
+    # fakes_multi PRs are 1/2/3 with merge_sha a/b/c; admitted [1,2] → cursor 'b'.
+    assert written["last_successful_run"]["head_sha"] == "b", written[
+        "last_successful_run"
+    ]
+
+
+def test_oldest_first_cursor_is_oldest_commit(tmp_path):
+    # Real window; PRs given newest-first; truncate after 1 → must advance to OLDEST.
+    repo = tmp_path
+    state_path = _init_host(
+        repo, {"version": "1", "last_successful_run": {"head_sha": "x"}}
+    )
+    # Add 3 real commits on top of the init commit.
+    base = _git(repo, "rev-parse", "HEAD")
+    shas = []
+    for i in range(1, 4):
+        (repo / "f.txt").write_text(f"c{i}")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", f"c{i}")
+        shas.append(_git(repo, "rev-parse", "HEAD"))
+    c1, c2, c3 = shas
+    # Seed baseline to `base` so the window base..HEAD contains c1,c2,c3.
+    state_path.write_text(
+        json.dumps({"version": "1", "last_successful_run": {"head_sha": base}})
+    )
+    fakes = tmp_path.parent / "fakes_cce109_order"
+    _write_fakes_with_prs(
+        FAKES_MULTI,
+        fakes,
+        [
+            {"number": 3, "merge_sha": c3, "url": "https://github.com/o/r/pull/3"},
+            {"number": 2, "merge_sha": c2, "url": "https://github.com/o/r/pull/2"},
+            {"number": 1, "merge_sha": c1, "url": "https://github.com/o/r/pull/1"},
+        ],
+    )
+    clock = _fake_clock([0, 9999])  # admit exactly 1 (the oldest after ordering)
+    rc = runner.run(
+        repo, dry_run_dir=fakes, no_pr=True, time_budget_seconds=1, now_monotonic=clock
+    )
+    assert rc == 0
+    written = json.loads(state_path.read_text())
+    # Correct oldest-first ordering admits PR#1 → cursor c1 (oldest).
+    # A broken passthrough would admit PR#3 → c3. Discriminating assertion:
+    assert written["last_successful_run"]["head_sha"] == c1, written[
+        "last_successful_run"
+    ]
+
+
+def test_truncation_with_no_usable_cursor_does_not_advance(tmp_path):
+    state_path = _init_host(
+        tmp_path, {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
+    )
+    fakes = tmp_path.parent / "fakes_cce109_nocursor"
+    _write_fakes_with_prs(
+        FAKES_MULTI,
+        fakes,
+        [
+            # no merge_sha (cannot anchor cursor); url required by schema
+            {"number": 1, "title": "x", "url": "https://github.com/o/r/pull/1"},
+            {"number": 2, "title": "y", "url": "https://github.com/o/r/pull/2"},
+            {"number": 3, "title": "z", "url": "https://github.com/o/r/pull/3"},
+        ],
+    )
+    clock = _fake_clock([0, 50, 150])  # admit 2, both lack merge_sha
+    rc = runner.run(
+        tmp_path,
+        dry_run_dir=fakes,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=clock,
+    )
+    assert rc == 0
+    written = json.loads(state_path.read_text())
+    assert written["last_successful_run"]["head_sha"] == "old_sha_000"
+    cr = _current_run(state_path)
+    assert any(
+        "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]

@@ -382,6 +382,21 @@ def _order_prs_oldest_first(
     return sorted(prs, key=key)
 
 
+def _last_processed_merge_sha(admitted_prs: list[dict]) -> str | None:
+    """Return the merge_sha of the newest admitted PR that has one.
+
+    ``admitted_prs`` is the oldest-first truncated prefix, so the newest admitted
+    PR is the last element. Scan from the end for the first non-empty merge_sha.
+    Returns None when no admitted PR carries a merge_sha (cannot anchor the
+    cursor → caller must not advance).
+    """
+    for pr in reversed(admitted_prs):
+        sha = (pr.get("merge_sha") or "").strip()
+        if sha:
+            return sha
+    return None
+
+
 def _clip_prs_to_window(
     prs: list[dict],
     *,
@@ -1548,8 +1563,19 @@ def run(
         # main; until then the advance lives only on the docs-agent branch
         # and on disk locally. If PR open fails, nothing reaches main and
         # the next run reads the unchanged committed state.
+        if time_truncated:
+            advance_sha = _last_processed_merge_sha(prs)
+            if advance_sha is None:
+                add_partial(
+                    state,
+                    "time_budget_no_advance_no_cursor: truncated run had no "
+                    "admitted PR with a merge_sha; baseline unchanged",
+                )
+                advance_sha = state.get("last_successful_run", {}).get("head_sha", "")
+        else:
+            advance_sha = state["current_run"]["head_sha"]
         state["last_successful_run"] = {
-            "head_sha": state["current_run"]["head_sha"],
+            "head_sha": advance_sha,
             "completed_at": now,
         }
         state["current_run"]["pr_number"] = None

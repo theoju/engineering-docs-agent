@@ -28,6 +28,11 @@ Run in the host repo's working directory. Accepts `--dry-run` flag to emit propo
 1. Run `python <plugin_root>/scripts/setup_discover.py --json` and parse output. Output now includes a `toolchain` block (`{node, bun, deno, package_manager, docusaurus_dep}`) — surface this when displaying discovered values (CCE-57).
 2. Display discovered values. Ask user to confirm or override each.
 3. Ask: Slack webhook secret name, Slack enabled (y/n), email enabled (y/n), email SMTP secret names + recipients (if enabled), Tier 2 lint rules to enable, voice preferences, gap allowlist paths, glossary creation.
+   Also ask (CCE-101): "Should nightly docs PRs auto-merge when fully green
+   and non-partial, or stay open for your review?" Options: `auto`
+   (recommended, default) / `manual`. ALWAYS write the answer as an explicit
+   `merge: { policy: <answer> }` block in the composed config — scaffolded
+   hosts must never rely on the implicit default (absent key = auto).
 4. Compose final config dict. Include the `site:` block from `preflight_host.proposed_config` (sections + archive `sources` + api `extractors`) — it is what the deterministic generators (`generate_archive`, `generate_contracts`) key off; omitting it makes them silently no-op and the rendered site stays empty (CCE-104). Adjust the archive `sources` to the host's actual decision-record dirs if they differ from the superpowers convention.
 5. If `--dry-run`, dump YAML to stdout and exit.
 6. Write `.engineering-docs-agent/config.yml`, `.engineering-docs-agent/state.json` (initial), `.github/workflows/docs-agent-nightly.yml`, `.github/workflows/docs-agent-verify.yml`, optionally `docs-agent-glossary.yml`. (CCE-57, CCE-80) The shipped workflow checks out `theoju/engineering-docs-agent` into `.docs-agent-plugin/` and runs the orchestrator from that path — do not delete the checkout step. After writing the workflow files, ensure `.docs-agent-plugin/` is in the host repo's `.gitignore`. If `.gitignore` exists, append the line if absent. If `.gitignore` does not exist, create it with that single line. This prevents `git add .` (run by you or by automation outside this orchestrator) from registering the workflow's vendored plugin checkout as a submodule gitlink in host commits — CCE-70.

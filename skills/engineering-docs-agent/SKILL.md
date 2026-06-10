@@ -64,7 +64,7 @@ See spec §8. Specifically: page-author content failing block-severity lint → 
 10. For each PR (parallel): dispatch `gap-detector`, skipping those in `dismissed_gap_flags`. Collect verdicts.
 11. Prepend a dated entry to `whats_new_file` summarizing the bullet list (PR summaries + gap flags).
 12. Write `state.json` with `current_run.partial`, `current_run.partial_reasons`, and head_sha.
-13. Open or append-commit to the docs-agent PR (see "PR handling" below).
+13. Open or append-commit to the docs-agent PR (see "PR handling" below), then run the CCE-101 auto-merge gate; record its outcome in the digest's `merge_outcome`.
 14. Compose digest and dispatch `notifier`.
 
 ## PR handling
@@ -73,6 +73,17 @@ See spec §8. Specifically: page-author content failing block-severity lint → 
 - If a branch with that name exists AND has an open PR: `git checkout` it, add the new commits, `git push`. Append-commit, no force-push.
 - If no such branch exists: `git checkout -b docs-agent/YYYY-MM-DD origin/main`, commit, push, `gh pr create` with body summarizing the run.
 - Commit message: `docs(agent): run YYYY-MM-DDTHH:MM:SS — N PRs summarized, M gaps flagged`.
+- CCE-101 auto-merge gate: after the PR number is known (either path), the
+  runner calls `_maybe_auto_merge`. Eligible = `merge.policy: auto` (the
+  default when the config block is absent) AND `partial: false` AND zero
+  fact-check warnings AND no human commits on the PR AND enough CCE-109
+  budget to wait out `checks_grace_seconds`. Check polling parses
+  `gh pr checks --json name,state,bucket` (state/bucket vocabulary, CCE-83);
+  zero registered checks after the grace window merges on in-run validation
+  (no-App-token hosts never get checks). Merge is `--squash --delete-branch`.
+  After merging, dispatch `publishing.build_workflow` via `gh workflow run`
+  (a GITHUB_TOKEN merge cannot fire `on: push` workflows). Every outcome is
+  an info-only reason; any failure leaves the PR open (pre-CCE-101 behavior).
 
 ## Partial-run signaling
 

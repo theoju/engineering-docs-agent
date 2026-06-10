@@ -2637,7 +2637,9 @@ def _maybe_auto_merge(
             return skip("checks_query_failed", checks.error or "")
         items = checks.value or []
         red = [
-            c for c in items if c.get("state") == "FAILURE" or c.get("bucket") == "fail"
+            c
+            for c in items
+            if c.get("state") == "FAILURE" or c.get("bucket") in ("fail", "cancel")
         ]
         if red:
             names = ",".join(sorted(c.get("name") or "?" for c in red))

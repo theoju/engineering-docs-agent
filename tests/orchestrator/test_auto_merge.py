@@ -282,3 +282,36 @@ def test_all_reasons_are_info_only():
     gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_red()]))
     _, reasons = _run(gh)
     assert all(info for _, info in reasons)
+
+
+def test_skipping_bucket_counts_as_settled():
+    """Path-filtered/conditional jobs report bucket=skipping; they must
+    count as settled-non-blocking, not poll until timeout."""
+    gh = _eligible_gh(
+        pr_checks=GhResult(
+            ok=True,
+            value=[
+                _green(),
+                {"name": "cond", "state": "SKIPPED", "bucket": "skipping"},
+            ],
+        )
+    )
+    clock = FakeClock()
+    outcome, _ = _run(gh, clock=clock)
+    assert outcome["merged"] is True
+    assert clock.t < 120  # settled immediately, no grace wait
+
+
+def test_cancelled_check_fails_fast_as_red():
+    """bucket=cancel is terminal-non-green: skip immediately as
+    checks_failed instead of burning the timeout as pending."""
+    gh = _eligible_gh(
+        pr_checks=GhResult(
+            ok=True,
+            value=[{"name": "ci", "state": "CANCELLED", "bucket": "cancel"}],
+        )
+    )
+    outcome, reasons = _run(gh)
+    assert outcome["reason"] == "checks_failed"
+    assert "ci" in reasons[0][0]
+    assert not [c for c in gh.calls if c[0] == "pr_merge"]

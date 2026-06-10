@@ -1,6 +1,10 @@
 ---
 title: Architecture
 status: draft
+description: Section landing page for architecture docs — component design, agent contracts, data flows, and system internals.
+source_files:
+  - scripts/orchestrator_runner.py
+last_reviewed: "2026-06-10"
 ---
 
 # Architecture
@@ -8,6 +12,7 @@ status: draft
 _Architecture: component design, agent contracts, data flows, and system internals._
 
 <!-- docs-agent:overview:start -->
+
 **In this section**
 
 - **Engineering Docs Agent** — A Claude Code plugin that turns merged PRs, Jira issues, and commits into a nightly docs-update PR — with voice-matched authoring, tiered linting, gap detection, and post-merge publish verification.
@@ -27,4 +32,5 @@ _Architecture: component design, agent contracts, data flows, and system interna
 - **Lint Rules** — The lint runner (`scripts/lint/lint_runner.py`) validates agent-authored Markdown before it reaches the docs site. Rules are tiered: **block** rules prevent a page from being published; **warn** rules surface in the PR review but do not block it.
 
 _15 pages · regenerated nightly_
+
 <!-- docs-agent:overview:end -->

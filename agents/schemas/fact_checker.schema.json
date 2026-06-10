@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "fact-checker output",
+  "type": "object",
+  "required": ["ok", "verdict"],
+  "properties": {
+    "page": { "type": "string" },
+    "verdict": { "enum": ["consistent", "contradiction", "unverifiable"] },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["claim"],
+        "properties": {
+          "claim": { "type": "string" },
+          "source_path": { "type": "string" },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "ok": { "type": "boolean" },
+    "error": { "type": ["string", "null"] }
+  }
+}

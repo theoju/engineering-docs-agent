@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Factual-accuracy guard for authored pages (page-author confabulation fix).** Three layers: page-author now receives `source_paths` grounding inputs and returns advisory `evidence.files_read`; a new Tier-1 `citation_exists` lint rule blocks pages citing nonexistent repo paths or test identifiers (regression-pinned against the two 2026-06-09 confabulated pages); a new warn-only `fact-checker` subagent (the eighth) flags prose that contradicts cited source, rendered as a "Factual-accuracy warnings" PR-body section. Generic-first: no git → trivial pass, no citations → no dispatch, fact-checker failure → info-only note. Tracker: CCE-110.
+
 ## [0.5.1] — 2026-06-09
 
 Consolidates the 20 changes merged since v0.5.0 (CCE-66, CCE-83, CCE-86, CCE-89 through CCE-108). The headline is the structured docs-site upgrade — a config-driven `site:` block with deterministic generators, a service/component-grouped API reference backed by JSON-Schema contracts, per-section overview pages, a richer home page, and freshness-sorted architecture/archive routing. Alongside: the SDD fidelity verification ladder, Jira auto-transition on merge, and the docs-agent nightly cadence controls. No breaking changes to the host config surface; existing `.engineering-docs-agent/config.yml` files continue to load.

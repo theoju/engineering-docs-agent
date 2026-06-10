@@ -8,6 +8,12 @@
     "action": { "type": "string" },
     "diff_summary": { "type": "string" },
     "ok": { "type": "boolean" },
-    "error": { "type": ["string", "null"] }
+    "error": { "type": ["string", "null"] },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "files_read": { "type": "array", "items": { "type": "string" } }
+      }
+    }
   }
 }

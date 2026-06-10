@@ -10,6 +10,10 @@
       "properties": {
         "completed_at": { "type": "string" },
         "head_sha": { "type": "string" },
+        "window_head_sha": {
+          "type": "string",
+          "description": "CCE-109: on a time-truncated run, the real window HEAD the run covered (head_sha then holds the mid-window cursor). Read by the CCE-43 same-hour rerun guard."
+        },
         "pr_number": { "type": "integer" }
       }
     },

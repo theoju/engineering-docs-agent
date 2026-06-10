@@ -339,24 +339,23 @@ def _order_prs_oldest_first(
     and the baseline advances to the last admitted PR. Processing oldest-first
     makes that prefix a contiguous oldest run, so advancing never skips an older
     PR. Order key = index of the PR's merge_sha in
-    ``git rev-list --reverse last_sha..head_sha`` (oldest-first). PRs whose
-    merge_sha is missing or out-of-window sort last (cannot anchor the cursor).
+    ``git rev-list --reverse`` over the window (oldest-first). An empty
+    ``last_sha`` (first run) is NOT a passthrough: the window is the full
+    history of ``head_sha``, so a truncated first run still gets a correct
+    oldest-first prefix (otherwise the cursor could strand older PRs forever).
+    PRs whose merge_sha is missing or out-of-window sort last (cannot anchor
+    the cursor). Keys are 7-char prefixes — the same tolerance
+    ``_clip_prs_to_window`` applies to the same data.
 
-    Degrades gracefully: if ``last_sha`` is empty or git is unavailable/fails,
-    returns ``prs`` unchanged (mirrors ``_clip_prs_to_window``).
+    Degrades gracefully: if git is unavailable/fails, returns ``prs``
+    unchanged (mirrors ``_clip_prs_to_window``).
     """
-    if not last_sha or not prs:
+    if not prs:
         return prs
+    rev_range = f"{last_sha}..{head_sha}" if last_sha else head_sha
     try:
         r = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo_root),
-                "rev-list",
-                "--reverse",
-                f"{last_sha}..{head_sha}",
-            ],
+            ["git", "-C", str(repo_root), "rev-list", "--reverse", rev_range],
             capture_output=True,
             text=True,
             check=False,
@@ -366,18 +365,13 @@ def _order_prs_oldest_first(
     if r.returncode != 0:
         return prs
     order = {
-        sha.strip(): i for i, sha in enumerate(r.stdout.splitlines()) if sha.strip()
+        sha.strip()[:7]: i for i, sha in enumerate(r.stdout.splitlines()) if sha.strip()
     }
-    order_short = {sha[:7]: i for sha, i in order.items()}
     big = len(order) + 1
 
     def key(pr: dict) -> int:
         sha = (pr.get("merge_sha") or "").strip()
-        if sha in order:
-            return order[sha]
-        if sha[:7] in order_short:
-            return order_short[sha[:7]]
-        return big
+        return order.get(sha[:7], big)
 
     return sorted(prs, key=key)
 
@@ -397,57 +391,96 @@ def _last_processed_merge_sha(admitted_prs: list[dict]) -> str | None:
     return None
 
 
+def _git_is_ancestor(repo_root: Path, anc: str, desc: str) -> bool | None:
+    """``git merge-base --is-ancestor`` as a tri-state: True/False, or None
+    when the relation is unverifiable (bad object, no git, other git error).
+    Output is captured (and discarded) so expected git fatals on the
+    degraded path don't leak into the orchestrator's stderr.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(repo_root), "merge-base", "--is-ancestor", anc, desc],
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    if r.returncode == 0:
+        return True
+    if r.returncode == 1:
+        return False
+    return None
+
+
+def _rev_parse_commit(repo_root: Path, sha: str) -> str | None:
+    """Resolve ``sha`` (possibly abbreviated) to its full 40-hex commit id.
+
+    CCE-109: the source-collector contract permits abbreviated merge_shas (its
+    own example is 8-char), but the persisted baseline must be canonical —
+    a stored prefix can turn ambiguous as the repo grows and never matches the
+    CCE-43 guard's string comparison. None when unresolvable or git is
+    unavailable.
+    """
+    try:
+        r = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"{sha}^{{commit}}",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    out = r.stdout.strip()
+    return out if r.returncode == 0 and out else None
+
+
 def _sha_in_window(
     sha: str,
     *,
     last_sha: str,
     head_sha: str,
     repo_root: Path,
-) -> bool:
-    """Return True only if ``sha`` is confirmed SAFE to advance the baseline to.
+) -> tuple[bool, str]:
+    """Return (ok, reason): ok only if ``sha`` is confirmed SAFE to advance
+    the baseline to.
 
-    CCE-109 spec Component 4 invariant guard. "Safe" means ``sha`` is an ancestor
-    of ``head_sha`` (reachable from this run's HEAD) AND — when a baseline exists
-    — a descendant of ``last_sha`` (strictly forward, so the cursor never
-    regresses). An empty ``last_sha`` (first run) imposes no lower bound: any
-    ancestor of HEAD is valid forward progress, so a truncated first run can
-    still drain.
+    CCE-109 spec Component 4 invariant guard. "Safe" means ``sha`` is an
+    ancestor of ``head_sha`` (reachable from this run's HEAD) AND — when a
+    baseline exists — a descendant of ``last_sha`` (strictly forward, so the
+    cursor never regresses). An empty ``last_sha`` (first run) imposes no lower
+    bound: any ancestor of HEAD is valid forward progress.
 
-    Returns False whenever the relation cannot be positively confirmed — a bogus
-    or garbage ``sha``, a baseline absent from the repo, or git unavailable. In
-    those cases the caller must not advance the cursor to an unverifiable SHA
-    (which could be an ancestor of the baseline → silent re-ingestion). This
-    closes the uncomputable-window truncation path where ``_clip_prs_to_window``
-    and ``_order_prs_oldest_first`` both degrade to passthrough.
+    On failure the reason names the cause so the partial reason distinguishes
+    infra failure from data corruption: ``not_ancestor_of_head`` (garbage or
+    foreign cursor), ``behind_baseline`` (would regress), or
+    ``window_unverifiable`` (git missing/erroring — the uncomputable-window
+    truncation path where ``_clip_prs_to_window`` and
+    ``_order_prs_oldest_first`` both degrade to passthrough). The caller must
+    not advance on any of them.
     """
     if not sha or not head_sha:
-        return False
-
-    def _is_ancestor(anc: str, desc: str) -> bool:
-        try:
-            r = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(repo_root),
-                    "merge-base",
-                    "--is-ancestor",
-                    anc,
-                    desc,
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except FileNotFoundError:
-            return False
-        return r.returncode == 0
-
-    if not _is_ancestor(sha, head_sha):
-        return False
+        return False, "window_unverifiable"
+    anc = _git_is_ancestor(repo_root, sha, head_sha)
+    if anc is None:
+        return False, "window_unverifiable"
+    if anc is False:
+        return False, "not_ancestor_of_head"
     if not last_sha:
-        return True
-    return _is_ancestor(last_sha, sha)
+        return True, ""
+    fwd = _git_is_ancestor(repo_root, last_sha, sha)
+    if fwd is None:
+        return False, "window_unverifiable"
+    if fwd is False:
+        return False, "behind_baseline"
+    return True, ""
 
 
 def _clip_prs_to_window(
@@ -1165,8 +1198,8 @@ def run(
         emit_log(f"config invalid: {e}")
         return 2
     clock = now_monotonic or time.monotonic
-    _budget = resolve_time_budget(config, time_budget_seconds)
-    deadline = clock() + _budget if _budget and _budget > 0 else None
+    budget = resolve_time_budget(config, time_budget_seconds)
+    deadline = clock() + budget if budget > 0 else None
     voice_samples = load_voice_samples(repo_root, config)
     try:
         state = load_state_validated(state_path)
@@ -1297,13 +1330,20 @@ def run(
             except (KeyError, OSError):
                 available_sections_by_lens[_ln] = []
         time_truncated = False
+        deferred_unanchored = False
         for i, pr in enumerate(prs):
             if deadline is not None and i > 0 and clock() > deadline:
                 add_partial(
                     state,
                     f"time_budget_exceeded: admitted {i}/{len(prs)} PRs "
-                    f"(budget {_budget}s); deferring PR #{pr.get('number')} "
+                    f"(budget {budget}s); deferring PR #{pr.get('number')} "
                     f"to next run",
+                )
+                # A deferred PR without a merge_sha can't be re-anchored by the
+                # next window — advancing past it would lose it forever, so the
+                # advance block below must refuse when any exist.
+                deferred_unanchored = any(
+                    not (p.get("merge_sha") or "").strip() for p in prs[i:]
                 )
                 prs = prs[:i]
                 time_truncated = True
@@ -1617,41 +1657,62 @@ def run(
         # and on disk locally. If PR open fails, nothing reaches main and
         # the next run reads the unchanged committed state.
         if time_truncated:
-            advance_sha = _last_processed_merge_sha(prs)
-            # CCE-109 Component 4: never advance to a cursor we cannot confirm is
-            # forward-of-baseline and reachable from HEAD. On an uncomputable
-            # window (bogus baseline / garbage merge_sha / no git) the guard
-            # returns False and we keep the baseline — partial, retried next run,
-            # but never a silent SHA regression.
-            out_of_window = advance_sha is not None and not _sha_in_window(
-                advance_sha,
-                last_sha=prior_baseline_sha,
-                head_sha=head_sha,
-                repo_root=repo_root,
-            )
-            if out_of_window:
+            # CCE-109 Component 4: never advance to a cursor we cannot confirm
+            # is forward-of-baseline and reachable from HEAD, never advance
+            # past an unanchorable deferred PR, and persist only the canonical
+            # full SHA. Every refusal keeps the baseline — partial, retried
+            # next run, but no silent regression and no lost PR.
+            advance_sha = prior_baseline_sha
+            cursor = _last_processed_merge_sha(prs)
+            window = f"{(prior_baseline_sha or '(root)')[:8]}..{head_sha[:8]}"
+            full_cursor = _rev_parse_commit(repo_root, cursor) if cursor else None
+            if cursor is None:
                 add_partial(
                     state,
-                    f"time_budget_advance_out_of_window: cursor "
-                    f"{advance_sha[:8]} not confirmed within "
-                    f"{(prior_baseline_sha or '(root)')[:8]}..{head_sha[:8]}; "
-                    "baseline unchanged",
+                    "time_budget_no_advance_no_cursor: truncated run had no "
+                    "admitted PR with a usable merge_sha; baseline unchanged",
                 )
-                advance_sha = None
-            if advance_sha is None:
-                if not out_of_window:
+            elif deferred_unanchored:
+                add_partial(
+                    state,
+                    f"time_budget_no_advance_unanchored_deferred: a deferred "
+                    f"PR has no merge_sha and would be stranded behind cursor "
+                    f"{cursor[:8]}; baseline unchanged",
+                )
+            elif full_cursor is None:
+                add_partial(
+                    state,
+                    f"time_budget_advance_out_of_window: cursor {cursor[:8]} "
+                    f"unresolvable in repo ({window}); baseline unchanged",
+                )
+            else:
+                ok, why = _sha_in_window(
+                    full_cursor,
+                    last_sha=prior_baseline_sha,
+                    head_sha=head_sha,
+                    repo_root=repo_root,
+                )
+                if ok:
+                    advance_sha = full_cursor
+                else:
                     add_partial(
                         state,
-                        "time_budget_no_advance_no_cursor: truncated run had no "
-                        "admitted PR with a usable merge_sha; baseline unchanged",
+                        f"time_budget_advance_out_of_window: cursor "
+                        f"{full_cursor[:8]} {why} ({window}); baseline unchanged",
                     )
-                advance_sha = prior_baseline_sha
         else:
             advance_sha = state["current_run"]["head_sha"]
         state["last_successful_run"] = {
             "head_sha": advance_sha,
             "completed_at": now,
         }
+        if time_truncated:
+            # CCE-43 guard support: record the window this truncated run
+            # covered so a same-hour re-dispatch is recognized as already
+            # processed (the cursor alone never equals HEAD).
+            state["last_successful_run"]["window_head_sha"] = state["current_run"][
+                "head_sha"
+            ]
         state["current_run"]["pr_number"] = None
         save_persistent_state(state_path, state)
         save_current_run(state_path, state)
@@ -1668,7 +1729,10 @@ def run(
             partial_reasons=state["current_run"]["partial_reasons"],
             lens_paths=config.get("docs", {}).get("lens_paths") or None,
             baseline_sha=prior_baseline_sha,
-            current_sha=state["current_run"]["head_sha"],
+            # Spec Component 6: on a truncated run the operator-facing window
+            # must end at the cursor actually persisted, not the full HEAD
+            # (advance_sha == HEAD whenever the run wasn't truncated).
+            current_sha=advance_sha,
         )
         for reason, info_only in pr_reasons:
             add_partial(state, reason, info_only=info_only)
@@ -1926,6 +1990,23 @@ def branch_name(now_iso: str) -> str:
     return f"docs-agent/{now_iso[:13]}"
 
 
+def _remote_state_covers_window(remote_state: dict, our_head_sha: str) -> bool:
+    """True if a committed state.json shows the window ending at
+    ``our_head_sha`` was already processed.
+
+    A full run records ``last_successful_run.head_sha == HEAD``; a
+    time-truncated run (CCE-109) records a mid-window cursor there plus
+    ``window_head_sha == HEAD``. Either field matching means this hour's
+    window was already (at least partially) processed — without the second
+    field, every truncated run would defeat the CCE-43 guard and a same-hour
+    re-dispatch would die on the CCE-42 layer-3 checkout refusal.
+    """
+    lsr = remote_state.get("last_successful_run") or {}
+    heads = {lsr.get("head_sha", ""), lsr.get("window_head_sha", "")}
+    heads.discard("")
+    return bool(our_head_sha) and our_head_sha in heads
+
+
 def _remote_already_processed_window(
     repo_root: Path, branch: str, our_head_sha: str
 ) -> bool:
@@ -1963,10 +2044,9 @@ def _remote_already_processed_window(
         return False
     try:
         remote = json.loads(show.stdout)
-        remote_head = remote.get("last_successful_run", {}).get("head_sha", "")
+        return _remote_state_covers_window(remote, our_head_sha)
     except (json.JSONDecodeError, AttributeError):
         return False
-    return remote_head == our_head_sha
 
 
 def _format_partial_digest(partial_reasons: list[str]) -> str:

@@ -1,19 +1,20 @@
 ---
-description: "A Claude Code plugin that turns merged PRs, Jira issues, and commits\
-  \ into a nightly docs-update PR \u2014 seven specialized subagents handle voice-matched\
-  \ authoring, tiered linting, gap detection, and post-merge publish verification,\
-  \ running against any host repo."
+description:
+  "A Claude Code plugin that turns merged PRs, Jira issues, and commits\
+  \ into a nightly docs-update PR \u2014 eight specialized subagents handle voice-matched\
+  \ authoring, tiered linting, factual-accuracy checking, gap detection, and post-merge\
+  \ publish verification, running against any host repo."
 source_files:
-- .claude/hooks/doc_drift.py
-- docs-agent/*
-- docs/site-src/*
-- docs/site-src/archive/adrs/*.md
-- scripts/build_doc_source_map.py
-- scripts/lint/<rule>.py
-- scripts/lint/frontmatter_schema.py
-- scripts/lint/lint_runner.py
-- scripts/lint/stub_redirect.py
-last_reviewed: 2026-05-28
+  - .claude/hooks/doc_drift.py
+  - docs-agent/*
+  - docs/site-src/*
+  - docs/site-src/archive/adrs/*.md
+  - scripts/build_doc_source_map.py
+  - scripts/lint/<rule>.py
+  - scripts/lint/frontmatter_schema.py
+  - scripts/lint/lint_runner.py
+  - scripts/lint/stub_redirect.py
+last_reviewed: 2026-06-09
 status: draft
 doc_kind: architecture
 ---
@@ -27,7 +28,7 @@ The plugin runs against **any host repository**. You install it once, run the se
 ```mermaid
 flowchart TB
     PR[Merged PR or Jira issue] --> TRIG[Nightly cron<br/>or PR closed event]
-    TRIG --> ORCH[Orchestrator<br/>+ 7 subagents]
+    TRIG --> ORCH[Orchestrator<br/>+ 8 subagents]
     CFG[host config + state] --> ORCH
     ORCH -- writes pages --> DOCS[docs/site-src]
     DOCS --> DOCSPR[docs-agent/YYYY-MM-DD PR]
@@ -36,19 +37,20 @@ flowchart TB
     ORCH --> NOTIF[Slack + email digest]
 ```
 
-## Seven subagents
+## Eight subagents
 
 Each subagent is defined in `agents/<name>.md` with YAML frontmatter declaring its tool allowlist and a JSON schema for its output. The orchestrator (`scripts/orchestrator_runner.py`) dispatches them via the Claude CLI.
 
-| Subagent            | Job                                                                                  | Returns                                        |
-| ------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------- |
-| `source-collector`  | Fetches merged PRs in `(last_sha..HEAD)` and optionally linked Jira issues           | `{ prs, jira_issues }`                         |
-| `pr-summarizer`     | Summarizes one PR — what changed, why, which doc targets to hit                      | `{ what_changed, why, breaking, doc_targets }` |
-| `gap-detector`      | Judges whether a PR needs an ADR/spec/plan that doesn't exist yet                    | `{ needs_spec, reasoning, confidence }`        |
-| `page-author`       | Writes or edits one doc page with voice few-shot                                     | `{ path, diff_summary }`                       |
-| `content-validator` | Runs the tiered lint suite on authored pages                                         | `{ passed, failed }`                           |
-| `publish-verifier`  | Polls the host build workflow after merge; fetches live URLs to confirm pages are up | `{ verified, failed }`                         |
-| `notifier`          | Posts a Slack message and/or email digest                                            | `{ slack_ok, email_ok, errors }`               |
+| Subagent            | Job                                                                                     | Returns                                        |
+| ------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `source-collector`  | Fetches merged PRs in `(last_sha..HEAD)` and optionally linked Jira issues              | `{ prs, jira_issues }`                         |
+| `pr-summarizer`     | Summarizes one PR — what changed, why, which doc targets to hit                         | `{ what_changed, why, breaking, doc_targets }` |
+| `gap-detector`      | Judges whether a PR needs an ADR/spec/plan that doesn't exist yet                       | `{ needs_spec, reasoning, confidence }`        |
+| `page-author`       | Writes or edits one doc page with voice few-shot, grounded in the PRs' source files     | `{ path, diff_summary }`                       |
+| `content-validator` | Runs the tiered lint suite on authored pages                                            | `{ passed, failed }`                           |
+| `fact-checker`      | Reads a cited page plus its cited sources; flags prose the code contradicts (warn-only) | `{ verdict, findings }`                        |
+| `publish-verifier`  | Polls the host build workflow after merge; fetches live URLs to confirm pages are up    | `{ verified, failed }`                         |
+| `notifier`          | Posts a Slack message and/or email digest                                               | `{ slack_ok, email_ok, errors }`               |
 
 Subagent outputs are validated against JSON schemas in `agents/schemas/`. Dataclasses in `scripts/contracts.py` provide the typed view used by the orchestrator.
 
@@ -62,13 +64,16 @@ flowchart TD
     PSn --> AGG[aggregate doc_targets per lens]
     AGG --> PAB[page-author batches<br/>parallel across lenses<br/>serial within lens]
     PAB --> CV[content-validator]
-    CV --> GDn[gap-detector × N parallel]
+    CV --> FC[fact-checker per cited page<br/>warn-only]
+    FC --> GDn[gap-detector × N parallel]
     GDn --> WN[prepend What's New<br/>update state.json]
     WN --> DOCSPR[open or append docs-agent PR]
     DOCSPR --> NOT[notifier]
 ```
 
 `pr-summarizer` and `gap-detector` fan out in parallel. `page-author` parallelizes across lenses but serializes within a single lens — two authors must not edit the same page concurrently. The PR open, state write, and notifier steps run serially after fan-in.
+
+After content validation, the `fact-checker` runs once per surviving page that cites at least one resolvable repo source file. It is a warn layer: contradictions render as a "Factual-accuracy warnings" section in the docs PR body and the notifier digest, but never drop a page and never mark the run partial. Pages citing nothing skip the dispatch entirely.
 
 The Actions concurrency group `docs-agent-${branch}` cancels any in-progress run when a newer event fires, acting as a debounce.
 

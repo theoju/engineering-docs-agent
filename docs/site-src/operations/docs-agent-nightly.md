@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/108
+  - https://github.com/theoju/engineering-docs-agent/pull/133
 synthesized_into: []
 ---
 
@@ -48,10 +49,51 @@ D1 and D2 shipped in PRs #112 and #113 (CCE-89). The cron was re-enabled after D
 ## Merge gate (CCE-101)
 
 Nightly PRs merge themselves when the run earned it: `partial: false`, zero
-factual-accuracy warnings, no human commits on the PR, and host CI green
-(checks that never register — the no-App-token case — count as "no gate";
-the in-run lint/build validation already passed). The merge is squash +
-branch-delete, followed by an explicit dispatch of the Pages workflow.
+factual-accuracy warnings, no human commits on the PR, sufficient CCE-109
+budget remaining, and host CI green (checks that never register — the
+no-App-token case — count as "no gate"; the in-run lint/build validation
+already passed). The merge is squash + branch-delete, followed by an
+explicit dispatch of the configured Pages workflow (a `GITHUB_TOKEN` merge
+cannot fire `on: push` workflows — without the dispatch the site never
+redeploys).
+
+### Configuring merge policy
+
+The `merge:` block in `.engineering-docs-agent/config.yml` controls the
+policy. When the block is absent, `resolve_merge_settings` defaults to
+`auto`:
+
+```yaml
+merge:
+  policy: auto   # default when absent; use "manual" to opt out
+```
+
+Hosts that prefer human review before every merge set `policy: manual`.
+The setup skill asks operators to choose explicitly at scaffold time, so
+new installs carry an intentional value rather than a silent default.
+
+### Check polling
+
+The gate polls `gh pr checks <PR> --json name,state,bucket` (CCE-83
+vocabulary: `state === 'FAILURE' || bucket === 'fail'` for red;
+`state === 'SUCCESS' || bucket === 'pass'` for green). Two windows bound
+the poll:
+
+- **Grace window** — 120 seconds after the PR is opened for checks to
+  register. Checks absent within the grace period count as "no gate."
+- **Settle window** — 900 seconds for in-progress checks to reach a
+  terminal state. A timeout here leaves the PR open with reason
+  `checks_timeout`.
+
+Both windows are bounded by the CCE-109 budget, so check polling cannot
+block or overrun the nightly job timeout.
+
+### Digest field
+
+The run digest gains a `merge_outcome` field. Its value is one of
+`merged`, `skipped`, or the leave-open reason listed below.
+
+### Leave-open reasons
 
 A PR is left open, with the reason in the run digest and
 `current_run.partial_reasons`, when any of:

@@ -326,6 +326,62 @@ def resolve_time_budget(config: dict, cli_override: int | None) -> int:
     return int(val)
 
 
+def _order_prs_oldest_first(
+    prs: list[dict],
+    *,
+    last_sha: str,
+    head_sha: str,
+    repo_root: Path,
+) -> list[dict]:
+    """Return ``prs`` sorted oldest-merge-first by position in the window.
+
+    CCE-109 correctness requirement: the admission gate truncates to a prefix,
+    and the baseline advances to the last admitted PR. Processing oldest-first
+    makes that prefix a contiguous oldest run, so advancing never skips an older
+    PR. Order key = index of the PR's merge_sha in
+    ``git rev-list --reverse last_sha..head_sha`` (oldest-first). PRs whose
+    merge_sha is missing or out-of-window sort last (cannot anchor the cursor).
+
+    Degrades gracefully: if ``last_sha`` is empty or git is unavailable/fails,
+    returns ``prs`` unchanged (mirrors ``_clip_prs_to_window``).
+    """
+    if not last_sha or not prs:
+        return prs
+    try:
+        r = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "rev-list",
+                "--reverse",
+                f"{last_sha}..{head_sha}",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return prs
+    if r.returncode != 0:
+        return prs
+    order = {
+        sha.strip(): i for i, sha in enumerate(r.stdout.splitlines()) if sha.strip()
+    }
+    order_short = {sha[:7]: i for sha, i in order.items()}
+    big = len(order) + 1
+
+    def key(pr: dict) -> int:
+        sha = (pr.get("merge_sha") or "").strip()
+        if sha in order:
+            return order[sha]
+        if sha[:7] in order_short:
+            return order_short[sha[:7]]
+        return big
+
+    return sorted(prs, key=key)
+
+
 def _clip_prs_to_window(
     prs: list[dict],
     *,
@@ -1145,6 +1201,12 @@ def run(
             add_partial(state, r)
 
         prs = sources.get("prs", [])
+        prs = _order_prs_oldest_first(
+            prs,
+            last_sha=sc_inputs["last_sha"],
+            head_sha=head_sha,
+            repo_root=repo_root,
+        )
         jira_issues = sources.get("jira_issues", []) or []
         jira_lookup = {issue["key"]: issue for issue in jira_issues}
 

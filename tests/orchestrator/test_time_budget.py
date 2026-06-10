@@ -311,3 +311,45 @@ def test_truncation_with_no_usable_cursor_does_not_advance(tmp_path):
     assert any(
         "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]
     ), cr["partial_reasons"]
+
+
+def test_ordering_degrades_when_window_uncomputable(tmp_path):
+    # Spec test 7 (graceful degradation): a *bogus* last_sha makes
+    # `git rev-list bogus_000..HEAD` exit rc=128, so BOTH `_clip_prs_to_window`
+    # and `_order_prs_oldest_first` hit their documented git-failure fallback and
+    # pass the PRs through in their given order — no crash. The run still
+    # finalizes cleanly (rc == 0) and the time-budget gate never trips (the fake
+    # clock stays under deadline=100).
+    #
+    # NOTE on assertions (CCE-109 plan-vs-code drift, resolved per the sibling
+    # `test_unlimited_budget_processes_all_prs`): a bogus last_sha deliberately
+    # exercises the rev-list-FAILURE path, but that same failure makes
+    # `_clip_prs_to_window` record the pre-existing CCE-19
+    # `out_of_window_filter_skipped` partial — orthogonal to the time-budget gate
+    # under test. So this test asserts the time-budget-specific contract (no
+    # `time_budget_exceeded` reason, clean rc) and that the ONLY partial cause is
+    # that orthogonal clip fallback — never a `cr["partial"] is False` that the
+    # CCE-19 net makes impossible whenever the window is uncomputable.
+    state_path = _init_host(
+        tmp_path,
+        {"version": "1", "last_successful_run": {"head_sha": "bogus_000"}},
+    )
+    clock = _fake_clock([0, 1, 2, 3])  # always under deadline=100
+    rc = runner.run(
+        tmp_path,
+        dry_run_dir=FAKES_MULTI,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=clock,
+    )
+    assert rc == 0
+    cr = _current_run(state_path)
+    # The time-budget gate must NOT have fired (window degraded, not truncated).
+    assert not any("time_budget_exceeded" in r for r in cr["partial_reasons"]), cr[
+        "partial_reasons"
+    ]
+    # Any partial state is solely the orthogonal CCE-19 clip fallback, never the
+    # time-budget feature.
+    assert all("time_budget" not in r for r in cr["partial_reasons"]), cr[
+        "partial_reasons"
+    ]

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **CCE-109 time budget now bounds the authoring fan-out (CCE-114).** The
+  soft deadline was only checked at PR admission, which completes minutes
+  into a run — the page-author fan-out (one dispatch per doc-target batch)
+  then ran unbounded, and six consecutive scheduled nightlies died at the
+  workflow's 60-minute hard kill with all work discarded. The deadline is
+  now checked before each authoring batch (at-least-one-progress, mirroring
+  admission) and before each advisory fact-checker/gap-detector dispatch
+  (skip outright). All cuts flip `partial`, so the CCE-101 gate never
+  auto-merges a run whose pages were cut or never fact-checked.
+
 ### Added
 
 - **Factual-accuracy guard for authored pages (page-author confabulation fix).** Three layers: page-author now receives `source_paths` grounding inputs and returns advisory `evidence.files_read`; a new Tier-1 `citation_exists` lint rule blocks pages citing nonexistent repo paths or test identifiers (regression-pinned against the two 2026-06-09 confabulated pages); a new warn-only `fact-checker` subagent (the eighth) flags prose that contradicts cited source, rendered as a "Factual-accuracy warnings" PR-body section. Generic-first: no git → trivial pass, no citations → no dispatch, fact-checker failure → info-only note. Tracker: CCE-110.

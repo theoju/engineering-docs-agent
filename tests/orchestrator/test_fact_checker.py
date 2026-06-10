@@ -64,3 +64,105 @@ def test_page_author_output_with_evidence_validates():
     parsed, reasons = validate_and_parse("page-author", raw)
     assert reasons == []
     assert parsed.ok
+
+
+# ---------- orchestrator wiring (dry-run fixtures) ----------
+
+import orchestrator_runner  # noqa: E402
+
+
+def _write_fakes(fakes: Path, *, with_fact_checker: bool = True) -> None:
+    """Minimal dry-run fixture set for one PR -> one core page."""
+    fakes.mkdir(parents=True, exist_ok=True)
+    (fakes / "fake_source_collector.json").write_text(
+        json.dumps(
+            {
+                "prs": [
+                    {
+                        "number": 1,
+                        "url": "https://example.test/pr/1",
+                        "merge_sha": "",
+                        "files": [
+                            {"path": "scripts/real_module.py"},
+                            "plain_listed.py",
+                        ],
+                        "jira_keys": [],
+                    }
+                ],
+                "jira_issues": [],
+            }
+        )
+    )
+    (fakes / "fake_pr_summarizer.json").write_text(
+        json.dumps(
+            {
+                "pr_number": 1,
+                "what_changed": "module behavior",
+                "doc_targets": [
+                    {"lens": "core", "page_hint": "page.md", "action": "create"}
+                ],
+            }
+        )
+    )
+    (fakes / "fake_page_author.json").write_text(
+        json.dumps(
+            {"ok": True, "path": "docs/site-src/core/page.md", "action": "create"}
+        )
+    )
+    (fakes / "fake_content_validator.json").write_text(
+        json.dumps({"passed": [], "failed": []})
+    )
+    (fakes / "fake_gap_detector.json").write_text(
+        json.dumps({"pr_id": "o/r#1", "needs_spec": False})
+    )
+    (fakes / "fake_notifier.json").write_text(
+        json.dumps({"slack_ok": True, "email_ok": True})
+    )
+    if with_fact_checker:
+        (fakes / "fake_fact_checker.json").write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "verdict": "contradiction",
+                    "page": "docs/site-src/core/page.md",
+                    "findings": [
+                        {
+                            "claim": "page says X but code does Y",
+                            "source_path": "scripts/real_module.py",
+                            "evidence": "real_fn returns 1",
+                        }
+                    ],
+                }
+            )
+        )
+
+
+def _host_with_module(init_host, tmp_path) -> Path:
+    """init_host + one committed source file the pages can cite."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "real_module.py").write_text(
+        "def real_fn():\n    return 1\n"
+    )
+    return init_host({"version": "1"})
+
+
+def test_page_author_receives_source_paths(init_host, tmp_path, monkeypatch):
+    _host_with_module(init_host, tmp_path)
+    fakes = tmp_path / "fakes"
+    _write_fakes(fakes)
+
+    captured: dict = {}
+    real = orchestrator_runner.dispatch_validated
+
+    def spy(name, inputs, **kw):
+        if name == "page-author":
+            captured["inputs"] = inputs
+        return real(name, inputs, **kw)
+
+    monkeypatch.setattr(orchestrator_runner, "dispatch_validated", spy)
+    rc = orchestrator_runner.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0
+    assert captured["inputs"]["source_paths"] == [
+        "plain_listed.py",
+        "scripts/real_module.py",
+    ]

@@ -1431,6 +1431,16 @@ def run(
             _dk = doc_kind_by_target.get((lens, hint))
             if _dk:
                 fm_template["doc_kind"] = _dk
+            # CCE-110 layer 1: ground the author in the code the PRs touched.
+            grounding: set[str] = set()
+            for s in batch_summaries:
+                for pr in prs:
+                    if pr.get("number") != s.get("pr_number"):
+                        continue
+                    for f in pr.get("files") or []:
+                        fname = f.get("path") if isinstance(f, dict) else f
+                        if isinstance(fname, str) and fname:
+                            grounding.add(fname)
             out, reasons = dispatch_validated(
                 "page-author",
                 {
@@ -1440,6 +1450,7 @@ def run(
                     "summaries": batch_summaries,
                     "voice_samples": voice_samples,
                     "frontmatter_template": fm_template,
+                    "source_paths": sorted(grounding),
                 },
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,

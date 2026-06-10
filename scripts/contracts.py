@@ -75,6 +75,19 @@ class NotifierResult:
             object.__setattr__(self, "errors", [])
 
 
+@dataclass(frozen=True)
+class FactCheckerResult:
+    ok: bool
+    verdict: str
+    page: str | None = None
+    findings: list[dict] = None  # type: ignore[assignment]
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.findings is None:
+            object.__setattr__(self, "findings", [])
+
+
 _DATACLASS_BY_NAME: dict[str, type] = {
     "source-collector": SourceCollectorResult,
     "pr-summarizer": PrSummary,
@@ -83,6 +96,7 @@ _DATACLASS_BY_NAME: dict[str, type] = {
     "gap-detector": GapVerdict,
     "publish-verifier": VerifyVerdict,
     "notifier": NotifierResult,
+    "fact-checker": FactCheckerResult,
 }
 
 

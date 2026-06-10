@@ -1430,7 +1430,20 @@ def run(
         authored: list[str] = []
         authored_lens: dict[str, str] = {}
         pr_by_number = {pr.get("number"): pr for pr in prs}
-        for (lens, hint), batch_summaries in per_target.items():
+        for i, ((lens, hint), batch_summaries) in enumerate(per_target.items()):
+            # CCE-114: the authoring fan-out is the most expensive phase (one
+            # dispatch per batch), so it must respect the CCE-109 deadline —
+            # admission alone happens too early to bound the run (all PRs are
+            # admitted minutes in; run 27263616736 then authored straight
+            # through the deadline into the workflow's 60-min hard kill).
+            # Same at-least-one-progress guarantee as PR admission (i > 0).
+            if deadline is not None and i > 0 and clock() > deadline:
+                add_partial(
+                    state,
+                    f"time_budget_exceeded: authored {i}/{len(per_target)} "
+                    f"page batches (budget {budget}s); deferring the rest",
+                )
+                break
             try:
                 lens_path, _opts = resolve_lens(config, lens)
             except KeyError:
@@ -1575,7 +1588,8 @@ def run(
         # dispatch per surviving authored page that cites >=1 resolvable repo
         # source. Findings are operator-facing warnings only: info_only
         # reasons, a PR-body section, and the run record — never a partial
-        # flag, never a dropped page.
+        # flag, never a dropped page. (Sole exception: a CCE-114 time-budget
+        # cut of this loop DOES flip partial — see the guard inside.)
         fact_warnings: list[str] = []
         fact_pages = [p for p in authored if Path(p).exists()]
         if fact_pages:
@@ -1586,7 +1600,21 @@ def run(
                 sys.path.append(lint_dir)
             import citation_exists as _citation_exists
 
-            for page in fact_pages:
+            for i, page in enumerate(fact_pages):
+                # CCE-114: advisory layer — skip the remaining pages outright
+                # once the deadline passes (no at-least-one guarantee; every
+                # post-deadline second risks the hard kill). The reason is
+                # deliberately NOT info-only: pages that were never
+                # fact-checked must not auto-merge, and the CCE-101 gate
+                # keys off `partial`.
+                if deadline is not None and clock() > deadline:
+                    add_partial(
+                        state,
+                        f"time_budget_exceeded: fact-checked {i}/"
+                        f"{len(fact_pages)} pages (budget {budget}s); "
+                        f"skipping the rest",
+                    )
+                    break
                 page_path = Path(page)
                 try:
                     page_text = page_path.read_text()
@@ -1691,7 +1719,16 @@ def run(
         # Gap detection
         dismissed = set(state.get("dismissed_gap_flags", {}).keys())
         gap_verdicts = []
-        for pr in prs:
+        for i, pr in enumerate(prs):
+            # CCE-114: advisory layer — skip entirely once the deadline
+            # passes, same posture as the fact-checker loop above.
+            if deadline is not None and clock() > deadline:
+                add_partial(
+                    state,
+                    f"time_budget_exceeded: gap-checked {i}/{len(prs)} PRs "
+                    f"(budget {budget}s); skipping the rest",
+                )
+                break
             pr_id = f"{repo['owner']}/{repo['name']}#{pr['number']}"
             if pr_id in dismissed:
                 continue

@@ -253,3 +253,77 @@ def test_fact_checker_consistent_verdict_yields_no_warnings(
     rc = orchestrator_runner.run(tmp_path, dry_run_dir=fakes, no_pr=True)
     assert rc == 0
     assert read_current_run(state_path)["fact_check_warnings"] == []
+
+
+# ---------- PR body + notifier digest threading ----------
+
+
+def test_compose_pr_body_renders_fact_warnings():
+    body = orchestrator_runner._compose_pr_body(
+        changed_files=["docs/site-src/core/page.md"],
+        lens_paths={"core": "docs/site-src/core"},
+        partial=False,
+        partial_reasons=[],
+        baseline_sha="a" * 40,
+        current_sha="b" * 40,
+        fact_warnings=["`docs/site-src/core/page.md`: claim (vs `scripts/x.py`)"],
+    )
+    assert "**Factual-accuracy warnings:**" in body
+    assert "- `docs/site-src/core/page.md`: claim (vs `scripts/x.py`)" in body
+
+
+def test_compose_pr_body_warnings_alone_render():
+    body = orchestrator_runner._compose_pr_body(
+        changed_files=[],
+        lens_paths=None,
+        partial=False,
+        partial_reasons=[],
+        baseline_sha="",
+        current_sha="",
+        fact_warnings=["w1"],
+    )
+    assert "Factual-accuracy warnings" in body
+    assert body != "docs-agent run"
+
+
+def test_compose_pr_body_no_warnings_keeps_legacy_sentinel():
+    body = orchestrator_runner._compose_pr_body(
+        changed_files=[],
+        lens_paths=None,
+        partial=False,
+        partial_reasons=[],
+        baseline_sha="",
+        current_sha="",
+    )
+    assert body == "docs-agent run"
+
+
+def test_run_threads_fact_warnings_to_pr_and_digest(init_host, tmp_path, monkeypatch):
+    _host_with_module(init_host, tmp_path)
+    _precreate_page(tmp_path, CITED_PAGE)
+    fakes = tmp_path / "fakes"
+    _write_fakes(fakes)
+
+    seen_pr: dict = {}
+
+    def fake_open(repo_root, gh, **kw):
+        seen_pr.update(kw)
+        return 1, []
+
+    monkeypatch.setattr(orchestrator_runner, "open_or_append_pr", fake_open)
+
+    seen_notifier: dict = {}
+    real = orchestrator_runner.dispatch_validated
+
+    def spy(name, inputs, **kw):
+        if name == "notifier":
+            seen_notifier.update(inputs)
+        return real(name, inputs, **kw)
+
+    monkeypatch.setattr(orchestrator_runner, "dispatch_validated", spy)
+
+    rc = orchestrator_runner.run(tmp_path, dry_run_dir=fakes, no_pr=False)
+    assert rc == 0
+    assert len(seen_pr["fact_warnings"]) == 1
+    assert "page says X but code does Y" in seen_pr["fact_warnings"][0]
+    assert seen_notifier["digest"]["fact_check_warnings"] == seen_pr["fact_warnings"]

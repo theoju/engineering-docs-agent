@@ -1802,6 +1802,7 @@ def run(
             # must end at the cursor actually persisted, not the full HEAD
             # (advance_sha == HEAD whenever the run wasn't truncated).
             current_sha=advance_sha,
+            fact_warnings=state["current_run"].get("fact_check_warnings") or [],
         )
         for reason, info_only in pr_reasons:
             add_partial(state, reason, info_only=info_only)
@@ -1842,6 +1843,8 @@ def run(
             "source_drift": drifted_pages,
             "citation_drift": citation_ledger,
             "core_drift": core_drifted,
+            "fact_check_warnings": state["current_run"].get("fact_check_warnings")
+            or [],
         }
         notifier_result, reasons = dispatch_validated(
             "notifier",
@@ -2172,6 +2175,7 @@ def _compose_pr_body(
     baseline_sha: str,
     current_sha: str,
     top_n: int = 5,
+    fact_warnings: list[str] | None = None,
 ) -> str:
     """CCE-89 D1: compose a docs-agent PR body with operator-review enrichment.
 
@@ -2193,11 +2197,12 @@ def _compose_pr_body(
     has_files = bool(changed_files)
     has_baseline = bool(baseline_sha) and bool(current_sha)
     has_reasons = bool(partial_reasons)
+    has_warnings = bool(fact_warnings)
 
-    if not has_files and not has_baseline and not has_reasons:
+    if not has_files and not has_baseline and not has_reasons and not has_warnings:
         return "docs-agent run"
 
-    if not has_files and not has_baseline and has_reasons:
+    if not has_files and not has_baseline and has_reasons and not has_warnings:
         return _format_partial_digest(partial_reasons)
 
     sections: list[str] = []
@@ -2222,6 +2227,11 @@ def _compose_pr_body(
         if remaining > 0:
             page_lines.append(f"- _(+{remaining} more)_")
         sections.append("\n".join(page_lines))
+
+    if has_warnings:
+        warn_lines = ["**Factual-accuracy warnings:**"]
+        warn_lines.extend(f"- {w}" for w in fact_warnings)
+        sections.append("\n".join(warn_lines))
 
     if has_reasons:
         digest = _format_partial_digest(partial_reasons)
@@ -2567,6 +2577,7 @@ def open_or_append_pr(
     lens_paths: dict[str, str] | None = None,
     baseline_sha: str = "",
     current_sha: str = "",
+    fact_warnings: list[str] | None = None,
 ) -> tuple[int | None, list[tuple[str, bool]]]:
     """Open or append the docs-agent PR for `branch`.
 
@@ -2673,6 +2684,7 @@ def open_or_append_pr(
         partial_reasons=partial_reasons,
         baseline_sha=baseline_sha,
         current_sha=current_sha,
+        fact_warnings=fact_warnings,
     )
     created = gh.pr_create(branch, commit_msg, body)
     if not created.ok:

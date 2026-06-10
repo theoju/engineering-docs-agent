@@ -6,7 +6,7 @@ instead of invoking Claude.
 """
 
 from __future__ import annotations
-import argparse, fnmatch, json, os, re, subprocess, sys
+import argparse, fnmatch, json, os, re, subprocess, sys, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -305,6 +305,25 @@ def _summarize_tool_use(events: list[dict]) -> dict:
         "stop_reason": result_ev.get("stop_reason"),
         "duration_ms": result_ev.get("duration_ms"),
     }
+
+
+DEFAULT_TIME_BUDGET_SECONDS = 2700  # 45 min; below the 60-min job hard limit
+
+
+def resolve_time_budget(config: dict, cli_override: int | None) -> int:
+    """Resolve the per-run soft time budget in seconds.
+
+    Precedence: CLI override (incl. explicit 0 = unlimited) > config
+    `run.time_budget_seconds` > DEFAULT_TIME_BUDGET_SECONDS. A value <= 0 means
+    "no budget" (unlimited); the caller turns that into deadline=None.
+    """
+    if cli_override is not None:
+        return cli_override
+    run_cfg = config.get("run") or {}
+    val = run_cfg.get("time_budget_seconds")
+    if val is None:
+        return DEFAULT_TIME_BUDGET_SECONDS
+    return int(val)
 
 
 def _clip_prs_to_window(
@@ -1002,7 +1021,14 @@ def run_site_generators(repo_root: Path, config: dict, state: dict) -> dict:
     return result
 
 
-def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
+def run(
+    repo_root: Path,
+    *,
+    dry_run_dir: Path | None,
+    no_pr: bool,
+    time_budget_seconds: int | None = None,
+    now_monotonic: Callable[[], float] | None = None,
+) -> int:
     cfg_path = repo_root / ".engineering-docs-agent" / "config.yml"
     state_path = repo_root / ".engineering-docs-agent" / "state.json"
     if not cfg_path.exists():
@@ -1014,6 +1040,9 @@ def run(repo_root: Path, *, dry_run_dir: Path | None, no_pr: bool) -> int:
     except ConfigError as e:
         emit_log(f"config invalid: {e}")
         return 2
+    clock = now_monotonic or time.monotonic
+    _budget = resolve_time_budget(config, time_budget_seconds)
+    deadline = clock() + _budget if _budget and _budget > 0 else None
     voice_samples = load_voice_samples(repo_root, config)
     try:
         state = load_state_validated(state_path)
@@ -2352,12 +2381,24 @@ def main() -> int:
     parser.add_argument(
         "--today", default=None, help="ISO date for last_reviewed (bootstrap-core)."
     )
+    parser.add_argument(
+        "--time-budget-seconds",
+        type=int,
+        default=None,
+        help="CCE-109 soft per-run budget (seconds). 0 = unlimited. "
+        "Overrides config run.time_budget_seconds.",
+    )
     args = parser.parse_args()
     if args.bootstrap_core:
         return run_bootstrap_core(
             args.repo_root, dry_run_dir=args.dry_run_subagents, today=args.today
         )
-    return run(args.repo_root, dry_run_dir=args.dry_run_subagents, no_pr=args.no_pr)
+    return run(
+        args.repo_root,
+        dry_run_dir=args.dry_run_subagents,
+        no_pr=args.no_pr,
+        time_budget_seconds=args.time_budget_seconds,
+    )
 
 
 if __name__ == "__main__":

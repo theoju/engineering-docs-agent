@@ -164,6 +164,17 @@
           }
         }
       }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "time_budget_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "CCE-109: soft per-run time budget in seconds. 0 = unlimited. Default 2700."
+        }
+      }
     }
   }
 }

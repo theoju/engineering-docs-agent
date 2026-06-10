@@ -32,63 +32,14 @@ FAKES_OK = Path(__file__).parent / "fakes"
 FAKES_SC_ERROR = Path(__file__).parent / "fakes_sc_error"
 FAKES_BLOCK = Path(__file__).parent / "fakes_block"
 
-CONFIG_YAML = """
-docs:
-  framework: mkdocs
-  source_dir: docs/site-src
-  whats_new_file: docs/site-src/whats-new.md
-  agent_editable_paths: ["docs/site-src/**"]
-  lens_paths:
-    core: docs/site-src/core
-sources:
-  git: { host: github }
-lint: { tier1: default }
-publishing:
-  base_url: https://example.com
-  build_workflow: deploy.yml
-  url_map_rule: standard
-  verify_timeout_seconds: 60
-notifications:
-  slack: { enabled: false }
-  email: { enabled: false }
-"""
 
-
-def _init_host(tmp_path: Path, seeded_state: dict) -> tuple[Path, str]:
-    """Initialize a git repo + config + seeded state. Returns
-    (state_path, head_sha_after_init).
-    """
-    (tmp_path / "docs" / "site-src" / "core").mkdir(parents=True)
-    (tmp_path / ".engineering-docs-agent").mkdir()
-    (tmp_path / ".engineering-docs-agent" / "config.yml").write_text(CONFIG_YAML)
-    state_path = tmp_path / ".engineering-docs-agent" / "state.json"
-    state_path.write_text(json.dumps(seeded_state))
-    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.email", "test@example.com"],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.name", "Test"], check=True
-    )
-    (tmp_path / "README.md").write_text("init")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"], check=True
-    )
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+def _head_sha(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
         capture_output=True,
         text=True,
         check=True,
     ).stdout.strip()
-    return state_path, head_sha
-
-
-def _read_current_run(state_path: Path) -> dict:
-    """CCE-40: current_run is in the sibling ephemeral file."""
-    sibling = state_path.parent / "current_run.json"
-    return json.loads(sibling.read_text())["current_run"]
 
 
 def _run_subproc(tmp_path: Path, fakes_dir: Path) -> subprocess.CompletedProcess:
@@ -107,7 +58,9 @@ def _run_subproc(tmp_path: Path, fakes_dir: Path) -> subprocess.CompletedProcess
     )
 
 
-def test_partial_run_via_source_collector_error_advances_state(tmp_path):
+def test_partial_run_via_source_collector_error_advances_state(
+    tmp_path, init_host, read_current_run
+):
     """Subagent-error path: source-collector returns error+partial. The run
     proceeds, ends with current_run.partial=True, and state.json on disk
     still advances last_successful_run.head_sha to HEAD.
@@ -116,7 +69,8 @@ def test_partial_run_via_source_collector_error_advances_state(tmp_path):
     in its body and the operator decides whether to merge.
     """
     seeded = {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
-    state_path, head_sha = _init_host(tmp_path, seeded)
+    state_path = init_host(seeded)
+    head_sha = _head_sha(tmp_path)
 
     result = _run_subproc(tmp_path, FAKES_SC_ERROR)
     assert result.returncode == 0, f"runner failed: {result.stderr}"
@@ -133,7 +87,7 @@ def test_partial_run_via_source_collector_error_advances_state(tmp_path):
         f"current_run leaked into persistent state.json: {written}"
     )
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     assert cr["partial"] is True, (
         f"partial flag must be True after source_collector error; got {cr}"
     )
@@ -142,13 +96,16 @@ def test_partial_run_via_source_collector_error_advances_state(tmp_path):
     )
 
 
-def test_partial_run_via_lint_block_advances_state(tmp_path):
+def test_partial_run_via_lint_block_advances_state(
+    tmp_path, init_host, read_current_run
+):
     """Lint-block path: content-validator returns a block-severity failure.
     The blocked file is unlinked, current_run.partial=True, but state.json
     on disk still advances last_successful_run.head_sha.
     """
     seeded = {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
-    state_path, head_sha = _init_host(tmp_path, seeded)
+    state_path = init_host(seeded)
+    head_sha = _head_sha(tmp_path)
 
     result = _run_subproc(tmp_path, FAKES_BLOCK)
     assert result.returncode == 0, f"runner failed: {result.stderr}"
@@ -163,14 +120,16 @@ def test_partial_run_via_lint_block_advances_state(tmp_path):
         f"current_run leaked into persistent state.json: {written}"
     )
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     assert cr["partial"] is True
     assert any("lint_block" in r for r in cr["partial_reasons"]), (
         f"partial_reasons must contain lint_block: {cr['partial_reasons']}"
     )
 
 
-def test_pr_open_failure_returns_1_and_records_partial_reason(tmp_path, monkeypatch):
+def test_pr_open_failure_returns_1_and_records_partial_reason(
+    tmp_path, monkeypatch, init_host, read_current_run
+):
     """PR-open-failure path (§8 row 7): the runner hard-fails (returns 1).
 
     Per CCE-40 §7 row 3, the working-tree advance is acknowledged as
@@ -185,7 +144,8 @@ def test_pr_open_failure_returns_1_and_records_partial_reason(tmp_path, monkeypa
     importlib.reload(runner)
 
     seeded = {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
-    state_path, head_sha = _init_host(tmp_path, seeded)
+    state_path = init_host(seeded)
+    head_sha = _head_sha(tmp_path)
 
     captured: dict = {}
 
@@ -218,7 +178,7 @@ def test_pr_open_failure_returns_1_and_records_partial_reason(tmp_path, monkeypa
     )
     assert "current_run" not in written
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     assert any("forced_failure" in r for r in cr["partial_reasons"]), (
         f"partial_reasons must contain forced_failure: {cr['partial_reasons']}"
     )

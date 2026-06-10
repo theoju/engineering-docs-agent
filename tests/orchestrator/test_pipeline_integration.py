@@ -4,6 +4,8 @@ import json, subprocess, sys
 import sys as _sys
 from pathlib import Path
 
+import pytest
+
 RUNNER = Path(__file__).parent.parent.parent / "scripts" / "orchestrator_runner.py"
 FAKES = Path(__file__).parent / "fakes"
 FAKES_BLOCK = Path(__file__).parent / "fakes_block"
@@ -26,12 +28,9 @@ def _run_inproc(tmp_path: Path, fakes_dir: Path):
     return runner.run(tmp_path, dry_run_dir=fakes_dir, no_pr=True)
 
 
-def _read_current_run(state_path: Path) -> dict:
-    """CCE-40: current_run lives in a sibling file, not state.json."""
-    sibling = state_path.parent / "current_run.json"
-    return json.loads(sibling.read_text())["current_run"]
-
-
+# Variant of the conftest CONFIG_YAML: extra trigger/gap_detection blocks and
+# explicit (empty) tier2/tier3 lint maps — kept local so these tests keep
+# running under the exact config they were written against.
 CONFIG_YAML = """
 docs:
   framework: mkdocs
@@ -58,43 +57,20 @@ notifications:
 """
 
 
-def _init_host(tmp_path: Path, *, seed_files: dict[str, str] | None = None) -> Path:
-    """Create a docs site skeleton, config, state, and initial git commit.
+@pytest.fixture
+def init_pipeline_host(init_host):
+    """Thin wrapper over the conftest ``init_host`` factory: every test in this
+    file runs under the local variant CONFIG_YAML above and a state seeded with
+    dismissed_gap_flags/cursors."""
 
-    `seed_files` is a mapping of repo-relative path → content for files that
-    must exist in the initial commit (so they're in HEAD before the runner runs).
-    """
-    (tmp_path / "docs" / "site-src" / "core").mkdir(parents=True)
-    (tmp_path / ".engineering-docs-agent").mkdir()
-    (tmp_path / ".engineering-docs-agent" / "config.yml").write_text(CONFIG_YAML)
-    state = tmp_path / ".engineering-docs-agent" / "state.json"
-    state.write_text(
-        json.dumps({"version": "1", "dismissed_gap_flags": {}, "cursors": {}})
-    )
-    for rel, body in (seed_files or {}).items():
-        p = tmp_path / rel
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(body)
+    def _make(*, seed_files: dict[str, str] | None = None) -> Path:
+        return init_host(
+            {"version": "1", "dismissed_gap_flags": {}, "cursors": {}},
+            config_yaml=CONFIG_YAML,
+            seed_files=seed_files,
+        )
 
-    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(tmp_path),
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "user.name=t",
-            "commit",
-            "-q",
-            "-m",
-            "init",
-        ],
-        check=True,
-    )
-    return state
+    return _make
 
 
 def _run(tmp_path: Path, fakes_dir: Path) -> subprocess.CompletedProcess:
@@ -113,11 +89,11 @@ def _run(tmp_path: Path, fakes_dir: Path) -> subprocess.CompletedProcess:
     )
 
 
-def test_pipeline_dry_run(tmp_path):
-    state = _init_host(tmp_path)
+def test_pipeline_dry_run(tmp_path, init_pipeline_host, read_current_run):
+    state = init_pipeline_host()
     r = _run(tmp_path, FAKES)
     assert r.returncode == 0, r.stderr
-    cr = _read_current_run(state)
+    cr = read_current_run(state)
     assert cr is not None
     whats_new = tmp_path / "docs" / "site-src" / "whats-new.md"
     assert whats_new.exists(), "What's New file should be created"
@@ -126,9 +102,13 @@ def test_pipeline_dry_run(tmp_path):
     assert "Gaps flagged" in content
 
 
-def test_lint_block_unlinks_newly_created_file(tmp_path):
+def test_lint_block_unlinks_newly_created_file(
+    tmp_path,
+    init_pipeline_host,
+    read_current_run
+):
     """Create case: page-author writes a new file, validator blocks → unlink."""
-    state = _init_host(tmp_path)
+    state = init_pipeline_host()
     target = tmp_path / "docs" / "site-src" / "core" / "connectors" / "foo.md"
     assert not target.exists(), "foo.md must not be in HEAD for the create-case"
 
@@ -136,20 +116,20 @@ def test_lint_block_unlinks_newly_created_file(tmp_path):
     assert r.returncode == 0, r.stderr
     assert not target.exists(), "blocked create should be unlinked"
 
-    cr = _read_current_run(state)
+    cr = read_current_run(state)
     reasons = cr["partial_reasons"]
     assert cr["partial"] is True
     assert any("lint_block" in reason for reason in reasons), reasons
 
 
-def test_orchestrator_hard_fails_on_bad_config(tmp_path):
+def test_orchestrator_hard_fails_on_bad_config(tmp_path, init_pipeline_host):
     """An invalid config (missing required keys + bad enum) → exit 2 (hard fail)."""
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
     importlib.reload(runner)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
     cfg.write_text("docs:\n  framework: vuepress\n")  # missing required + bad enum
 
@@ -157,7 +137,11 @@ def test_orchestrator_hard_fails_on_bad_config(tmp_path):
     assert rc == 2, "exit 2 on invalid config (hard fail)"
 
 
-def test_same_page_targets_batched_into_single_dispatch(tmp_path, monkeypatch):
+def test_same_page_targets_batched_into_single_dispatch(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     """3 PRs that all target the same (lens, page_hint) → ONE page-author dispatch
     with all 3 summaries."""
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
@@ -175,7 +159,7 @@ def test_same_page_targets_batched_into_single_dispatch(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     rc = runner.run(tmp_path, dry_run_dir=FAKES_COLLISION, no_pr=True)
     assert rc == 0
 
@@ -184,14 +168,14 @@ def test_same_page_targets_batched_into_single_dispatch(tmp_path, monkeypatch):
     assert len(captured[0]["summaries"]) == 3
 
 
-def test_blocked_create_cleans_up_empty_parent_dirs(tmp_path):
+def test_blocked_create_cleans_up_empty_parent_dirs(tmp_path, init_pipeline_host):
     """Blocked create unlinks the file; empty parent dir(s) should also be removed."""
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
     importlib.reload(runner)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     rc = runner.run(tmp_path, dry_run_dir=FAKES_BLOCK, no_pr=True)
     assert rc == 0
 
@@ -201,12 +185,16 @@ def test_blocked_create_cleans_up_empty_parent_dirs(tmp_path):
     assert not connectors.exists(), "empty parent dir should be removed after cleanup"
 
 
-def test_lint_block_restores_edited_file_from_head(tmp_path):
+def test_lint_block_restores_edited_file_from_head(
+    tmp_path,
+    init_pipeline_host,
+    read_current_run
+):
     """Edit case: file in HEAD with original content, working tree modified,
     validator blocks → git checkout HEAD -- restores original content."""
     rel = "docs/site-src/core/connectors/foo.md"
     original = "---\nstatus: published\n---\n# Original\n"
-    state = _init_host(tmp_path, seed_files={rel: original})
+    state = init_pipeline_host(seed_files={rel: original})
     target = tmp_path / rel
     assert target.read_text() == original
 
@@ -218,12 +206,16 @@ def test_lint_block_restores_edited_file_from_head(tmp_path):
     assert r.returncode == 0, r.stderr
     assert target.read_text() == original, "blocked edit should be restored from HEAD"
 
-    cr = _read_current_run(state)
+    cr = read_current_run(state)
     assert cr["partial"] is True
     assert any("lint_block" in reason for reason in cr["partial_reasons"])
 
 
-def test_jira_input_forwarded_to_source_collector(tmp_path, monkeypatch):
+def test_jira_input_forwarded_to_source_collector(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     """When config has sources.jira, orchestrator passes it under the `jira` key."""
     import sys as _sys
 
@@ -241,7 +233,7 @@ def test_jira_input_forwarded_to_source_collector(tmp_path, monkeypatch):
 
     monkeypatch.setattr(orchestrator_runner, "dispatch_subagent", spying_dispatch)
 
-    state = _init_host(tmp_path)
+    state = init_pipeline_host()
     cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
     cfg.write_text(
         cfg.read_text().replace(
@@ -261,7 +253,11 @@ def test_jira_input_forwarded_to_source_collector(tmp_path, monkeypatch):
     }
 
 
-def test_jira_context_threaded_to_pr_summarizer(tmp_path, monkeypatch):
+def test_jira_context_threaded_to_pr_summarizer(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
@@ -279,7 +275,7 @@ def test_jira_context_threaded_to_pr_summarizer(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
 
     assert len(captured["summarizer_inputs"]) == 1
@@ -288,7 +284,11 @@ def test_jira_context_threaded_to_pr_summarizer(tmp_path, monkeypatch):
     assert jc[0]["key"] == "ADIS-235"
 
 
-def test_voice_samples_loaded_and_passed_to_authoring(tmp_path, monkeypatch):
+def test_voice_samples_loaded_and_passed_to_authoring(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
@@ -308,8 +308,7 @@ def test_voice_samples_loaded_and_passed_to_authoring(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
-    _init_host(
-        tmp_path,
+    init_pipeline_host(
         seed_files={
             "voice/tone.md": "Use second person.",
             "CLAUDE.md": "Project voice notes.",
@@ -328,14 +327,18 @@ def test_voice_samples_loaded_and_passed_to_authoring(tmp_path, monkeypatch):
         assert "CLAUDE.md" in paths
 
 
-def test_unsafe_page_path_filtered_logs_partial(tmp_path):
+def test_unsafe_page_path_filtered_logs_partial(
+    tmp_path,
+    init_pipeline_host,
+    read_current_run
+):
     """page_hint containing .. should not touch the filesystem."""
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
     importlib.reload(runner)
 
-    state_path = _init_host(tmp_path)
+    state_path = init_pipeline_host()
     rc = runner.run(tmp_path, dry_run_dir=FAKES_UNSAFE, no_pr=True)
     assert rc == 0
 
@@ -344,12 +347,16 @@ def test_unsafe_page_path_filtered_logs_partial(tmp_path):
     # No "etc" dir was created at any level
     assert not (tmp_path / ".." / "etc").exists()
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     reasons = cr["partial_reasons"]
     assert any("unsafe_page_path" in r for r in reasons)
 
 
-def test_gap_detector_receives_constructed_pr_id(tmp_path, monkeypatch):
+def test_gap_detector_receives_constructed_pr_id(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
@@ -366,21 +373,20 @@ def test_gap_detector_receives_constructed_pr_id(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
     monkeypatch.setenv("GITHUB_REPOSITORY", "myorg/myrepo")
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
 
     assert captured
     assert captured[0].get("pr_id") == "myorg/myrepo#1"
 
 
-def test_archive_index_regenerated_after_authoring(tmp_path):
+def test_archive_index_regenerated_after_authoring(tmp_path, init_pipeline_host):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
     importlib.reload(runner)
 
-    _init_host(
-        tmp_path,
+    init_pipeline_host(
         seed_files={
             "docs/site-src/archive/2025/old.md": "---\nstatus: archived\n---\n# Old",
         },
@@ -465,7 +471,11 @@ def test_dispatch_subagent_handles_claude_not_installed(monkeypatch, tmp_path):
     assert result is None
 
 
-def test_orchestrator_uses_gh_client_for_pr_create(tmp_path, monkeypatch):
+def test_orchestrator_uses_gh_client_for_pr_create(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
     import gh_client
@@ -478,7 +488,7 @@ def test_orchestrator_uses_gh_client_for_pr_create(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(runner, "GhClient", lambda *a, **kw: fake)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     # Have to make git work for commit/push: stub push to succeed
     monkeypatch.setattr(
         runner.subprocess,
@@ -489,13 +499,17 @@ def test_orchestrator_uses_gh_client_for_pr_create(tmp_path, monkeypatch):
     assert any(c[0] == "pr_create" for c in fake.calls)
 
 
-def test_stale_current_run_cleared_on_next_run(tmp_path):
+def test_stale_current_run_cleared_on_next_run(
+    tmp_path,
+    init_pipeline_host,
+    read_current_run
+):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
     importlib.reload(runner)
 
-    state_path = _init_host(tmp_path)
+    state_path = init_pipeline_host()
     # Inject a 48h-old current_run
     state = json.loads(state_path.read_text())
     from datetime import datetime, timedelta, timezone
@@ -512,19 +526,19 @@ def test_stale_current_run_cleared_on_next_run(tmp_path):
     rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
     assert rc == 0
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     assert "stale_current_run_cleared" in cr["partial_reasons"]
     # New current_run replaces the old; the old head_sha is gone
     assert cr["head_sha"] != "olddeadbeef"
 
 
-def test_zero_pr_run_does_not_write_whats_new(tmp_path):
+def test_zero_pr_run_does_not_write_whats_new(tmp_path, init_pipeline_host):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
     importlib.reload(runner)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     rc = runner.run(tmp_path, dry_run_dir=FAKES_EMPTY, no_pr=True)
     assert rc == 0
 
@@ -532,7 +546,12 @@ def test_zero_pr_run_does_not_write_whats_new(tmp_path):
     assert not whats_new.exists(), "no PRs => no whats_new write"
 
 
-def test_git_push_failure_adds_partial(tmp_path, monkeypatch):
+def test_git_push_failure_adds_partial(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host,
+    read_current_run
+):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
     import gh_client
@@ -553,37 +572,41 @@ def test_git_push_failure_adds_partial(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner.subprocess, "run", selective)
 
-    state_path = _init_host(tmp_path)
+    state_path = init_pipeline_host()
     rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=False)
     assert rc == 1
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     reasons = cr["partial_reasons"]
     assert any("push_failed" in r for r in reasons)
 
 
-def test_invalid_subagent_json_logs_partial_continues(tmp_path):
+def test_invalid_subagent_json_logs_partial_continues(
+    tmp_path,
+    init_pipeline_host,
+    read_current_run
+):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
     importlib.reload(runner)
 
-    state_path = _init_host(tmp_path)
+    state_path = init_pipeline_host()
     rc = runner.run(tmp_path, dry_run_dir=FAKES_BAD_JSON, no_pr=True)
     assert rc == 0
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     reasons = cr["partial_reasons"]
     assert any("pr_summarizer_invalid" in r for r in reasons)
 
 
-def test_multi_pr_runs_lists_all_in_whats_new(tmp_path):
+def test_multi_pr_runs_lists_all_in_whats_new(tmp_path, init_pipeline_host):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
     importlib.reload(runner)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     rc = runner.run(tmp_path, dry_run_dir=FAKES_MULTI, no_pr=True)
     assert rc == 0
 
@@ -633,7 +656,7 @@ def test_compose_whats_new_no_frontmatter_prepends():
     assert runner._compose_whats_new("", "## new\n- y\n\n") == "## new\n- y\n\n"
 
 
-def test_whats_new_prepend_preserves_frontmatter(tmp_path):
+def test_whats_new_prepend_preserves_frontmatter(tmp_path, init_pipeline_host):
     """run() must not push YAML frontmatter below the new entry. Reproduces the
     dry-run finding: the entry landed above the frontmatter, breaking parsing."""
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
@@ -651,7 +674,7 @@ def test_whats_new_prepend_preserves_frontmatter(tmp_path):
         "## 2026-05-20\n"
         "- PR #99: earlier entry\n"
     )
-    _init_host(tmp_path, seed_files={"docs/site-src/whats-new.md": seeded})
+    init_pipeline_host(seed_files={"docs/site-src/whats-new.md": seeded})
 
     rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
     assert rc == 0
@@ -667,24 +690,32 @@ def test_whats_new_prepend_preserves_frontmatter(tmp_path):
     )
 
 
-def test_source_collector_error_propagates_partial(tmp_path):
+def test_source_collector_error_propagates_partial(
+    tmp_path,
+    init_pipeline_host,
+    read_current_run
+):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
     importlib.reload(runner)
 
-    state_path = _init_host(tmp_path)
+    state_path = init_pipeline_host()
     rc = runner.run(tmp_path, dry_run_dir=FAKES_SC_ERROR, no_pr=True)
     assert rc == 0
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     reasons = cr["partial_reasons"]
     assert any("source_collector_error" in r for r in reasons)
     assert any("source_collector_partial" in r for r in reasons)
     assert cr["partial"] is True
 
 
-def test_run_surfaces_source_drift_in_whats_new_and_state(tmp_path):
+def test_run_surfaces_source_drift_in_whats_new_and_state(
+    tmp_path,
+    init_pipeline_host,
+    read_current_run
+):
     """Source-map stage wiring: run() must record drift in run state AND emit
     the 'Pages to review (source drift)' block in the What's-New entry.
 
@@ -698,7 +729,7 @@ def test_run_surfaces_source_drift_in_whats_new_and_state(tmp_path):
     connectors_content = (
         "---\nsource_files:\n  - backend/connectors/*.py\n---\n# Connectors\n"
     )
-    state_path = _init_host(tmp_path, seed_files={connectors_page: connectors_content})
+    state_path = init_pipeline_host(seed_files={connectors_page: connectors_content})
 
     # Overwrite the config with a site: block so compute_source_drift is active.
     site_block = (
@@ -726,7 +757,7 @@ def test_run_surfaces_source_drift_in_whats_new_and_state(tmp_path):
     )
 
     # --- Run-state assertion ---
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     expected_drift = [
         {"page": "core/connectors.md", "changed_sources": ["backend/connectors/foo.py"]}
     ]
@@ -735,7 +766,11 @@ def test_run_surfaces_source_drift_in_whats_new_and_state(tmp_path):
     )
 
 
-def test_available_sections_passed_to_pr_summarizer(tmp_path, monkeypatch):
+def test_available_sections_passed_to_pr_summarizer(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
@@ -751,7 +786,7 @@ def test_available_sections_passed_to_pr_summarizer(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     # Create subdirs inside the lens root after git init (scan is filesystem-only)
     (tmp_path / "docs" / "site-src" / "core" / "architecture").mkdir()
     (tmp_path / "docs" / "site-src" / "core" / "operations").mkdir()
@@ -763,7 +798,11 @@ def test_available_sections_passed_to_pr_summarizer(tmp_path, monkeypatch):
     assert sections.get("core") == ["architecture", "operations"]
 
 
-def test_available_sections_empty_when_no_subdirs(tmp_path, monkeypatch):
+def test_available_sections_empty_when_no_subdirs(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
 
@@ -779,14 +818,18 @@ def test_available_sections_empty_when_no_subdirs(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
-    _init_host(tmp_path)  # core/ dir exists but has no subdirs
+    init_pipeline_host()  # core/ dir exists but has no subdirs
     runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
 
     assert captured
     assert captured[0]["available_sections"] == {"core": []}
 
 
-def test_available_sections_empty_when_lens_root_missing(tmp_path, monkeypatch):
+def test_available_sections_empty_when_lens_root_missing(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     """Lens root that does not exist on disk → empty list, no crash."""
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -803,7 +846,7 @@ def test_available_sections_empty_when_lens_root_missing(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     # Add a second lens pointing to a dir that does not exist
     cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
     cfg.write_text(
@@ -819,7 +862,11 @@ def test_available_sections_empty_when_lens_root_missing(tmp_path, monkeypatch):
     assert captured[0]["available_sections"]["extra"] == []
 
 
-def test_available_sections_excludes_hidden_dirs(tmp_path, monkeypatch):
+def test_available_sections_excludes_hidden_dirs(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     """Dot-prefixed dirs (e.g. .git in a broad lens root) are never routing targets."""
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -836,7 +883,7 @@ def test_available_sections_excludes_hidden_dirs(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     # A hidden dir alongside a real section must not surface as a routing target.
     (tmp_path / "docs" / "site-src" / "core" / "operations").mkdir()
     (tmp_path / "docs" / "site-src" / "core" / ".hidden").mkdir()
@@ -847,7 +894,11 @@ def test_available_sections_excludes_hidden_dirs(tmp_path, monkeypatch):
     assert captured[0]["available_sections"]["core"] == ["operations"]
 
 
-def test_run_surfaces_core_drift_in_whats_new_and_state(tmp_path):
+def test_run_surfaces_core_drift_in_whats_new_and_state(
+    tmp_path,
+    init_pipeline_host,
+    read_current_run
+):
     """C2 drift-update stage wiring: a manifest core page that M flags as
     source-drifted is surfaced under 'Core pages to review (drift)' in the
     What's-New entry AND recorded in run state. Flag-only — pinned at the helper
@@ -862,7 +913,7 @@ def test_run_surfaces_core_drift_in_whats_new_and_state(tmp_path):
     connectors_content = (
         "---\nsource_files:\n  - backend/connectors/*.py\n---\n# Connectors\n"
     )
-    state_path = _init_host(tmp_path, seed_files={connectors_page: connectors_content})
+    state_path = init_pipeline_host(seed_files={connectors_page: connectors_content})
 
     site_block = (
         "site:\n"
@@ -895,11 +946,15 @@ def test_run_surfaces_core_drift_in_whats_new_and_state(tmp_path):
     assert "### Core pages to review (drift)" in whats_new
     assert "- core/connectors.md (source)" in whats_new
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     assert cr["core_drift"] == [{"page": "core/connectors.md", "reasons": ["source"]}]
 
 
-def test_content_validator_dispatch_includes_plugin_root(tmp_path, monkeypatch):
+def test_content_validator_dispatch_includes_plugin_root(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     """CCE-67: orchestrator must pass plugin_root in content-validator inputs
     so the subagent can locate scripts/lint/lint_runner.py at the absolute
     plugin path (the plugin is vendored at .docs-agent-plugin/ in CI, not the
@@ -921,7 +976,7 @@ def test_content_validator_dispatch_includes_plugin_root(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
 
     assert captured, "expected at least one content-validator dispatch"
@@ -935,7 +990,11 @@ def test_content_validator_dispatch_includes_plugin_root(tmp_path, monkeypatch):
     )
 
 
-def test_content_validator_payload_plugin_root_is_str_not_path(tmp_path, monkeypatch):
+def test_content_validator_payload_plugin_root_is_str_not_path(
+    tmp_path,
+    monkeypatch,
+    init_pipeline_host
+):
     """CCE-67: plugin_root must be passed as str, not Path, to remain
     JSON-serializable. Path objects round-trip through the dispatcher's JSON
     serialization differently across platforms (POSIX vs Windows)."""
@@ -956,7 +1015,7 @@ def test_content_validator_payload_plugin_root_is_str_not_path(tmp_path, monkeyp
 
     monkeypatch.setattr(runner, "dispatch_subagent", spying)
 
-    _init_host(tmp_path)
+    init_pipeline_host()
     runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
 
     assert captured

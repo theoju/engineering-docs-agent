@@ -3,8 +3,8 @@
 
 CONFIG_YAML / init_host / read_current_run existed as near-verbatim
 module-level copies in seven test files when this conftest was introduced
-(CCE-109 review). New tests should use these fixtures; migrating the older
-files is a mechanical follow-up.
+(CCE-109 review). The older files were migrated onto these fixtures in
+CCE-112; new tests should use them too.
 """
 
 from __future__ import annotations
@@ -48,14 +48,26 @@ def _git(repo: Path, *args: str) -> str:
 @pytest.fixture
 def init_host(tmp_path):
     """Factory: scaffold a host repo (git init + config + seeded state) in
-    tmp_path. Returns the state.json path."""
+    tmp_path. Returns the state.json path.
 
-    def _init(seeded_state: dict, config_yaml: str = CONFIG_YAML) -> Path:
+    `seed_files` is a mapping of repo-relative path → content for files that
+    must exist in the initial commit (so they're in HEAD before the runner
+    runs)."""
+
+    def _init(
+        seeded_state: dict,
+        config_yaml: str = CONFIG_YAML,
+        seed_files: dict[str, str] | None = None,
+    ) -> Path:
         (tmp_path / "docs" / "site-src" / "core").mkdir(parents=True)
         (tmp_path / ".engineering-docs-agent").mkdir()
         (tmp_path / ".engineering-docs-agent" / "config.yml").write_text(config_yaml)
         state_path = tmp_path / ".engineering-docs-agent" / "state.json"
         state_path.write_text(json.dumps(seeded_state))
+        for rel, body in (seed_files or {}).items():
+            p = tmp_path / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(body)
         _git(tmp_path, "init", "-q")
         _git(tmp_path, "config", "user.email", "t@example.com")
         _git(tmp_path, "config", "user.name", "T")

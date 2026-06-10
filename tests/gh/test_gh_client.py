@@ -224,3 +224,86 @@ def test_pr_checks_garbage_nonzero_is_error(monkeypatch, tmp_path):
     r = GhClient(tmp_path).pr_checks(7)
     assert not r.ok
     assert r.error.startswith("gh_pr_checks_failed")
+
+
+def test_pr_checks_failing_exit_1_with_json_is_data(monkeypatch, tmp_path):
+    """A genuine check failure returns exit 1 WITH a JSON payload on
+    stdout. JSON acceptance must not be gated on returncode — the caller
+    classifies red/green from state/bucket (CCE-83)."""
+    from gh_client import GhClient
+
+    stdout = json.dumps([{"name": "pytest", "state": "FAILURE", "bucket": "fail"}])
+    monkeypatch.setattr(
+        "gh_client.subprocess.run", _fake_run(stdout=stdout, returncode=1)
+    )
+    r = GhClient(tmp_path).pr_checks(7)
+    assert r.ok
+    assert r.value[0]["bucket"] == "fail"
+
+
+def test_pr_merge_success_builds_squash_delete_argv(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    seen = {}
+
+    def _capture(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("gh_client.subprocess.run", _capture)
+    r = GhClient(tmp_path).pr_merge(7)
+    assert r.ok and r.value == 7
+    assert seen["cmd"] == [
+        "gh",
+        "pr",
+        "merge",
+        "7",
+        "--squash",
+        "--delete-branch",
+    ]
+
+
+def test_pr_merge_failure_surfaces_stderr(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    monkeypatch.setattr(
+        "gh_client.subprocess.run",
+        _fake_run(stderr="branch protection", returncode=1),
+    )
+    r = GhClient(tmp_path).pr_merge(7)
+    assert not r.ok
+    assert r.error.startswith("gh_pr_merge_failed")
+    assert "branch protection" in r.error
+
+
+def test_workflow_run_dispatches_on_main(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    seen = {}
+
+    def _capture(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("gh_client.subprocess.run", _capture)
+    r = GhClient(tmp_path).workflow_run("docs-agent-pages.yml")
+    assert r.ok
+    assert seen["cmd"] == [
+        "gh",
+        "workflow",
+        "run",
+        "docs-agent-pages.yml",
+        "--ref",
+        "main",
+    ]
+
+
+def test_workflow_run_failure(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    monkeypatch.setattr(
+        "gh_client.subprocess.run", _fake_run(stderr="404", returncode=1)
+    )
+    r = GhClient(tmp_path).workflow_run("docs-agent-pages.yml")
+    assert not r.ok
+    assert r.error.startswith("gh_workflow_run_failed")

@@ -94,6 +94,47 @@ class GhClient:
             error=f"gh_pr_checks_failed: rc={r.returncode} {(r.stderr or '')[:200]}",
         )
 
+    def pr_merge(self, pr_number: int) -> GhResult:
+        """CCE-101: squash-merge + delete branch. Method is fixed by spec
+        (not configurable). Failure is the caller's leave-open fallback."""
+        try:
+            r = subprocess.run(
+                ["gh", "pr", "merge", str(pr_number), "--squash", "--delete-branch"],
+                cwd=self._cwd,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            return GhResult(ok=False, error="gh_not_installed")
+        if r.returncode != 0:
+            return GhResult(
+                ok=False, error=f"gh_pr_merge_failed: {(r.stderr or '')[:200]}"
+            )
+        return GhResult(ok=True, value=pr_number)
+
+    def workflow_run(self, workflow_file: str) -> GhResult:
+        """CCE-101: explicit pages-deploy dispatch after an auto-merge.
+
+        A merge pushed with GITHUB_TOKEN does not fire `on: push` workflows
+        (GitHub recursion suppression), so the docs would land in main with
+        the site never redeploying. workflow_dispatch is exempt from the
+        suppression, so this fires even under GITHUB_TOKEN.
+        """
+        try:
+            r = subprocess.run(
+                ["gh", "workflow", "run", workflow_file, "--ref", "main"],
+                cwd=self._cwd,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            return GhResult(ok=False, error="gh_not_installed")
+        if r.returncode != 0:
+            return GhResult(
+                ok=False, error=f"gh_workflow_run_failed: {(r.stderr or '')[:200]}"
+            )
+        return GhResult(ok=True, value=workflow_file)
+
     def pr_close(self, pr_number: int, comment: str) -> GhResult:
         """Close a PR with an explanatory comment.
 

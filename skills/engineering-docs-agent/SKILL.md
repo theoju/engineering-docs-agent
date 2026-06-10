@@ -82,8 +82,10 @@ See spec §8. Specifically: page-author content failing block-severity lint → 
   zero registered checks after the grace window merges on in-run validation
   (no-App-token hosts never get checks). Merge is `--squash --delete-branch`.
   After merging, dispatch `publishing.build_workflow` via `gh workflow run`
-  (a GITHUB_TOKEN merge cannot fire `on: push` workflows). Every outcome is
-  an info-only reason; any failure leaves the PR open (pre-CCE-101 behavior).
+  (a GITHUB_TOKEN merge cannot fire `on: push` workflows). Every reason the
+  gate emits is info-only (a `manual` host emits none — the digest's
+  `merge_outcome` carries it); any failure leaves the PR open (pre-CCE-101
+  behavior).
 
 ## Partial-run signaling
 

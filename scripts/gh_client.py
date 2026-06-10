@@ -119,10 +119,13 @@ class GhClient:
         (GitHub recursion suppression), so the docs would land in main with
         the site never redeploying. workflow_dispatch is exempt from the
         suppression, so this fires even under GITHUB_TOKEN.
+
+        No --ref: gh dispatches against the repo's default branch, which
+        keeps this generic for hosts whose default is master/trunk.
         """
         try:
             r = subprocess.run(
-                ["gh", "workflow", "run", workflow_file, "--ref", "main"],
+                ["gh", "workflow", "run", workflow_file],
                 cwd=self._cwd,
                 capture_output=True,
                 text=True,

@@ -58,9 +58,14 @@ New helper `_maybe_auto_merge(...)` in `scripts/orchestrator_runner.py`, called 
 ### Merge and post-merge
 
 - `gh pr merge <N> --squash --delete-branch`.
-- After a successful merge, when `publishing.build_workflow` is configured: `gh workflow run <build_workflow> --ref main`. This closes the `GITHUB_TOKEN` landmine — a merge performed with the default token does not trigger the host's `on: push → main` workflows, so without the explicit dispatch the docs land in main but the site never redeploys. `workflow_dispatch` is exempt from GitHub's recursion suppression, so the dispatch fires even under `GITHUB_TOKEN`.
+- After a successful merge, when `publishing.build_workflow` is configured: `gh workflow run <build_workflow>` (no `--ref` — gh dispatches against the host's default branch, generic for `master`/`trunk` hosts). This closes the `GITHUB_TOKEN` landmine — a merge performed with the default token does not trigger the host's `on: push → main` workflows, so without the explicit dispatch the docs land in main but the site never redeploys. `workflow_dispatch` is exempt from GitHub's recursion suppression, so the dispatch fires even under `GITHUB_TOKEN`.
 - On App-token hosts the push trigger _does_ fire, so the explicit dispatch produces a duplicate deploy. Coalesce it with a `concurrency` group in `templates/workflow-pages.yml` (verify at implementation time; add if missing). A duplicated deploy of identical content is harmless either way.
-- Dispatch failure → `pages_dispatch_failed` info reason. The publish-verifier remains the safety net for an unpublished site.
+- Dispatch failure → `pages_dispatch_failed` info reason. On App-token hosts the publish-verifier remains the safety net for an unpublished site; on `GITHUB_TOKEN` hosts it is NOT — `templates/workflow-verify.yml` triggers on `pull_request: closed`, which a `GITHUB_TOKEN` merge does not fire (the same recursion suppression). There the digest reason is the only signal.
+
+### Known limitations (post-review fast-follow)
+
+- **Ambiguous `pr_merge` failure:** `gh pr merge` performs the remote merge and then local cleanup (checkout default branch, pull, delete local branch). A failure in the local phase exits non-zero after the remote merge already succeeded — the gate then reports `merge_failed` and skips the pages dispatch even though the PR merged. Fix: on merge failure, re-query PR state; if merged, continue to the dispatch and emit a cleanup-warning reason instead.
+- **No publish-verifier backstop on `GITHUB_TOKEN` hosts** (see above): consider dispatching the verify workflow explicitly post-merge, the same way the build workflow is dispatched.
 
 ### Signaling
 

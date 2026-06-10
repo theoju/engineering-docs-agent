@@ -276,7 +276,9 @@ def test_pr_merge_failure_surfaces_stderr(monkeypatch, tmp_path):
     assert "branch protection" in r.error
 
 
-def test_workflow_run_dispatches_on_main(monkeypatch, tmp_path):
+def test_workflow_run_dispatches_on_default_branch(monkeypatch, tmp_path):
+    """No --ref: gh defaults to the repo's default branch, so the dispatch
+    works on hosts whose default is master/trunk (generic-first)."""
     from gh_client import GhClient
 
     seen = {}
@@ -293,8 +295,6 @@ def test_workflow_run_dispatches_on_main(monkeypatch, tmp_path):
         "workflow",
         "run",
         "docs-agent-pages.yml",
-        "--ref",
-        "main",
     ]
 
 

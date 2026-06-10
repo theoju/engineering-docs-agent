@@ -6,8 +6,10 @@ plain markdown rendered by GitHub at `https://github.com/<owner>/<repo>/blob/mai
 
 ## What runs
 
-- `pr-summarizer`, `page-author`, `content-validator` (Tier-1 rules),
-  `gap-detector`, `notifier`: all run normally.
+- `pr-summarizer`, `page-author`, `content-validator` (Tier-1 rules,
+  including `citation_exists`), `fact-checker` (factual-accuracy
+  warnings on pages that cite repo sources), `gap-detector`,
+  `notifier`: all run normally.
 - The What's New entry and the nightly PR are produced normally.
 
 ## What skips

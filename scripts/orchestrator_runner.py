@@ -2620,11 +2620,61 @@ def _maybe_auto_merge(
                 return skip("human_edited")
 
     grace = merge_settings["checks_grace_seconds"]
-    timeout = merge_settings["checks_timeout_seconds"]  # noqa: F841 — used by Task 7
+    timeout = merge_settings["checks_timeout_seconds"]
     if deadline is not None and clock() + grace > deadline:
         return skip("time_budget")
 
-    raise NotImplementedError("poll loop: Task 7")
+    reasons: list[tuple[str, bool]] = []
+    start = clock()
+    grace_end = start + grace
+    poll_end = start + timeout
+    if deadline is not None:
+        poll_end = min(poll_end, deadline)
+
+    while True:
+        checks = gh.pr_checks(pr_number)
+        if not checks.ok:
+            return skip("checks_query_failed", checks.error or "")
+        items = checks.value or []
+        red = [
+            c for c in items if c.get("state") == "FAILURE" or c.get("bucket") == "fail"
+        ]
+        if red:
+            names = ",".join(sorted(c.get("name") or "?" for c in red))
+            return skip("checks_failed", names)
+        pending = [
+            c
+            for c in items
+            if not (
+                c.get("state") == "SUCCESS" or c.get("bucket") in ("pass", "skipping")
+            )
+        ]
+        now = clock()
+        if not items:
+            if now >= grace_end:
+                break  # zero checks registered: in-run validation is the gate
+        elif not pending:
+            break  # every registered check settled green
+        if now >= poll_end:
+            return skip(
+                "checks_timeout", f"{len(pending)} pending after {int(now - start)}s"
+            )
+        sleep(_CHECKS_POLL_INTERVAL_SECONDS)
+
+    merged = gh.pr_merge(pr_number)
+    if not merged.ok:
+        return (
+            {"merged": False, "reason": "merge_failed"},
+            [(f"auto_merge_failed: {merged.error}", True)],
+        )
+    reasons.append((f"auto_merge_succeeded: pr={pr_number}", True))
+    if build_workflow:
+        dispatch = gh.workflow_run(build_workflow)
+        if dispatch.ok:
+            reasons.append((f"pages_dispatch_succeeded: {build_workflow}", True))
+        else:
+            reasons.append((f"pages_dispatch_failed: {dispatch.error}", True))
+    return {"merged": True, "reason": None}, reasons
 
 
 def _changed_files_in_head_commit(repo_root: Path) -> list[str]:

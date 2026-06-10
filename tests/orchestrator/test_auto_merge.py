@@ -161,3 +161,124 @@ def test_exhausted_time_budget_skips_before_polling():
     outcome, reasons = _run(gh, deadline=1060.0, clock=clock)
     assert outcome["reason"] == "time_budget"
     assert not [c for c in gh.calls if c[0] == "pr_checks"]
+
+
+# ---------------------------------------------------------------------------
+# Task 7: _maybe_auto_merge — check poll, merge, pages dispatch
+# ---------------------------------------------------------------------------
+
+
+def _eligible_gh(**kw):
+    kw.setdefault(
+        "pr_view_commits", GhResult(ok=True, value=[{"authors": [_bot_author()]}])
+    )
+    return FakeGhClient(**kw)
+
+
+def _green(name="ci"):
+    return {"name": name, "state": "SUCCESS", "bucket": "pass"}
+
+
+def _pending(name="ci"):
+    return {"name": name, "state": "PENDING", "bucket": "pending"}
+
+
+def _red(name="ci"):
+    return {"name": name, "state": "FAILURE", "bucket": "fail"}
+
+
+def test_zero_checks_merges_after_grace_window():
+    """No-App-token host: no checks ever register; in-run validation is
+    the gate. Merge fires once the grace window elapses."""
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[]))
+    clock = FakeClock()
+    outcome, reasons = _run(gh, clock=clock)
+    assert outcome == {"merged": True, "reason": None}
+    assert ("pr_merge", (7,)) in gh.calls
+    assert clock.t >= 120  # waited out the grace window
+    assert ("auto_merge_succeeded: pr=7", True) in reasons
+
+
+def test_checks_green_merges_without_waiting_full_grace():
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
+    clock = FakeClock()
+    outcome, _ = _run(gh, clock=clock)
+    assert outcome["merged"] is True
+    assert clock.t < 120  # settled checks short-circuit the grace wait
+
+
+def test_pending_then_green_polls_until_settled():
+    gh = _eligible_gh(
+        pr_checks=[
+            GhResult(ok=True, value=[_pending()]),
+            GhResult(ok=True, value=[_pending()]),
+            GhResult(ok=True, value=[_green()]),
+        ]
+    )
+    outcome, _ = _run(gh)
+    assert outcome["merged"] is True
+    assert [c for c in gh.calls if c[0] == "pr_checks"]
+
+
+def test_any_red_check_skips_immediately():
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green("a"), _red("b")]))
+    outcome, reasons = _run(gh)
+    assert outcome["reason"] == "checks_failed"
+    assert "b" in reasons[0][0]
+    assert not [c for c in gh.calls if c[0] == "pr_merge"]
+
+
+def test_checks_never_settle_times_out():
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_pending()]))
+    outcome, reasons = _run(gh, settings=_settings(checks_timeout_seconds=60))
+    assert outcome["reason"] == "checks_timeout"
+    assert not [c for c in gh.calls if c[0] == "pr_merge"]
+
+
+def test_checks_query_failure_skips_conservatively():
+    gh = _eligible_gh(pr_checks=GhResult(ok=False, error="gh_failed: 500"))
+    outcome, reasons = _run(gh)
+    assert outcome["reason"] == "checks_query_failed"
+    assert not [c for c in gh.calls if c[0] == "pr_merge"]
+
+
+def test_merge_failure_leaves_pr_open_with_info_reason():
+    gh = _eligible_gh(
+        pr_checks=GhResult(ok=True, value=[_green()]),
+        pr_merge=GhResult(ok=False, error="gh_pr_merge_failed: protected"),
+    )
+    outcome, reasons = _run(gh)
+    assert outcome == {"merged": False, "reason": "merge_failed"}
+    assert reasons == [("auto_merge_failed: gh_pr_merge_failed: protected", True)]
+
+
+def test_successful_merge_dispatches_pages_workflow():
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
+    outcome, reasons = _run(gh, build_workflow="docs-agent-pages.yml")
+    assert outcome["merged"] is True
+    assert ("workflow_run", ("docs-agent-pages.yml",)) in gh.calls
+    assert ("pages_dispatch_succeeded: docs-agent-pages.yml", True) in reasons
+
+
+def test_no_build_workflow_skips_dispatch():
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
+    outcome, _ = _run(gh, build_workflow=None)
+    assert outcome["merged"] is True
+    assert not [c for c in gh.calls if c[0] == "workflow_run"]
+
+
+def test_dispatch_failure_is_info_only_after_merge():
+    gh = _eligible_gh(
+        pr_checks=GhResult(ok=True, value=[_green()]),
+        workflow_run=GhResult(ok=False, error="gh_workflow_run_failed: 404"),
+    )
+    outcome, reasons = _run(gh)
+    assert outcome["merged"] is True  # merge succeeded; dispatch is best-effort
+    assert ("pages_dispatch_failed: gh_workflow_run_failed: 404", True) in reasons
+
+
+def test_all_reasons_are_info_only():
+    """No auto-merge outcome may ever flip the run to partial."""
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_red()]))
+    _, reasons = _run(gh)
+    assert all(info for _, info in reasons)

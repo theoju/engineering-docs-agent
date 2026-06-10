@@ -2644,7 +2644,6 @@ def _maybe_auto_merge(
     if deadline is not None and clock() + grace > deadline:
         return skip("time_budget")
 
-    reasons: list[tuple[str, bool]] = []
     start = clock()
     grace_end = start + grace
     poll_end = start + timeout
@@ -2689,7 +2688,7 @@ def _maybe_auto_merge(
             {"merged": False, "reason": "merge_failed"},
             [(f"auto_merge_failed: {merged.error}", True)],
         )
-    reasons.append((f"auto_merge_succeeded: pr={pr_number}", True))
+    reasons: list[tuple[str, bool]] = [(f"auto_merge_succeeded: pr={pr_number}", True)]
     if build_workflow:
         dispatch = gh.workflow_run(build_workflow)
         if dispatch.ok:

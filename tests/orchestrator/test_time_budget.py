@@ -219,11 +219,58 @@ def _write_fakes_with_prs(src: Path, dst: Path, prs: list[dict]) -> None:
 
 
 def test_truncated_run_advances_to_last_processed_pr(tmp_path):
-    # Fake merge_shas + bogus last_sha → ordering passes through; cursor = PR2.merge_sha.
+    # Real window so the Component-4 in-window guard confirms the cursor.
+    # PRs in window order #1(c1) #2(c2) #3(c3); truncate after 2 → cursor = c2.
+    repo = tmp_path
+    state_path = _init_host(
+        repo, {"version": "1", "last_successful_run": {"head_sha": "seed"}}
+    )
+    base = _git(repo, "rev-parse", "HEAD")
+    shas = []
+    for i in range(1, 4):
+        (repo / "f.txt").write_text(f"c{i}")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", f"c{i}")
+        shas.append(_git(repo, "rev-parse", "HEAD"))
+    c1, c2, c3 = shas
+    state_path.write_text(
+        json.dumps({"version": "1", "last_successful_run": {"head_sha": base}})
+    )
+    fakes = tmp_path.parent / "fakes_cce109_advance"
+    _write_fakes_with_prs(
+        FAKES_MULTI,
+        fakes,
+        [
+            {"number": 1, "merge_sha": c1, "url": "https://github.com/o/r/pull/1"},
+            {"number": 2, "merge_sha": c2, "url": "https://github.com/o/r/pull/2"},
+            {"number": 3, "merge_sha": c3, "url": "https://github.com/o/r/pull/3"},
+        ],
+    )
+    clock = _fake_clock([0, 50, 150])  # admit 2 of 3 → cursor = c2
+    rc = runner.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=clock,
+    )
+    assert rc == 0
+    written = json.loads(state_path.read_text())
+    assert written["last_successful_run"]["head_sha"] == c2, written[
+        "last_successful_run"
+    ]
+
+
+def test_truncation_with_out_of_window_cursor_does_not_advance(tmp_path):
+    # Prober edge / spec Component-4 guard: an uncomputable window (bogus baseline)
+    # plus a cursor SHA that cannot be verified inside last_sha..head_sha must NOT
+    # advance the baseline (no silent regression). The fake merge_sha 'b' is not a
+    # real commit, so `git merge-base --is-ancestor b HEAD` fails and the guard
+    # refuses the advance, recording time_budget_advance_out_of_window.
     state_path = _init_host(
         tmp_path, {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
     )
-    clock = _fake_clock([0, 50, 150])  # admit 2 of 3
+    clock = _fake_clock([0, 50, 150])  # admit 2 of 3; cursor would be fake 'b'
     rc = runner.run(
         tmp_path,
         dry_run_dir=FAKES_MULTI,
@@ -233,10 +280,58 @@ def test_truncated_run_advances_to_last_processed_pr(tmp_path):
     )
     assert rc == 0
     written = json.loads(state_path.read_text())
-    # fakes_multi PRs are 1/2/3 with merge_sha a/b/c; admitted [1,2] → cursor 'b'.
-    assert written["last_successful_run"]["head_sha"] == "b", written[
+    # Baseline must NOT regress to the unverifiable cursor 'b'.
+    assert written["last_successful_run"]["head_sha"] == "old_sha_000", written[
         "last_successful_run"
     ]
+    cr = _current_run(state_path)
+    assert any(
+        "time_budget_advance_out_of_window" in r for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+
+
+def test_gate_admits_on_deadline_equality_not_strict(tmp_path):
+    # The admission gate is strict `clock() > deadline`, so clock()==deadline
+    # ADMITS. Pins `>` against a `>=` regression that would truncate one PR early.
+    state_path = _init_host(tmp_path, {"version": "1", "last_successful_run": {}})
+    clock = _fake_clock([0, 100])  # deadline=100; every gate check sees exactly 100
+    rc = runner.run(
+        tmp_path,
+        dry_run_dir=FAKES_MULTI,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=clock,
+    )
+    assert rc == 0
+    cr = _current_run(state_path)
+    assert not any("time_budget_exceeded" in r for r in cr["partial_reasons"]), cr[
+        "partial_reasons"
+    ]
+
+
+def test_order_prs_oldest_first_matches_short_merge_sha(tmp_path):
+    # A 7-char prefix merge_sha still resolves via the order_short branch.
+    shas = _init_repo_with_commits(tmp_path, 3)  # [base, c1, c2, c3]
+    base, c1, c2, c3 = shas
+    prs = [
+        {"number": 3, "merge_sha": c3[:7]},
+        {"number": 2, "merge_sha": c2[:7]},
+        {"number": 1, "merge_sha": c1[:7]},
+    ]
+    ordered = runner._order_prs_oldest_first(
+        prs, repo_root=tmp_path, last_sha=base, head_sha=c3
+    )
+    assert [p["number"] for p in ordered] == [1, 2, 3]
+
+
+def test_order_prs_oldest_first_empty_list(tmp_path):
+    # Empty PR list (a no-merge nightly) → trivial passthrough, no git call.
+    assert (
+        runner._order_prs_oldest_first(
+            [], repo_root=tmp_path, last_sha="anything", head_sha="anything"
+        )
+        == []
+    )
 
 
 def test_oldest_first_cursor_is_oldest_commit(tmp_path):

@@ -397,6 +397,59 @@ def _last_processed_merge_sha(admitted_prs: list[dict]) -> str | None:
     return None
 
 
+def _sha_in_window(
+    sha: str,
+    *,
+    last_sha: str,
+    head_sha: str,
+    repo_root: Path,
+) -> bool:
+    """Return True only if ``sha`` is confirmed SAFE to advance the baseline to.
+
+    CCE-109 spec Component 4 invariant guard. "Safe" means ``sha`` is an ancestor
+    of ``head_sha`` (reachable from this run's HEAD) AND — when a baseline exists
+    — a descendant of ``last_sha`` (strictly forward, so the cursor never
+    regresses). An empty ``last_sha`` (first run) imposes no lower bound: any
+    ancestor of HEAD is valid forward progress, so a truncated first run can
+    still drain.
+
+    Returns False whenever the relation cannot be positively confirmed — a bogus
+    or garbage ``sha``, a baseline absent from the repo, or git unavailable. In
+    those cases the caller must not advance the cursor to an unverifiable SHA
+    (which could be an ancestor of the baseline → silent re-ingestion). This
+    closes the uncomputable-window truncation path where ``_clip_prs_to_window``
+    and ``_order_prs_oldest_first`` both degrade to passthrough.
+    """
+    if not sha or not head_sha:
+        return False
+
+    def _is_ancestor(anc: str, desc: str) -> bool:
+        try:
+            r = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_root),
+                    "merge-base",
+                    "--is-ancestor",
+                    anc,
+                    desc,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            return False
+        return r.returncode == 0
+
+    if not _is_ancestor(sha, head_sha):
+        return False
+    if not last_sha:
+        return True
+    return _is_ancestor(last_sha, sha)
+
+
 def _clip_prs_to_window(
     prs: list[dict],
     *,
@@ -1565,13 +1618,34 @@ def run(
         # the next run reads the unchanged committed state.
         if time_truncated:
             advance_sha = _last_processed_merge_sha(prs)
-            if advance_sha is None:
+            # CCE-109 Component 4: never advance to a cursor we cannot confirm is
+            # forward-of-baseline and reachable from HEAD. On an uncomputable
+            # window (bogus baseline / garbage merge_sha / no git) the guard
+            # returns False and we keep the baseline — partial, retried next run,
+            # but never a silent SHA regression.
+            out_of_window = advance_sha is not None and not _sha_in_window(
+                advance_sha,
+                last_sha=prior_baseline_sha,
+                head_sha=head_sha,
+                repo_root=repo_root,
+            )
+            if out_of_window:
                 add_partial(
                     state,
-                    "time_budget_no_advance_no_cursor: truncated run had no "
-                    "admitted PR with a merge_sha; baseline unchanged",
+                    f"time_budget_advance_out_of_window: cursor "
+                    f"{advance_sha[:8]} not confirmed within "
+                    f"{(prior_baseline_sha or '(root)')[:8]}..{head_sha[:8]}; "
+                    "baseline unchanged",
                 )
-                advance_sha = state.get("last_successful_run", {}).get("head_sha", "")
+                advance_sha = None
+            if advance_sha is None:
+                if not out_of_window:
+                    add_partial(
+                        state,
+                        "time_budget_no_advance_no_cursor: truncated run had no "
+                        "admitted PR with a usable merge_sha; baseline unchanged",
+                    )
+                advance_sha = prior_baseline_sha
         else:
             advance_sha = state["current_run"]["head_sha"]
         state["last_successful_run"] = {

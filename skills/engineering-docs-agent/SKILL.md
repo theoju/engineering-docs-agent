@@ -21,12 +21,13 @@ Run the full main authoring pipeline (see spec §5.3.1):
 3. Dispatch `source-collector` → PRs + Jira data.
 4. Dispatch `pr-summarizer` per PR in parallel → summaries.
 5. Aggregate `doc_targets` per lens → authoring batches.
-6. Dispatch `page-author` per batch (parallel across lenses, serial within).
+6. Dispatch `page-author` per batch (parallel across lenses, serial within), passing `source_paths` (the PRs' changed files) for grounding.
 7. Dispatch `content-validator` on authored paths; drop block-failures, surface warnings.
-8. Dispatch `gap-detector` per PR (skip those in `dismissed_gap_flags`).
-9. Prepend What's New entry and update `state.json`.
-10. Open or append-commit to `docs-agent/YYYY-MM-DD` PR.
-11. Dispatch `notifier` with the run digest.
+8. Dispatch `fact-checker` per surviving page that cites ≥1 resolvable repo source (CCE-110). Warn-only: contradictions become a "Factual-accuracy warnings" PR-body section and info-only reasons — never a dropped page, never a partial flag.
+9. Dispatch `gap-detector` per PR (skip those in `dismissed_gap_flags`).
+10. Prepend What's New entry and update `state.json`.
+11. Open or append-commit to `docs-agent/YYYY-MM-DD` PR.
+12. Dispatch `notifier` with the run digest.
 
 ## Inputs
 
@@ -59,11 +60,12 @@ See spec §8. Specifically: page-author content failing block-severity lint → 
 6. Aggregate doc_targets per lens.
 7. For each lens (parallel) and each target within the lens (serial): dispatch `page-author`. Collect outputs.
 8. Dispatch `content-validator` on the union of authored/edited paths. For each block-failure, undo the page change via git and remove the path from the run's contribution; record the failure in `partial_reasons` and the digest.
-9. For each PR (parallel): dispatch `gap-detector`, skipping those in `dismissed_gap_flags`. Collect verdicts.
-10. Prepend a dated entry to `whats_new_file` summarizing the bullet list (PR summaries + gap flags).
-11. Write `state.json` with `current_run.partial`, `current_run.partial_reasons`, and head_sha.
-12. Open or append-commit to the docs-agent PR (see "PR handling" below).
-13. Compose digest and dispatch `notifier`.
+9. For each surviving authored page that cites ≥1 existing repo source file (extraction via `scripts/lint/citation_exists.py`): dispatch `fact-checker` with the page and its cited sources. Append `contradiction` findings to `current_run.fact_check_warnings`; on dispatch failure record `fact_checker_unavailable: <page>` as info-only. This layer never blocks.
+10. For each PR (parallel): dispatch `gap-detector`, skipping those in `dismissed_gap_flags`. Collect verdicts.
+11. Prepend a dated entry to `whats_new_file` summarizing the bullet list (PR summaries + gap flags).
+12. Write `state.json` with `current_run.partial`, `current_run.partial_reasons`, and head_sha.
+13. Open or append-commit to the docs-agent PR (see "PR handling" below).
+14. Compose digest and dispatch `notifier`.
 
 ## PR handling
 

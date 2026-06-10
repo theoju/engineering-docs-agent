@@ -13,11 +13,12 @@ The `description_quality` rule is a Tier-1 lint check that blocks pages with mis
 
 The rule inspects the `description` field in each page's frontmatter. It fails the page if:
 
-- `description` is absent entirely.
-- `description` is present but contains fewer than a configurable minimum number of characters (default: 20).
-- `description` consists only of whitespace.
+- `description` is absent or only whitespace.
+- `description` has fewer than a configurable minimum number of words (`min_words`, default 6).
+- `description` merely repeats the page title (`forbid_equal_to_title`, default on).
+- `description` ends with a trailing colon (`forbid_trailing_colon`, default on).
 
-A page that passes the check has a non-empty `description` long enough to be useful in search indexes and site previews.
+A page that passes the check has a substantive `description` useful in search indexes and site previews.
 
 ## Why it's Tier-1
 
@@ -25,46 +26,39 @@ Thin or missing descriptions were reaching the published site because the bootst
 
 ## Configuration
 
-No extra config is needed when `lint.tier1: default` is set. To raise or lower the minimum length threshold, add a rule-specific override to your `.engineering-docs-agent/config.yml`:
+No extra config is needed when `lint.tier1: default` is set. Overrides live under `lint.tier1` as a dict carrying rule subkeys (the `_resolve_config` helper in `scripts/lint/description_quality.py` merges them over the defaults):
 
 ```yaml
 lint:
-  tier1: default
-  rules:
+  tier1:
     description_quality:
-      min_length: 40
+      min_words: 10
+      forbid_equal_to_title: true
+      forbid_trailing_colon: true
 ```
 
-To disable the rule entirely for a host that genuinely cannot provide descriptions:
-
-```yaml
-lint:
-  rules:
-    description_quality:
-      enabled: false
-```
-
-Disabling a Tier-1 rule suppresses it from the lint runner output; the runner logs a warning so the suppression is visible in CI.
+Note the trade-off: `lint.tier1` is either the sentinel string `default` (full Tier-1 set, rule defaults) or a dict (which is also how per-rule keys such as `stub_paths` are carried). Only the three keys above are recognized; unknown keys are ignored.
 
 ## How the rule is registered
 
-The rule is a standalone callable in `scripts/lint/rules/description_quality.py`. The lint runner (`scripts/lint/lint_runner.py`) discovers and registers it at startup by scanning the `rules/` directory. You do not need to edit the runner to add a new rule — drop a module into `rules/` and it is picked up automatically.
+The rule is a standalone script at `scripts/lint/description_quality.py`, registered by name in the `TIER1_DEFAULT` list in `scripts/lint/lint_runner.py`. Registration is explicit — adding a rule means adding the script and appending its name to the tier list (or a tier-2/3 config-key mapping).
 
-The rule's module exports a single `check(page_path, frontmatter, config) -> list[LintViolation]` function. The `LintViolation` dataclass is defined in `scripts/lint/contracts.py` and carries `rule`, `severity`, `message`, and `line` fields.
+Every rule script shares one CLI contract: `--config <path> --paths <p...> --json`, exit 0 all-pass / 1 any-fail / 2 invocation error, emitting `{"rule", "severity", "results": [{"path", "ok", "message"}]}`. The runner aggregates per-rule JSON and exits 1 if any block-severity rule failed.
 
 ## Behavior in the bootstrap pipeline
 
-During C2 bootstrap, the orchestrator runs the lint suite on each page immediately after `dispatch_verified` confirms the artifact was written. A `description_quality` failure at this stage marks the page with `status: lint_failed` in its `_BootstrapProgress` record and excludes it from the final PR. The page is not silently dropped — the bootstrap summary lists it under `lint_failures` so you can act on it in the next run.
+During C2 bootstrap, `dispatch_verified` runs a post-write check against the artifact the page-author produced. A failing page is unlinked so the next bootstrap run retries it (the existing skip-if-exists idempotency is the retry mechanism), and the rejection reasons land in the run ledger. The per-page progress file `bootstrap.progress.json` (a runtime artifact under `.engineering-docs-agent/`) records the page under its `failed` list, and the run digest surfaces the reasons under `lint_failures` — the page is not silently dropped.
 
 ## Testing
 
 Tests for this rule live in `tests/lint/test_description_quality.py`. They cover:
 
-- Page with no `description` key → violation.
-- Page with empty string → violation.
-- Page with a description below `min_length` → violation.
-- Page with a description at or above `min_length` → no violation.
-- Custom `min_length` via config override → respected.
+- Missing `description` field → violation.
+- Description below `min_words` → violation; substantial description → pass.
+- Description equal to the page title → violation (and skipped when no title).
+- Trailing colon → violation.
+- Config overrides for `min_words`, `forbid_trailing_colon`, `forbid_equal_to_title` → respected.
+- Non-agent-authored lenses skipped; CLI JSON output and Tier-1 registration.
 
 Run them with:
 

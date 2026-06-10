@@ -12,7 +12,7 @@ _This section is scaffolded. Content will be added here._
 
 - **Orchestrator** — 4 modules
 - **Generators** — 7 modules
-- **Lint** — 17 modules
+- **Lint** — 18 modules
 - **Setup** — 5 modules
 - **Verification** — 3 modules
 - **Integrations** — 3 modules
@@ -21,6 +21,7 @@ _This section is scaffolded. Content will be added here._
 **Contracts**
 
 - [content-validator output](contracts/content_validator.schema.md)
+- [fact-checker output](contracts/fact_checker.schema.md)
 - [gap-detector output](contracts/gap_detector.schema.md)
 - [notifier output](contracts/notifier.schema.md)
 - [page-author output](contracts/page_author.schema.md)

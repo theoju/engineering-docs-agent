@@ -2565,6 +2565,68 @@ def _auto_close_superseded_docs_agent_prs(
     return reasons
 
 
+def _maybe_auto_merge(
+    gh: "GhClient",
+    *,
+    pr_number: int,
+    partial: bool,
+    fact_warnings: list[str],
+    merge_settings: dict,
+    build_workflow: str | None,
+    deadline: float | None,
+    clock: Callable[[], float],
+    sleep: Callable[[float], None] = time.sleep,
+    bot_author_names: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_NAMES,
+    bot_author_emails: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_EMAILS,
+) -> tuple[dict, list[tuple[str, bool]]]:
+    """CCE-101: squash-merge the docs-agent PR when the run earned it.
+
+    Eligibility (cheapest first): policy auto → non-partial → zero
+    fact-checker warnings → no human commits on the PR → enough CCE-109
+    budget left to wait out the check-grace window. Then a bounded poll
+    of `gh pr checks`; zero registered checks after the grace window
+    means a no-App-token host (the in-run validation is the gate there).
+
+    Returns (merge_outcome, reasons): merge_outcome is the digest's
+    ``{"merged": bool, "reason": str | None}``; reasons feed the caller's
+    add_partial loop and are ALL info_only=True — merge automation is
+    hygiene (mirrors D2 auto-close), it never flips the run to partial.
+    """
+
+    def skip(key: str, detail: str = "") -> tuple[dict, list[tuple[str, bool]]]:
+        msg = f"auto_merge_skipped: {key}"
+        if detail:
+            msg += f": {detail}"
+        return {"merged": False, "reason": key}, [(msg, True)]
+
+    if merge_settings.get("policy") != "auto":
+        # The configured normal path for a manual host — no reason entry,
+        # the digest's merge_outcome line carries it.
+        return {"merged": False, "reason": "policy_manual"}, []
+    if partial:
+        return skip("partial_run")
+    if fact_warnings:
+        return skip("fact_check_warnings", f"{len(fact_warnings)} warning(s)")
+
+    # Human-edit guard (same authority as D2 auto-close): run it on both
+    # PR paths — on a fresh PR every commit is the bot's, so the extra
+    # lookup is one cheap gh call for one uniform code path.
+    commits = gh.pr_view_commits(pr_number)
+    if not commits.ok:
+        return skip("commits_lookup_failed", commits.error or "")
+    for commit in commits.value or []:
+        for author in commit.get("authors") or []:
+            if not _commit_author_is_bot(author, bot_author_names, bot_author_emails):
+                return skip("human_edited")
+
+    grace = merge_settings["checks_grace_seconds"]
+    timeout = merge_settings["checks_timeout_seconds"]  # noqa: F841 — used by Task 7
+    if deadline is not None and clock() + grace > deadline:
+        return skip("time_budget")
+
+    raise NotImplementedError("poll loop: Task 7")
+
+
 def _changed_files_in_head_commit(repo_root: Path) -> list[str]:
     """Return repo-relative paths committed by the most recent commit.
 

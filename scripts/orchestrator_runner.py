@@ -309,6 +309,32 @@ def _summarize_tool_use(events: list[dict]) -> dict:
 
 DEFAULT_TIME_BUDGET_SECONDS = 2700  # 45 min; below the 60-min job hard limit
 
+DEFAULT_MERGE_POLICY = "auto"
+DEFAULT_CHECKS_GRACE_SECONDS = 120
+DEFAULT_CHECKS_TIMEOUT_SECONDS = 900
+_CHECKS_POLL_INTERVAL_SECONDS = 15.0
+
+
+def resolve_merge_settings(config: dict) -> dict:
+    """CCE-101: resolve the merge-gate settings with default-ON semantics.
+
+    Absent `merge:` block, absent `policy`, or a malformed (non-dict)
+    block all resolve to auto — existing hosts flip on at tag pickup
+    with zero config edits. Setup writes an explicit value for new hosts.
+    """
+    cfg = config.get("merge")
+    if not isinstance(cfg, dict):
+        cfg = {}
+    return {
+        "policy": cfg.get("policy", DEFAULT_MERGE_POLICY),
+        "checks_grace_seconds": cfg.get(
+            "checks_grace_seconds", DEFAULT_CHECKS_GRACE_SECONDS
+        ),
+        "checks_timeout_seconds": cfg.get(
+            "checks_timeout_seconds", DEFAULT_CHECKS_TIMEOUT_SECONDS
+        ),
+    }
+
 
 def resolve_time_budget(config: dict, cli_override: int | None) -> int:
     """Resolve the per-run soft time budget in seconds.

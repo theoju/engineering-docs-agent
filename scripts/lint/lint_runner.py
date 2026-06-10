@@ -28,6 +28,7 @@ TIER1_DEFAULT = [
     "framework_build",
     "stub_redirect",
     "description_quality",
+    "citation_exists",
 ]
 
 # Mapping config keys (in tier2/tier3 dicts) → rule script name.

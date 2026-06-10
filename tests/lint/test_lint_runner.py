@@ -130,6 +130,13 @@ def test_lint_runner_missing_script_reports_block(tmp_path, monkeypatch):
     assert any("rule script missing" in r["message"] for r in out["results"])
 
 
+def test_citation_exists_registered_in_tier1():
+    from scripts.lint.lint_runner import TIER1_DEFAULT, enabled_rules
+
+    assert "citation_exists" in TIER1_DEFAULT
+    assert "citation_exists" in enabled_rules({"lint": {"tier1": "default"}})
+
+
 def test_lint_runner_empty_output_reports_block(tmp_path, monkeypatch):
     import sys, subprocess as sp
 

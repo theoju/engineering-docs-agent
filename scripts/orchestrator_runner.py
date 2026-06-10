@@ -309,6 +309,32 @@ def _summarize_tool_use(events: list[dict]) -> dict:
 
 DEFAULT_TIME_BUDGET_SECONDS = 2700  # 45 min; below the 60-min job hard limit
 
+DEFAULT_MERGE_POLICY = "auto"
+DEFAULT_CHECKS_GRACE_SECONDS = 120
+DEFAULT_CHECKS_TIMEOUT_SECONDS = 900
+_CHECKS_POLL_INTERVAL_SECONDS = 15.0
+
+
+def resolve_merge_settings(config: dict) -> dict:
+    """CCE-101: resolve the merge-gate settings with default-ON semantics.
+
+    Absent `merge:` block, absent `policy`, or a malformed (non-dict)
+    block all resolve to auto — existing hosts flip on at tag pickup
+    with zero config edits. Setup writes an explicit value for new hosts.
+    """
+    cfg = config.get("merge")
+    if not isinstance(cfg, dict):
+        cfg = {}
+    return {
+        "policy": cfg.get("policy", DEFAULT_MERGE_POLICY),
+        "checks_grace_seconds": cfg.get(
+            "checks_grace_seconds", DEFAULT_CHECKS_GRACE_SECONDS
+        ),
+        "checks_timeout_seconds": cfg.get(
+            "checks_timeout_seconds", DEFAULT_CHECKS_TIMEOUT_SECONDS
+        ),
+    }
+
 
 def resolve_time_budget(config: dict, cli_override: int | None) -> int:
     """Resolve the per-run soft time budget in seconds.
@@ -1828,6 +1854,25 @@ def run(
         save_persistent_state(state_path, state)
         save_current_run(state_path, state)
 
+        # CCE-101: auto-merge gate. Runs on both PR paths (fresh create and
+        # same-hour append) — the human-edit guard inside makes the append
+        # path safe. deadline/clock are the CCE-109 budget objects.
+        merge_settings = resolve_merge_settings(config)
+        merge_outcome, merge_reasons = _maybe_auto_merge(
+            gh,
+            pr_number=pr_number,
+            partial=state["current_run"]["partial"],
+            fact_warnings=state["current_run"].get("fact_check_warnings") or [],
+            merge_settings=merge_settings,
+            build_workflow=config.get("publishing", {}).get("build_workflow"),
+            deadline=deadline,
+            clock=clock,
+        )
+        for reason, info_only in merge_reasons:
+            add_partial(state, reason, info_only=info_only)
+        save_persistent_state(state_path, state)
+        save_current_run(state_path, state)
+
         # Compose digest and dispatch notifier.
         digest = {
             "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
@@ -1847,6 +1892,7 @@ def run(
             "core_drift": core_drifted,
             "fact_check_warnings": state["current_run"].get("fact_check_warnings")
             or [],
+            "merge_outcome": merge_outcome,
         }
         notifier_result, reasons = dispatch_validated(
             "notifier",
@@ -2537,6 +2583,119 @@ def _auto_close_superseded_docs_agent_prs(
             reasons.append((f"auto_close_failed:{prior_num}: {close.error}", True))
 
     return reasons
+
+
+def _maybe_auto_merge(
+    gh: "GhClient",
+    *,
+    pr_number: int,
+    partial: bool,
+    fact_warnings: list[str],
+    merge_settings: dict,
+    build_workflow: str | None,
+    deadline: float | None,
+    clock: Callable[[], float],
+    sleep: Callable[[float], None] = time.sleep,
+    bot_author_names: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_NAMES,
+    bot_author_emails: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_EMAILS,
+) -> tuple[dict, list[tuple[str, bool]]]:
+    """CCE-101: squash-merge the docs-agent PR when the run earned it.
+
+    Eligibility (cheapest first): policy auto → non-partial → zero
+    fact-checker warnings → no human commits on the PR → enough CCE-109
+    budget left to wait out the check-grace window. Then a bounded poll
+    of `gh pr checks`; zero registered checks after the grace window
+    means a no-App-token host (the in-run validation is the gate there).
+
+    Returns (merge_outcome, reasons): merge_outcome is the digest's
+    ``{"merged": bool, "reason": str | None}``; reasons feed the caller's
+    add_partial loop and are ALL info_only=True — merge automation is
+    hygiene (mirrors D2 auto-close), it never flips the run to partial.
+    """
+
+    def skip(key: str, detail: str = "") -> tuple[dict, list[tuple[str, bool]]]:
+        msg = f"auto_merge_skipped: {key}"
+        if detail:
+            msg += f": {detail}"
+        return {"merged": False, "reason": key}, [(msg, True)]
+
+    if merge_settings.get("policy") != "auto":
+        # The configured normal path for a manual host — no reason entry,
+        # the digest's merge_outcome line carries it.
+        return {"merged": False, "reason": "policy_manual"}, []
+    if partial:
+        return skip("partial_run")
+    if fact_warnings:
+        return skip("fact_check_warnings", f"{len(fact_warnings)} warning(s)")
+
+    # Human-edit guard (same authority as D2 auto-close): run it on both
+    # PR paths — on a fresh PR every commit is the bot's, so the extra
+    # lookup is one cheap gh call for one uniform code path.
+    commits = gh.pr_view_commits(pr_number)
+    if not commits.ok:
+        return skip("commits_lookup_failed", commits.error or "")
+    for commit in commits.value or []:
+        for author in commit.get("authors") or []:
+            if not _commit_author_is_bot(author, bot_author_names, bot_author_emails):
+                return skip("human_edited")
+
+    grace = merge_settings["checks_grace_seconds"]
+    timeout = merge_settings["checks_timeout_seconds"]
+    if deadline is not None and clock() + grace > deadline:
+        return skip("time_budget")
+
+    start = clock()
+    grace_end = start + grace
+    poll_end = start + timeout
+    if deadline is not None:
+        poll_end = min(poll_end, deadline)
+
+    while True:
+        checks = gh.pr_checks(pr_number)
+        if not checks.ok:
+            return skip("checks_query_failed", checks.error or "")
+        items = checks.value or []
+        red = [
+            c
+            for c in items
+            if c.get("state") == "FAILURE" or c.get("bucket") in ("fail", "cancel")
+        ]
+        if red:
+            names = ",".join(sorted(c.get("name") or "?" for c in red))
+            return skip("checks_failed", names)
+        pending = [
+            c
+            for c in items
+            if not (
+                c.get("state") == "SUCCESS" or c.get("bucket") in ("pass", "skipping")
+            )
+        ]
+        now = clock()
+        if not items:
+            if now >= grace_end:
+                break  # zero checks registered: in-run validation is the gate
+        elif not pending:
+            break  # every registered check settled green
+        if now >= poll_end:
+            return skip(
+                "checks_timeout", f"{len(pending)} pending after {int(now - start)}s"
+            )
+        sleep(_CHECKS_POLL_INTERVAL_SECONDS)
+
+    merged = gh.pr_merge(pr_number)
+    if not merged.ok:
+        return (
+            {"merged": False, "reason": "merge_failed"},
+            [(f"auto_merge_failed: {merged.error}", True)],
+        )
+    reasons: list[tuple[str, bool]] = [(f"auto_merge_succeeded: pr={pr_number}", True)]
+    if build_workflow:
+        dispatch = gh.workflow_run(build_workflow)
+        if dispatch.ok:
+            reasons.append((f"pages_dispatch_succeeded: {build_workflow}", True))
+        else:
+            reasons.append((f"pages_dispatch_failed: {dispatch.error}", True))
+    return {"merged": True, "reason": None}, reasons
 
 
 def _changed_files_in_head_commit(repo_root: Path) -> list[str]:

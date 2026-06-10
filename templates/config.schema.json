@@ -175,6 +175,28 @@
           "description": "CCE-109: soft per-run time budget in seconds. 0 = unlimited. Default 2700."
         }
       }
+    },
+    "merge": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "CCE-101: docs-agent PR merge gate. Absent block (or absent policy) = auto.",
+      "properties": {
+        "policy": {
+          "type": "string",
+          "enum": ["auto", "manual"],
+          "description": "auto (default when absent): squash-merge a fully-green non-partial run's PR. manual: every PR stays open for operator review."
+        },
+        "checks_grace_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Wait for host CI checks to register before merging without them. Default 120."
+        },
+        "checks_timeout_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Max wait for registered checks to settle. Default 900."
+        }
+      }
     }
   }
 }

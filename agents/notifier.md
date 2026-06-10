@@ -15,7 +15,8 @@ configured channels (Slack webhook + SMTP email).
 
 ## Inputs
 
-- `digest`: `{ pr_url, run_summary_bullets, gap_flags, lint_failures, build_status, verified, failed_urls, partial_reasons, source_drift, citation_drift, core_drift }`
+- `digest`: `{ pr_url, run_summary_bullets, gap_flags, lint_failures, build_status, verified, failed_urls, partial_reasons, source_drift, citation_drift, core_drift, merge_outcome }`
+  - `merge_outcome` (CCE-101): `{ merged: bool, reason: string | null }`. Render as one line: `Merged automatically` when `merged` is true; `Left open for review: <reason>` otherwise (reason keys: `policy_manual`, `partial_run`, `fact_check_warnings`, `human_edited`, `commits_lookup_failed`, `checks_failed`, `checks_timeout`, `checks_query_failed`, `time_budget`, `merge_failed`). Absent field (older runner): omit the line.
 - `slack_config`: `{ enabled, webhook_url }` (webhook_url passed from env via the workflow)
 - `email_config`: `{ enabled, smtp_server, smtp_user, smtp_password, from_address, recipients }`
 - `mode`: "run" | "verify" — "run" for "PR opened" digest, "verify" for "PR landed" follow-up

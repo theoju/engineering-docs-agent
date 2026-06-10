@@ -62,6 +62,82 @@ class GhClient:
             extract=lambda d: list(d.get("commits") or []),
         )
 
+    def pr_checks(self, pr_number: int) -> GhResult:
+        """CI check states for a PR, parsed per the CCE-83 vocabulary
+        (name/state/bucket — never statusCheckRollup/conclusion).
+
+        CCE-101: `gh pr checks` exit codes are data, not errors —
+        0 = all green, 8 = pending, 1 = failing OR "no checks reported".
+        Deliberately NOT routed through _run_json (check=True would turn
+        a pending poll into an exception). "No checks reported" maps to
+        ok-with-[] so the caller's zero-checks grace path can decide.
+        """
+        try:
+            r = subprocess.run(
+                ["gh", "pr", "checks", str(pr_number), "--json", "name,state,bucket"],
+                cwd=self._cwd,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            return GhResult(ok=False, error="gh_not_installed")
+        if "no checks reported" in (r.stderr or "").lower():
+            return GhResult(ok=True, value=[])
+        try:
+            data = json.loads(r.stdout or "null")
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, list):
+            return GhResult(ok=True, value=data)
+        return GhResult(
+            ok=False,
+            error=f"gh_pr_checks_failed: rc={r.returncode} {(r.stderr or '')[:200]}",
+        )
+
+    def pr_merge(self, pr_number: int) -> GhResult:
+        """CCE-101: squash-merge + delete branch. Method is fixed by spec
+        (not configurable). Failure is the caller's leave-open fallback."""
+        try:
+            r = subprocess.run(
+                ["gh", "pr", "merge", str(pr_number), "--squash", "--delete-branch"],
+                cwd=self._cwd,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            return GhResult(ok=False, error="gh_not_installed")
+        if r.returncode != 0:
+            return GhResult(
+                ok=False, error=f"gh_pr_merge_failed: {(r.stderr or '')[:200]}"
+            )
+        return GhResult(ok=True, value=pr_number)
+
+    def workflow_run(self, workflow_file: str) -> GhResult:
+        """CCE-101: explicit pages-deploy dispatch after an auto-merge.
+
+        A merge pushed with GITHUB_TOKEN does not fire `on: push` workflows
+        (GitHub recursion suppression), so the docs would land in main with
+        the site never redeploying. workflow_dispatch is exempt from the
+        suppression, so this fires even under GITHUB_TOKEN.
+
+        No --ref: gh dispatches against the repo's default branch, which
+        keeps this generic for hosts whose default is master/trunk.
+        """
+        try:
+            r = subprocess.run(
+                ["gh", "workflow", "run", workflow_file],
+                cwd=self._cwd,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            return GhResult(ok=False, error="gh_not_installed")
+        if r.returncode != 0:
+            return GhResult(
+                ok=False, error=f"gh_workflow_run_failed: {(r.stderr or '')[:200]}"
+            )
+        return GhResult(ok=True, value=workflow_file)
+
     def pr_close(self, pr_number: int, comment: str) -> GhResult:
         """Close a PR with an explanatory comment.
 
@@ -175,7 +251,13 @@ class FakeGhClient:
         pr_list_docs_agent_open: GhResult | None = None,
         pr_view_commits: GhResult | None = None,
         pr_close: GhResult | None = None,
+        pr_checks: GhResult | list[GhResult] | None = None,
+        pr_merge: GhResult | None = None,
+        workflow_run: GhResult | None = None,
     ) -> None:
+        # CCE-101: pr_checks accepts a sequence so poll-loop tests can
+        # model pending→green transitions; the last element repeats.
+        self._pr_checks_seq = list(pr_checks) if isinstance(pr_checks, list) else None
         self._canned = {
             "pr_view_files": pr_view_files,
             "pr_list_for_branch": pr_list_for_branch,
@@ -183,6 +265,9 @@ class FakeGhClient:
             "pr_list_docs_agent_open": pr_list_docs_agent_open,
             "pr_view_commits": pr_view_commits,
             "pr_close": pr_close,
+            "pr_checks": pr_checks if not isinstance(pr_checks, list) else None,
+            "pr_merge": pr_merge,
+            "workflow_run": workflow_run,
         }
         self.calls: list[tuple[str, tuple]] = []
 
@@ -209,3 +294,19 @@ class FakeGhClient:
     def pr_close(self, pr_number: int, comment: str) -> GhResult:
         self.calls.append(("pr_close", (pr_number, comment)))
         return self._canned["pr_close"] or GhResult(ok=True, value=pr_number)
+
+    def pr_checks(self, pr_number: int) -> GhResult:
+        self.calls.append(("pr_checks", (pr_number,)))
+        if self._pr_checks_seq is not None:
+            if len(self._pr_checks_seq) > 1:
+                return self._pr_checks_seq.pop(0)
+            return self._pr_checks_seq[0]
+        return self._canned["pr_checks"] or GhResult(ok=True, value=[])
+
+    def pr_merge(self, pr_number: int) -> GhResult:
+        self.calls.append(("pr_merge", (pr_number,)))
+        return self._canned["pr_merge"] or GhResult(ok=True, value=pr_number)
+
+    def workflow_run(self, workflow_file: str) -> GhResult:
+        self.calls.append(("workflow_run", (workflow_file,)))
+        return self._canned["workflow_run"] or GhResult(ok=True, value=workflow_file)

@@ -5,6 +5,9 @@
     "agents/content-validator.md": [
       "architecture/cce4-schema-enforcement.md"
     ],
+    "agents/fact-checker.md": [
+      "architecture/cce4-schema-enforcement.md"
+    ],
     "agents/gap-detector.md": [
       "architecture/cce4-schema-enforcement.md"
     ],
@@ -21,6 +24,11 @@
       "architecture/cce4-schema-enforcement.md"
     ],
     "agents/schemas/content_validator.schema.json": [
+      "architecture/cce23-source-map-drift.md",
+      "architecture/cce4-schema-enforcement.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "agents/schemas/fact_checker.schema.json": [
       "architecture/cce23-source-map-drift.md",
       "architecture/cce4-schema-enforcement.md",
       "architecture/structured-docs-site-generation.md"
@@ -59,6 +67,9 @@
       "architecture/cce4-schema-enforcement.md"
     ],
     "docs/site-src/.doc-core-manifest.json": [
+      "architecture/engineering-docs-agent.md"
+    ],
+    "docs/site-src/.doc-source-map.json": [
       "architecture/engineering-docs-agent.md"
     ],
     "docs/site-src/index.md": [
@@ -1005,7 +1016,25 @@
       "architecture/cce32-github-pages-publish-target.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/plans/2026-06-09-cce109-time-budget-doom-loop.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/plans/2026-06-09-cce110-page-author-confabulation.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/plans/2026-06-09-cce86-release-rollback-runbook.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/plans/2026-06-10-cce101-auto-merge-gate.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/cce32-github-pages-publish-target.md",
@@ -1266,7 +1295,22 @@
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/specs/2026-06-09-cce109-time-budget-doom-loop-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/specs/2026-06-09-cce110-page-author-confabulation-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/specs/2026-06-09-cce86-release-rollback-runbook-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/specs/2026-06-10-cce101-merge-gate-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/structured-docs-site-generation.md"
@@ -1571,6 +1615,7 @@
     ],
     "architecture/engineering-docs-agent.md": [
       ".claude/hooks/doc_drift.py",
+      "agents/fact_checker.md",
       "docs-agent/*",
       "docs/site-src/*",
       "docs/site-src/archive/adrs/*.md",

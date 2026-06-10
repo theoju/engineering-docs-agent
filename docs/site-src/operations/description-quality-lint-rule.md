@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/50
+  - https://github.com/theoju/engineering-docs-agent/pull/131
 synthesized_into: []
 ---
 
@@ -22,7 +23,7 @@ A page that passes the check has a substantive `description` useful in search in
 
 ## Why it's Tier-1
 
-Thin or missing descriptions were reaching the published site because the bootstrap pipeline trusted `page-author`'s `ok: true` signal without re-reading the artifact. The CCE-38 retrospective identified this as a structural gap: the author agent returns success when it believes it wrote valid content, but it does not re-parse what it wrote. The `description_quality` rule closes that gap at the lint stage — it reads the artifact on disk and rejects pages that fall short before the PR is opened.
+The `page-author` subagent produces a `description` field but does not re-parse its own output. A plausible-looking value can still be too short, a copy of the page title, or end in a trailing colon — all of which degrade search-index quality and site previews. The `description_quality` rule closes this gap at the lint stage: it reads every agent-authored artifact on disk and rejects pages that fall short before the PR is opened. Because a bad `description` is silent and always wrong — not a matter of style or preference — the rule carries `severity: block`, not warn.
 
 ## Configuration
 
@@ -47,18 +48,21 @@ Every rule script shares one CLI contract: `--config <path> --paths <p...> --jso
 
 ## Behavior in the bootstrap pipeline
 
-During C2 bootstrap, `dispatch_verified` runs a post-write check against the artifact the page-author produced. A failing page is unlinked so the next bootstrap run retries it (the existing skip-if-exists idempotency is the retry mechanism), and the rejection reasons land in the run ledger. The per-page progress file `bootstrap.progress.json` (a runtime artifact under `.engineering-docs-agent/`) records the page under its `failed` list, and the run digest surfaces the reasons under `lint_failures` — the page is not silently dropped.
+When the lint runner dispatches `description_quality` against an agent-authored page and the check fails, `lint_runner` (`scripts/lint/lint_runner.py`) aggregates the block-severity failure and exits with code 1. A non-zero exit signals the orchestrator that the page is not ready to land in the PR. The rule itself does not unlink files or mutate state; that responsibility belongs to the caller. Because `severity` is `block` and not `warn`, the failure gates the whole run — there is no partial-PR path for a page that fails this check.
 
 ## Testing
 
-Tests for this rule live in `tests/lint/test_description_quality.py`. They cover:
+Tests live in `tests/lint/test_description_quality.py`. They cover:
 
 - Missing `description` field → violation.
-- Description below `min_words` → violation; substantial description → pass.
-- Description equal to the page title → violation (and skipped when no title).
+- Description below `min_words` threshold → violation; substantial description → pass.
+- Description equal to the page title (case-insensitive) → violation.
+- `title=None` passed to `check_fm` → equal-to-title comparison skipped, other checks still apply.
 - Trailing colon → violation.
-- Config overrides for `min_words`, `forbid_trailing_colon`, `forbid_equal_to_title` → respected.
-- Non-agent-authored lenses skipped; CLI JSON output and Tier-1 registration.
+- Config overrides for `min_words`, `forbid_trailing_colon`, and `forbid_equal_to_title` individually → respected.
+- Non-agent-authored lens (no `generator: agent-authored`) → rule returns `ok=True, "skipped"`.
+- CLI emits JSON matching the rule contract and exits 1 on failure.
+- `lint_runner.enabled_rules` includes `description_quality` when `lint.tier1: default`.
 
 Run them with:
 

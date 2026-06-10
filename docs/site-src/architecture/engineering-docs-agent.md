@@ -6,6 +6,7 @@ description:
   \ publish verification, running against any host repo."
 source_files:
   - .claude/hooks/doc_drift.py
+  - agents/fact_checker.md
   - docs-agent/*
   - docs/site-src/*
   - docs/site-src/archive/adrs/*.md
@@ -14,7 +15,7 @@ source_files:
   - scripts/lint/frontmatter_schema.py
   - scripts/lint/lint_runner.py
   - scripts/lint/stub_redirect.py
-last_reviewed: 2026-06-09
+last_reviewed: 2026-06-10
 status: draft
 doc_kind: architecture
 ---

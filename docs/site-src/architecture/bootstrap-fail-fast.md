@@ -1,9 +1,13 @@
 ---
 status: draft
 sources:
-- https://github.com/theoju/engineering-docs-agent/pull/50
+  - https://github.com/theoju/engineering-docs-agent/pull/50
 synthesized_into: []
 doc_kind: architecture
+description: The four CCE-38 bootstrap safeguards that catch bad authored artifacts — strict frontmatter parsing, prose-contamination detection, post-write validation, and checklist-bypass recovery.
+source_files:
+  - scripts/orchestrator_runner.py
+last_reviewed: "2026-06-10"
 ---
 
 # Bootstrap fail-fast mechanisms
@@ -32,7 +36,7 @@ Because it is Tier-1, it is **on by default**. Hosts that need to disable it mus
 
 This closes the gap where `page-author` could report success while writing prose-contaminated YAML or an otherwise unloadable artifact. The callback is injectable: unit tests substitute a lightweight in-memory checker without touching the filesystem, keeping the test suite fast and fully mocked.
 
-## _BootstrapProgress
+## \_BootstrapProgress
 
 `_BootstrapProgress` writes an atomic per-page progress file to a `.bootstrap-progress/` directory under the run's working tree. Each record is written after a successful per-page dispatch and checked at startup on re-entry.
 
@@ -44,11 +48,11 @@ Progress files are ephemeral and gitignored. The docs-agent PR contains only the
 
 The four mechanisms together close the patterns identified in the CCE-15/CCE-36 retrospective:
 
-| Pattern | Mechanism |
-|---|---|
-| Checklist-bypass recovery | `_BootstrapProgress` re-run safety |
-| Prose-contamination detection | `dispatch_verified` post-write callback |
-| Post-write artifact validation | `parse_frontmatter_strict` |
-| Thin-description bypass | `description_quality` Tier-1 rule |
+| Pattern                        | Mechanism                               |
+| ------------------------------ | --------------------------------------- |
+| Checklist-bypass recovery      | `_BootstrapProgress` re-run safety      |
+| Prose-contamination detection  | `dispatch_verified` post-write callback |
+| Post-write artifact validation | `parse_frontmatter_strict`              |
+| Thin-description bypass        | `description_quality` Tier-1 rule       |
 
 None of these are breaking changes. Existing hosts gain the `description_quality` rule in their Tier-1 set automatically; all other behaviour is additive.

@@ -83,3 +83,126 @@ def test_order_prs_oldest_first_passthrough_when_git_fails(tmp_path):
         prs, repo_root=tmp_path, last_sha="nope000", head_sha="nope999"
     )
     assert [p["number"] for p in ordered] == [3, 1]
+
+
+FAKES_MULTI = Path(__file__).parent / "fakes_multi"
+
+CONFIG_YAML = """
+docs:
+  framework: mkdocs
+  source_dir: docs/site-src
+  whats_new_file: docs/site-src/whats-new.md
+  agent_editable_paths: ["docs/site-src/**"]
+  lens_paths:
+    core: docs/site-src/core
+sources:
+  git: { host: github }
+lint: { tier1: default }
+publishing:
+  base_url: https://example.com
+  build_workflow: deploy.yml
+  url_map_rule: standard
+  verify_timeout_seconds: 60
+notifications:
+  slack: { enabled: false }
+  email: { enabled: false }
+"""
+
+
+def _init_host(tmp: Path, seeded_state: dict, config_yaml: str = CONFIG_YAML) -> Path:
+    (tmp / "docs" / "site-src" / "core").mkdir(parents=True)
+    (tmp / ".engineering-docs-agent").mkdir()
+    (tmp / ".engineering-docs-agent" / "config.yml").write_text(config_yaml)
+    state_path = tmp / ".engineering-docs-agent" / "state.json"
+    state_path.write_text(json.dumps(seeded_state))
+    _git(tmp, "init", "-q")
+    _git(tmp, "config", "user.email", "t@example.com")
+    _git(tmp, "config", "user.name", "T")
+    (tmp / "README.md").write_text("init")
+    _git(tmp, "add", ".")
+    _git(tmp, "commit", "-q", "-m", "init")
+    return state_path
+
+
+def _current_run(state_path: Path) -> dict:
+    return json.loads((state_path.parent / "current_run.json").read_text())[
+        "current_run"
+    ]
+
+
+def _fake_clock(values):
+    """Return a callable yielding the given monotonic values in order, then
+    repeating the last value. First value is consumed by the deadline calc."""
+    seq = list(values)
+    state = {"i": 0}
+
+    def clock() -> float:
+        i = state["i"]
+        state["i"] = min(i + 1, len(seq) - 1)
+        return seq[i]
+
+    return clock
+
+
+def test_unlimited_budget_processes_all_prs(tmp_path):
+    # Empty baseline (first-run case) → clip + ordering take their documented
+    # `if not last_sha: return prs` passthrough with NO partial reason emitted,
+    # so a clean unlimited run is genuinely partial-free. (A *bogus* last_sha
+    # would instead trip the pre-existing CCE-19 `out_of_window_filter_skipped`
+    # clip partial, which is orthogonal to the time-budget gate under test.)
+    # 3 PRs from fakes_multi; budget 0 = unlimited → no truncation.
+    state_path = _init_host(
+        tmp_path,
+        {"version": "1", "last_successful_run": {}},
+    )
+    rc = runner.run(
+        tmp_path, dry_run_dir=FAKES_MULTI, no_pr=True, time_budget_seconds=0
+    )  # 0 = unlimited
+    assert rc == 0
+    cr = _current_run(state_path)
+    assert cr["partial"] is False
+    assert not any("time_budget_exceeded" in r for r in cr["partial_reasons"])
+
+
+def test_truncates_after_budget_and_records_partial(tmp_path):
+    state_path = _init_host(
+        tmp_path,
+        {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}},
+    )
+    # deadline calc=0 → deadline=100; i=1 check=50 (admit PR2); i=2 check=150 (trip).
+    clock = _fake_clock([0, 50, 150])
+    rc = runner.run(
+        tmp_path,
+        dry_run_dir=FAKES_MULTI,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=clock,
+    )
+    assert rc == 0
+    cr = _current_run(state_path)
+    assert cr["partial"] is True
+    assert any(
+        "time_budget_exceeded: admitted 2/3" in r for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+
+
+def test_always_admits_at_least_one_pr(tmp_path):
+    state_path = _init_host(
+        tmp_path,
+        {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}},
+    )
+    # Already past deadline at first gate (i=1), but i=0 is never gated → admit 1.
+    clock = _fake_clock([0, 9999])
+    rc = runner.run(
+        tmp_path,
+        dry_run_dir=FAKES_MULTI,
+        no_pr=True,
+        time_budget_seconds=1,
+        now_monotonic=clock,
+    )
+    assert rc == 0
+    cr = _current_run(state_path)
+    assert cr["partial"] is True
+    assert any(
+        "time_budget_exceeded: admitted 1/3" in r for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]

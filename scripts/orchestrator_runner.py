@@ -1228,7 +1228,18 @@ def run(
                 )
             except (KeyError, OSError):
                 available_sections_by_lens[_ln] = []
-        for pr in prs:
+        time_truncated = False
+        for i, pr in enumerate(prs):
+            if deadline is not None and i > 0 and clock() > deadline:
+                add_partial(
+                    state,
+                    f"time_budget_exceeded: admitted {i}/{len(prs)} PRs "
+                    f"(budget {_budget}s); deferring PR #{pr.get('number')} "
+                    f"to next run",
+                )
+                prs = prs[:i]
+                time_truncated = True
+                break
             jira_context = [
                 jira_lookup[k] for k in pr.get("jira_keys", []) if k in jira_lookup
             ]

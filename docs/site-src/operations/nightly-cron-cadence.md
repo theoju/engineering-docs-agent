@@ -11,7 +11,7 @@ The docs-agent runs automatically once per day at **07:07 UTC** via `.github/wor
 
 ## Current status
 
-The cron is **active** as of 2026-06-09 (PR #114). It was paused on 2026-06-04 (PR #108) and held until CCE-89 deliverables D1 and D2 landed.
+The cron is **active** as of 2026-06-09 (PR #114). It was paused on 2026-06-04 (PR #108) and held until CCE-89 deliverables D1 and D2 landed. Since CCE-101 (2026-06-10), auto-merge is the default closure mechanism for nightly PRs — manual merging is the exception, not the routine.
 
 ## CCE-89 deliverables
 
@@ -21,21 +21,19 @@ Three deliverables were required before safely resuming the schedule.
 
 **D2 — Auto-close-stale (PR #113, merged).** Only the freshest docs-agent run stays open. When a new run completes, the runner closes any prior open docs-agent PR automatically. This structurally prevents the stale-PR pileup that triggered the original pause.
 
-**D3 — Merge-gate decision (open, CCE-89).** D3 will decide between auto-merging a fully-green non-partial PR and publishing an operator-promotion runbook. D3 is still open. Until it lands, you promote each morning's PR manually after reviewing the enriched body.
+**D3 — Merge-gate decision (shipped, CCE-101).** D3 weighed auto-merging a fully-green non-partial PR against publishing an operator-promotion runbook. The decision landed as the CCE-101 merge gate on 2026-06-10: auto-merge won. A nightly PR now merges itself when the run earned it; a defined set of left-open reasons replaces the runbook.
 
-## Operator procedure (D3 pending)
+## Operator procedure (since CCE-101)
 
-Each morning after 07:07 UTC:
+Auto-merge is the default closure mechanism. A fully-green, non-partial, untouched-by-humans nightly PR merges itself and dispatches the Pages workflow — no morning ritual required.
 
-1. Open the docs-agent PR. The body lists which pages changed and why.
-2. If the run is not partial and checks are green, merge it.
-3. After merging, run `scripts/prune_merged_branches.py --apply` to clean up the local branch reference.
+You merge manually only when a PR is left open, and the reason is always recorded in the run digest and `current_run.partial_reasons`. The full reason table and per-reason operator actions live in the [merge-gate section of the nightly runbook](docs-agent-nightly.md#merge-gate-cce-101). In short: `policy_manual` means the host opted out, `fact_check_warnings` means verify the flagged page first, `human_edited` means finish the review you started, and the CI/infrastructure reasons mean fix the underlying problem and merge by hand.
 
-Do not rebase or amend the docs-agent branch. Each branch has no rebase target — `state.json.last_successful_run` advances only on merge-to-main.
+After any manual merge, run `scripts/prune_merged_branches.py --apply` to clean up the local branch reference. Do not rebase or amend the docs-agent branch. Each branch has no rebase target — `state.json.last_successful_run` advances only on merge-to-main.
 
-## Observation window
+## Observation window (historical)
 
-The cron resumed with D1 and D2 in place. The two-week window starting 2026-06-09 measures actual operator merge latency before the team commits to the D3 auto-merge vs promotion-runbook choice. If you merge promptly each morning, the data supports auto-merge in D3. If latency consistently exceeds 24 hours, D3 should instead produce a runbook.
+The cron resumed with D1 and D2 in place. A two-week window starting 2026-06-09 was planned to measure actual operator merge latency before committing to the D3 auto-merge vs promotion-runbook choice. CCE-101 superseded the window on 2026-06-10 by shipping auto-merge directly — the latency question is moot when the green path needs no operator at all.
 
 ## Re-pause procedure
 
@@ -65,4 +63,5 @@ The `reason` field is a free-text label surfaced in the run summary. Auth uses t
 - PR #113 — D2 auto-close-stale
 - PR #114 — cron resume
 - CCE-89 — umbrella ticket for D1/D2/D3
+- CCE-101 — the merge gate that closed D3 ([reason table](docs-agent-nightly.md#merge-gate-cce-101))
 - `docs/runbooks/release-and-rollback.md` — release and rollback ops

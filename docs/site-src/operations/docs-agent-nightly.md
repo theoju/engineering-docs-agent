@@ -43,7 +43,31 @@ Re-enable the schedule only after the durable fixes are in place. When PR #108 p
 - **D2** — Auto-close-stale: "freshest-only" policy that closes prior open `docs-agent/*` PRs unless a human has edited them.
 - **D3** — Merge-gate decision: auto-merge fully-green non-partial runs, or operator-promotion runbook for the rest.
 
-D1 and D2 shipped in PRs #112 and #113 (CCE-89). D3 remains open as a separate ticket. The cron was re-enabled after D1 + D2 landed.
+D1 and D2 shipped in PRs #112 and #113 (CCE-89). The cron was re-enabled after D1 + D2 landed. D3 shipped afterward as the CCE-101 merge gate, described next.
+
+## Merge gate (CCE-101)
+
+Nightly PRs merge themselves when the run earned it: `partial: false`, zero
+factual-accuracy warnings, no human commits on the PR, and host CI green
+(checks that never register — the no-App-token case — count as "no gate";
+the in-run lint/build validation already passed). The merge is squash +
+branch-delete, followed by an explicit dispatch of the Pages workflow.
+
+A PR is left open, with the reason in the run digest and
+`current_run.partial_reasons`, when any of:
+
+| Reason                                                                           | Meaning                                    | Operator action                             |
+| -------------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------- |
+| `policy_manual`                                                                  | host opted out (`merge: {policy: manual}`) | review + merge as before                    |
+| `partial_run`                                                                    | a subagent failed mid-run                  | read `partial_reasons`, merge if acceptable |
+| `fact_check_warnings`                                                            | the fact-checker flagged a contradiction   | verify the flagged page before merging      |
+| `human_edited`                                                                   | someone pushed to the PR branch            | finish the review you started               |
+| `checks_failed` / `checks_timeout`                                               | host CI red or unsettled                   | fix CI, then merge manually                 |
+| `time_budget` / `checks_query_failed` / `commits_lookup_failed` / `merge_failed` | infrastructure                             | merge manually; recurs → file a ticket      |
+
+An unmerged PR is superseded the next night (D2 auto-close keeps the list
+clean), but `state.json` only advances on merge — so a left-open PR means
+the next run re-covers the same window.
 
 ## Merge cadence invariant
 
@@ -67,13 +91,13 @@ Concurrent manual fires queue rather than race on the same branch. Let the first
 
 ## Required secrets and variables
 
-| Name | Kind | Purpose |
-|---|---|---|
-| `CLAUDE_CODE_OAUTH_TOKEN` | Secret | Claude CLI auth (`sk-ant-oat…` format) |
-| `DOCS_AGENT_APP_PRIVATE_KEY` | Secret | GitHub App private key for the `docs-agent-bot` App |
-| `DOCS_AGENT_APP_CLIENT_ID` | Variable | GitHub App Client ID (not the numeric App ID) |
-| `JIRA_API_TOKEN` | Secret | Jira basic-auth for source-collector enrichment (optional) |
-| `JIRA_EMAIL` | Variable | Jira account email paired with the API token (optional) |
+| Name                         | Kind     | Purpose                                                    |
+| ---------------------------- | -------- | ---------------------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN`    | Secret   | Claude CLI auth (`sk-ant-oat…` format)                     |
+| `DOCS_AGENT_APP_PRIVATE_KEY` | Secret   | GitHub App private key for the `docs-agent-bot` App        |
+| `DOCS_AGENT_APP_CLIENT_ID`   | Variable | GitHub App Client ID (not the numeric App ID)              |
+| `JIRA_API_TOKEN`             | Secret   | Jira basic-auth for source-collector enrichment (optional) |
+| `JIRA_EMAIL`                 | Variable | Jira account email paired with the API token (optional)    |
 
 If `JIRA_API_TOKEN` or `JIRA_EMAIL` is absent, the source-collector skips Jira enrichment and continues — no run failure, just `source_collector_error: jira_auth_missing` in the partial reasons.
 
@@ -94,3 +118,4 @@ The **Run summary** step appends the post-run `state.json` snapshot to the GitHu
 - Decision record: [docs-agent cadence invariant and stale-PR sweep (2026-06-05)](../archive/2026-06-05-docs-agent-cadence-invariant.md)
 - Stale PR archives: `.engineering-docs-agent/stale-prs-archive/pr-{85,86,90,92,94,95}.json`
 - CCE-89: D1 PR-body enrichment, D2 auto-close-stale, D3 merge-gate decision
+- CCE-101: the merge gate that closed D3 — auto-merge as the default closure mechanism

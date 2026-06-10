@@ -16,52 +16,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 ORCH_RUNNER = Path(__file__).parent.parent.parent / "scripts" / "orchestrator_runner.py"
 FAKES_SCHEMA_INVALID = Path(__file__).parent / "fakes_schema_invalid"
 
-CONFIG_YAML = """
-docs:
-  framework: mkdocs
-  source_dir: docs/site-src
-  whats_new_file: docs/site-src/whats-new.md
-  agent_editable_paths: ["docs/site-src/**"]
-  lens_paths:
-    core: docs/site-src/core
-sources:
-  git: { host: github }
-lint: { tier1: default }
-publishing:
-  base_url: https://example.com
-  build_workflow: deploy.yml
-  url_map_rule: standard
-  verify_timeout_seconds: 60
-notifications:
-  slack: { enabled: false }
-  email: { enabled: false }
-"""
 
-
-def _init_host(tmp_path: Path) -> Path:
-    (tmp_path / ".engineering-docs-agent").mkdir()
-    (tmp_path / ".engineering-docs-agent" / "config.yml").write_text(CONFIG_YAML)
-    state_path = tmp_path / ".engineering-docs-agent" / "state.json"
-    state_path.write_text(json.dumps({"version": "1"}))
-    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.email", "test@example.com"],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.name", "Test"], check=True
-    )
-    (tmp_path / "README.md").write_text("init")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "README.md"], check=True)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"], check=True
-    )
-    return state_path
-
-
-def test_schema_invalid_source_collector_yields_specific_reason(tmp_path):
+def test_schema_invalid_source_collector_yields_specific_reason(tmp_path, init_host):
     """Bad source-collector shape → schema_invalid reason, no generic redundancy."""
-    state_path = _init_host(tmp_path)
+    state_path = init_host({"version": "1"})
 
     env = {**os.environ, "GITHUB_REPOSITORY": "owner/repo"}
     r = subprocess.run(

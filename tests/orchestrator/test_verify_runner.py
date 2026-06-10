@@ -15,26 +15,15 @@ VERIFY_RUNNER = Path(__file__).parent.parent.parent / "scripts" / "verify_runner
 FAKES_VERIFY_FAIL = Path(__file__).parent / "fakes_verify_fail"
 FAKES_VERIFY_OK = Path(__file__).parent / "fakes_verify_ok"
 
-CONFIG_YAML = """
-docs:
-  framework: mkdocs
-  source_dir: docs/site-src
-  whats_new_file: docs/site-src/whats-new.md
-  agent_editable_paths: ["docs/site-src/**"]
-  lens_paths:
-    core: docs/site-src/core
-sources:
-  git: { host: github }
-lint: { tier1: default }
-publishing:
-  base_url: https://example.com
-  build_workflow: deploy.yml
-  url_map_rule: standard
-  verify_timeout_seconds: 60
-notifications:
-  slack: { enabled: false }
-  email: { enabled: false }
-"""
+# Seeded state for every test in this file: a pending current_run awaiting
+# post-merge verification.
+SEEDED_STATE = {
+    "version": "1",
+    "current_run": {
+        "started_at": "2026-05-19T07:00:00Z",
+        "head_sha": "abc123",
+    },
+}
 
 
 def test_verify_runner_imports():
@@ -42,25 +31,6 @@ def test_verify_runner_imports():
 
     assert hasattr(verify_runner, "run")
     assert hasattr(verify_runner, "main")
-
-
-def _init_host(tmp_path: Path) -> Path:
-    (tmp_path / ".engineering-docs-agent").mkdir()
-    (tmp_path / ".engineering-docs-agent" / "config.yml").write_text(CONFIG_YAML)
-    state_path = tmp_path / ".engineering-docs-agent" / "state.json"
-    state_path.write_text(
-        json.dumps(
-            {
-                "version": "1",
-                "current_run": {
-                    "started_at": "2026-05-19T07:00:00Z",
-                    "head_sha": "abc123",
-                },
-            }
-        )
-    )
-    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
-    return state_path
 
 
 def _invoke(tmp_path: Path, fakes_dir: Path) -> subprocess.CompletedProcess:
@@ -82,10 +52,10 @@ def _invoke(tmp_path: Path, fakes_dir: Path) -> subprocess.CompletedProcess:
     )
 
 
-def test_verify_runner_failure_does_not_promote(tmp_path):
+def test_verify_runner_failure_does_not_promote(tmp_path, init_host):
     """Failed URLs → rc=1, last_successful_run not written, current_run lives in
     the gitignored sibling (never in committed state.json)."""
-    state_path = _init_host(tmp_path)
+    state_path = init_host(SEEDED_STATE)
 
     r = _invoke(tmp_path, FAKES_VERIFY_FAIL)
     assert r.returncode == 1, r.stderr
@@ -103,9 +73,9 @@ def test_verify_runner_failure_does_not_promote(tmp_path):
     assert "current_run" in json.loads(sibling.read_text())
 
 
-def test_verify_runner_success_promotes(tmp_path):
+def test_verify_runner_success_promotes(tmp_path, init_host):
     """All URLs verified → rc=0, current_run promoted to last_successful_run."""
-    state_path = _init_host(tmp_path)
+    state_path = init_host(SEEDED_STATE)
 
     r = _invoke(tmp_path, FAKES_VERIFY_OK)
     assert r.returncode == 0, r.stderr
@@ -123,7 +93,7 @@ def test_verify_runner_success_promotes(tmp_path):
     )
 
 
-def test_verify_runner_uses_gh_client_for_pr_view(tmp_path, monkeypatch):
+def test_verify_runner_uses_gh_client_for_pr_view(tmp_path, monkeypatch, init_host):
     sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import verify_runner
     import gh_client
@@ -133,20 +103,20 @@ def test_verify_runner_uses_gh_client_for_pr_view(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(verify_runner, "GhClient", lambda *a, **kw: fake)
 
-    _init_host(tmp_path)
+    init_host(SEEDED_STATE)
     rc = verify_runner.run(tmp_path, 42, dry_run_dir=FAKES_VERIFY_OK)
     assert any(c[0] == "pr_view_files" for c in fake.calls)
     assert rc == 0
 
 
-def test_verify_runner_uses_cli_pr_number_authoritative(tmp_path):
+def test_verify_runner_uses_cli_pr_number_authoritative(tmp_path, init_host):
     """CLI --pr-number is authoritative; state.current_run.pr_number is ignored on promotion."""
     sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import verify_runner
 
     importlib.reload(verify_runner)
 
-    state_path = _init_host(tmp_path)
+    state_path = init_host(SEEDED_STATE)
     state = json.loads(state_path.read_text())
     state["current_run"]["pr_number"] = 99
     state_path.write_text(json.dumps(state))
@@ -160,13 +130,15 @@ def test_verify_runner_uses_cli_pr_number_authoritative(tmp_path):
     )
 
 
-def test_verify_runner_writes_state_even_on_dispatch_failure(tmp_path, monkeypatch):
+def test_verify_runner_writes_state_even_on_dispatch_failure(
+    tmp_path, monkeypatch, init_host
+):
     sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import verify_runner
 
     importlib.reload(verify_runner)
 
-    state_path = _init_host(tmp_path)
+    state_path = init_host(SEEDED_STATE)
     # Delete state.json after init so we can detect whether run() re-creates it
     # via try/finally. Without try/finally, the file stays missing because the
     # raise happens before the existing end-of-run write.

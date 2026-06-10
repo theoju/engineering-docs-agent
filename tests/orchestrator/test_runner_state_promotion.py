@@ -14,61 +14,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 ORCH_RUNNER = Path(__file__).parent.parent.parent / "scripts" / "orchestrator_runner.py"
 FAKES_OK = Path(__file__).parent / "fakes"
 
-CONFIG_YAML = """
-docs:
-  framework: mkdocs
-  source_dir: docs/site-src
-  whats_new_file: docs/site-src/whats-new.md
-  agent_editable_paths: ["docs/site-src/**"]
-  lens_paths:
-    core: docs/site-src/core
-sources:
-  git: { host: github }
-lint: { tier1: default }
-publishing:
-  base_url: https://example.com
-  build_workflow: deploy.yml
-  url_map_rule: standard
-  verify_timeout_seconds: 60
-notifications:
-  slack: { enabled: false }
-  email: { enabled: false }
-"""
 
-
-def _init_host(tmp_path: Path, seeded_state: dict) -> tuple[Path, str]:
-    """Returns (state_path, head_sha_after_init)."""
-    (tmp_path / ".engineering-docs-agent").mkdir()
-    (tmp_path / ".engineering-docs-agent" / "config.yml").write_text(CONFIG_YAML)
-    state_path = tmp_path / ".engineering-docs-agent" / "state.json"
-    state_path.write_text(json.dumps(seeded_state))
-    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.email", "test@example.com"],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.name", "Test"], check=True
-    )
-    (tmp_path / "README.md").write_text("init")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "README.md"], check=True)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"], check=True
-    )
-    head_sha = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+def _head_sha(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
         capture_output=True,
         text=True,
         check=True,
     ).stdout.strip()
-    return state_path, head_sha
 
 
-def test_runner_advances_last_successful_run_to_head(tmp_path):
+def test_runner_advances_last_successful_run_to_head(tmp_path, init_host):
     """After a dry-run, state.json on disk has last_successful_run.head_sha
     set to the repo's HEAD at run start."""
     seeded = {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
-    state_path, head_sha = _init_host(tmp_path, seeded)
+    state_path = init_host(seeded)
+    head_sha = _head_sha(tmp_path)
 
     result = subprocess.run(
         [
@@ -92,11 +53,11 @@ def test_runner_advances_last_successful_run_to_head(tmp_path):
     )
 
 
-def test_runner_does_not_write_current_run_to_state_json(tmp_path):
+def test_runner_does_not_write_current_run_to_state_json(tmp_path, init_host):
     """state.json on disk must not contain current_run. The ephemeral
     state goes to the sibling current_run.json (CCE-40)."""
     seeded = {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
-    state_path, _ = _init_host(tmp_path, seeded)
+    state_path = init_host(seeded)
 
     result = subprocess.run(
         [

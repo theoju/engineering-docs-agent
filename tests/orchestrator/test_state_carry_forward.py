@@ -4,7 +4,6 @@ next run's current_run. Persistent root causes will re-accumulate on their
 own when the next run also fails; transient reasons must not survive."""
 
 from __future__ import annotations
-import json
 import os
 import subprocess
 import sys
@@ -15,54 +14,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
 ORCH_RUNNER = Path(__file__).parent.parent.parent / "scripts" / "orchestrator_runner.py"
 FAKES_OK = Path(__file__).parent / "fakes"
-
-CONFIG_YAML = """
-docs:
-  framework: mkdocs
-  source_dir: docs/site-src
-  whats_new_file: docs/site-src/whats-new.md
-  agent_editable_paths: ["docs/site-src/**"]
-  lens_paths:
-    core: docs/site-src/core
-sources:
-  git: { host: github }
-lint: { tier1: default }
-publishing:
-  base_url: https://example.com
-  build_workflow: deploy.yml
-  url_map_rule: standard
-  verify_timeout_seconds: 60
-notifications:
-  slack: { enabled: false }
-  email: { enabled: false }
-"""
-
-
-def _read_current_run(state_path: Path) -> dict:
-    """CCE-40: current_run lives in a sibling file, not state.json."""
-    sibling = state_path.parent / "current_run.json"
-    return json.loads(sibling.read_text())["current_run"]
-
-
-def _init_host(tmp_path: Path, seeded_state: dict) -> Path:
-    (tmp_path / ".engineering-docs-agent").mkdir()
-    (tmp_path / ".engineering-docs-agent" / "config.yml").write_text(CONFIG_YAML)
-    state_path = tmp_path / ".engineering-docs-agent" / "state.json"
-    state_path.write_text(json.dumps(seeded_state))
-    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.email", "test@example.com"],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.name", "Test"], check=True
-    )
-    (tmp_path / "README.md").write_text("init")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "README.md"], check=True)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"], check=True
-    )
-    return state_path
 
 
 def _run_orchestrator(tmp_path: Path) -> subprocess.CompletedProcess:
@@ -83,7 +34,9 @@ def _run_orchestrator(tmp_path: Path) -> subprocess.CompletedProcess:
     )
 
 
-def test_prior_run_partial_reasons_do_not_carry_forward(tmp_path):
+def test_prior_run_partial_reasons_do_not_carry_forward(
+    tmp_path, init_host, read_current_run
+):
     """A non-stale prior current_run with transient reasons must NOT leak
     those reasons into the new current_run."""
     seeded = {
@@ -98,7 +51,7 @@ def test_prior_run_partial_reasons_do_not_carry_forward(tmp_path):
             ],
         },
     }
-    state_path = _init_host(tmp_path, seeded)
+    state_path = init_host(seeded)
 
     r = _run_orchestrator(tmp_path)
     assert r.returncode == 0, (
@@ -106,14 +59,16 @@ def test_prior_run_partial_reasons_do_not_carry_forward(tmp_path):
         f"rc={r.returncode}\nstdout={r.stdout}\nstderr={r.stderr}"
     )
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     reasons = cr.get("partial_reasons", [])
     assert reasons == [], (
         f"prior-run transient reasons must not carry forward; got {reasons}"
     )
 
 
-def test_fresh_run_after_failed_run_starts_with_empty_reasons(tmp_path):
+def test_fresh_run_after_failed_run_starts_with_empty_reasons(
+    tmp_path, init_host, read_current_run
+):
     """Acceptance criterion #5: after a prior failed run, the new run's
     current_run starts with partial: false and partial_reasons: []."""
     seeded = {
@@ -125,12 +80,12 @@ def test_fresh_run_after_failed_run_starts_with_empty_reasons(tmp_path):
             "partial_reasons": ["push_failed: simulated network error"],
         },
     }
-    state_path = _init_host(tmp_path, seeded)
+    state_path = init_host(seeded)
 
     r = _run_orchestrator(tmp_path)
     assert r.returncode == 0, r.stderr
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     assert cr.get("partial") is False, (
         f"clean run after failed run should have partial=false; got {cr}"
     )
@@ -139,7 +94,9 @@ def test_fresh_run_after_failed_run_starts_with_empty_reasons(tmp_path):
     )
 
 
-def test_stale_clear_signal_still_emitted_against_fresh_reasons(tmp_path):
+def test_stale_clear_signal_still_emitted_against_fresh_reasons(
+    tmp_path, init_host, read_current_run
+):
     """Acceptance criterion #6 + interaction with the existing stale-clear
     contract: a stale prior current_run must still emit
     'stale_current_run_cleared' — and that must be the ONLY reason
@@ -154,12 +111,12 @@ def test_stale_clear_signal_still_emitted_against_fresh_reasons(tmp_path):
             "partial_reasons": ["push_failed: ancient", "lint_block: tier1: rule_x"],
         },
     }
-    state_path = _init_host(tmp_path, seeded)
+    state_path = init_host(seeded)
 
     r = _run_orchestrator(tmp_path)
     assert r.returncode == 0, r.stderr
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     reasons = cr["partial_reasons"]
     assert "stale_current_run_cleared" in reasons, (
         f"stale-clear signal must still fire; got {reasons}"
@@ -174,7 +131,7 @@ def test_stale_clear_signal_still_emitted_against_fresh_reasons(tmp_path):
     )
 
 
-def test_stale_current_run_cleared_is_info_only(tmp_path):
+def test_stale_current_run_cleared_is_info_only(tmp_path, init_host, read_current_run):
     """Stale current_run is cleared as info-only: partial stays False, signal is recorded, prior reasons do not leak."""
     stale_iso = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
     seeded = {
@@ -186,12 +143,12 @@ def test_stale_current_run_cleared_is_info_only(tmp_path):
             "partial_reasons": ["push_failed: simulated"],
         },
     }
-    state_path = _init_host(tmp_path, seeded)
+    state_path = init_host(seeded)
 
     r = _run_orchestrator(tmp_path)
     assert r.returncode == 0, r.stderr
 
-    cr = _read_current_run(state_path)
+    cr = read_current_run(state_path)
     assert cr.get("partial") is False, (
         f"info-only stale_current_run_cleared must not flip partial=True; got {cr}"
     )

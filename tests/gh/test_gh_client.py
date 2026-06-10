@@ -307,3 +307,21 @@ def test_workflow_run_failure(monkeypatch, tmp_path):
     r = GhClient(tmp_path).workflow_run("docs-agent-pages.yml")
     assert not r.ok
     assert r.error.startswith("gh_workflow_run_failed")
+
+
+def test_fake_gh_client_pr_checks_sequence_pops_then_repeats_last():
+    """Poll-loop tests feed a pending→green sequence; the last element
+    repeats so a loop that polls extra times doesn't IndexError."""
+    from gh_client import FakeGhClient, GhResult
+
+    pending = GhResult(
+        ok=True, value=[{"name": "ci", "state": "PENDING", "bucket": "pending"}]
+    )
+    green = GhResult(
+        ok=True, value=[{"name": "ci", "state": "SUCCESS", "bucket": "pass"}]
+    )
+    fake = FakeGhClient(pr_checks=[pending, green])
+    assert fake.pr_checks(1).value[0]["bucket"] == "pending"
+    assert fake.pr_checks(1).value[0]["bucket"] == "pass"
+    assert fake.pr_checks(1).value[0]["bucket"] == "pass"  # last repeats
+    assert fake.calls.count(("pr_checks", (1,))) == 3

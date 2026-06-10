@@ -248,7 +248,13 @@ class FakeGhClient:
         pr_list_docs_agent_open: GhResult | None = None,
         pr_view_commits: GhResult | None = None,
         pr_close: GhResult | None = None,
+        pr_checks: GhResult | list[GhResult] | None = None,
+        pr_merge: GhResult | None = None,
+        workflow_run: GhResult | None = None,
     ) -> None:
+        # CCE-101: pr_checks accepts a sequence so poll-loop tests can
+        # model pending→green transitions; the last element repeats.
+        self._pr_checks_seq = list(pr_checks) if isinstance(pr_checks, list) else None
         self._canned = {
             "pr_view_files": pr_view_files,
             "pr_list_for_branch": pr_list_for_branch,
@@ -256,6 +262,9 @@ class FakeGhClient:
             "pr_list_docs_agent_open": pr_list_docs_agent_open,
             "pr_view_commits": pr_view_commits,
             "pr_close": pr_close,
+            "pr_checks": pr_checks if not isinstance(pr_checks, list) else None,
+            "pr_merge": pr_merge,
+            "workflow_run": workflow_run,
         }
         self.calls: list[tuple[str, tuple]] = []
 
@@ -282,3 +291,19 @@ class FakeGhClient:
     def pr_close(self, pr_number: int, comment: str) -> GhResult:
         self.calls.append(("pr_close", (pr_number, comment)))
         return self._canned["pr_close"] or GhResult(ok=True, value=pr_number)
+
+    def pr_checks(self, pr_number: int) -> GhResult:
+        self.calls.append(("pr_checks", (pr_number,)))
+        if self._pr_checks_seq is not None:
+            if len(self._pr_checks_seq) > 1:
+                return self._pr_checks_seq.pop(0)
+            return self._pr_checks_seq[0]
+        return self._canned["pr_checks"] or GhResult(ok=True, value=[])
+
+    def pr_merge(self, pr_number: int) -> GhResult:
+        self.calls.append(("pr_merge", (pr_number,)))
+        return self._canned["pr_merge"] or GhResult(ok=True, value=pr_number)
+
+    def workflow_run(self, workflow_file: str) -> GhResult:
+        self.calls.append(("workflow_run", (workflow_file,)))
+        return self._canned["workflow_run"] or GhResult(ok=True, value=workflow_file)

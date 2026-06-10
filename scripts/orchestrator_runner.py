@@ -1854,6 +1854,25 @@ def run(
         save_persistent_state(state_path, state)
         save_current_run(state_path, state)
 
+        # CCE-101: auto-merge gate. Runs on both PR paths (fresh create and
+        # same-hour append) — the human-edit guard inside makes the append
+        # path safe. deadline/clock are the CCE-109 budget objects.
+        merge_settings = resolve_merge_settings(config)
+        merge_outcome, merge_reasons = _maybe_auto_merge(
+            gh,
+            pr_number=pr_number,
+            partial=state["current_run"]["partial"],
+            fact_warnings=state["current_run"].get("fact_check_warnings") or [],
+            merge_settings=merge_settings,
+            build_workflow=config.get("publishing", {}).get("build_workflow"),
+            deadline=deadline,
+            clock=clock,
+        )
+        for reason, info_only in merge_reasons:
+            add_partial(state, reason, info_only=info_only)
+        save_persistent_state(state_path, state)
+        save_current_run(state_path, state)
+
         # Compose digest and dispatch notifier.
         digest = {
             "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
@@ -1873,6 +1892,7 @@ def run(
             "core_drift": core_drifted,
             "fact_check_warnings": state["current_run"].get("fact_check_warnings")
             or [],
+            "merge_outcome": merge_outcome,
         }
         notifier_result, reasons = dispatch_validated(
             "notifier",

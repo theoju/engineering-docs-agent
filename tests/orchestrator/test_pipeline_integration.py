@@ -103,9 +103,7 @@ def test_pipeline_dry_run(tmp_path, init_pipeline_host, read_current_run):
 
 
 def test_lint_block_unlinks_newly_created_file(
-    tmp_path,
-    init_pipeline_host,
-    read_current_run
+    tmp_path, init_pipeline_host, read_current_run
 ):
     """Create case: page-author writes a new file, validator blocks → unlink."""
     state = init_pipeline_host()
@@ -138,9 +136,7 @@ def test_orchestrator_hard_fails_on_bad_config(tmp_path, init_pipeline_host):
 
 
 def test_same_page_targets_batched_into_single_dispatch(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     """3 PRs that all target the same (lens, page_hint) → ONE page-author dispatch
     with all 3 summaries."""
@@ -186,9 +182,7 @@ def test_blocked_create_cleans_up_empty_parent_dirs(tmp_path, init_pipeline_host
 
 
 def test_lint_block_restores_edited_file_from_head(
-    tmp_path,
-    init_pipeline_host,
-    read_current_run
+    tmp_path, init_pipeline_host, read_current_run
 ):
     """Edit case: file in HEAD with original content, working tree modified,
     validator blocks → git checkout HEAD -- restores original content."""
@@ -212,9 +206,7 @@ def test_lint_block_restores_edited_file_from_head(
 
 
 def test_jira_input_forwarded_to_source_collector(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     """When config has sources.jira, orchestrator passes it under the `jira` key."""
     import sys as _sys
@@ -254,9 +246,7 @@ def test_jira_input_forwarded_to_source_collector(
 
 
 def test_jira_context_threaded_to_pr_summarizer(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -285,9 +275,7 @@ def test_jira_context_threaded_to_pr_summarizer(
 
 
 def test_voice_samples_loaded_and_passed_to_authoring(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -328,9 +316,7 @@ def test_voice_samples_loaded_and_passed_to_authoring(
 
 
 def test_unsafe_page_path_filtered_logs_partial(
-    tmp_path,
-    init_pipeline_host,
-    read_current_run
+    tmp_path, init_pipeline_host, read_current_run
 ):
     """page_hint containing .. should not touch the filesystem."""
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
@@ -353,9 +339,7 @@ def test_unsafe_page_path_filtered_logs_partial(
 
 
 def test_gap_detector_receives_constructed_pr_id(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -472,9 +456,7 @@ def test_dispatch_subagent_handles_claude_not_installed(monkeypatch, tmp_path):
 
 
 def test_orchestrator_uses_gh_client_for_pr_create(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -489,6 +471,11 @@ def test_orchestrator_uses_gh_client_for_pr_create(
     monkeypatch.setattr(runner, "GhClient", lambda *a, **kw: fake)
 
     init_pipeline_host()
+    # CCE-101: this test's subject is pr_create, not the merge gate —
+    # opt out so the default-auto gate doesn't real-sleep through its
+    # 120s check-grace window (the gate has its own wiring test).
+    cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
+    cfg.write_text(cfg.read_text() + "\nmerge: { policy: manual }\n")
     # Have to make git work for commit/push: stub push to succeed
     monkeypatch.setattr(
         runner.subprocess,
@@ -500,9 +487,7 @@ def test_orchestrator_uses_gh_client_for_pr_create(
 
 
 def test_stale_current_run_cleared_on_next_run(
-    tmp_path,
-    init_pipeline_host,
-    read_current_run
+    tmp_path, init_pipeline_host, read_current_run
 ):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -547,10 +532,7 @@ def test_zero_pr_run_does_not_write_whats_new(tmp_path, init_pipeline_host):
 
 
 def test_git_push_failure_adds_partial(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host,
-    read_current_run
+    tmp_path, monkeypatch, init_pipeline_host, read_current_run
 ):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -582,9 +564,7 @@ def test_git_push_failure_adds_partial(
 
 
 def test_invalid_subagent_json_logs_partial_continues(
-    tmp_path,
-    init_pipeline_host,
-    read_current_run
+    tmp_path, init_pipeline_host, read_current_run
 ):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -691,9 +671,7 @@ def test_whats_new_prepend_preserves_frontmatter(tmp_path, init_pipeline_host):
 
 
 def test_source_collector_error_propagates_partial(
-    tmp_path,
-    init_pipeline_host,
-    read_current_run
+    tmp_path, init_pipeline_host, read_current_run
 ):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -712,9 +690,7 @@ def test_source_collector_error_propagates_partial(
 
 
 def test_run_surfaces_source_drift_in_whats_new_and_state(
-    tmp_path,
-    init_pipeline_host,
-    read_current_run
+    tmp_path, init_pipeline_host, read_current_run
 ):
     """Source-map stage wiring: run() must record drift in run state AND emit
     the 'Pages to review (source drift)' block in the What's-New entry.
@@ -767,9 +743,7 @@ def test_run_surfaces_source_drift_in_whats_new_and_state(
 
 
 def test_available_sections_passed_to_pr_summarizer(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -799,9 +773,7 @@ def test_available_sections_passed_to_pr_summarizer(
 
 
 def test_available_sections_empty_when_no_subdirs(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
     import orchestrator_runner as runner
@@ -826,9 +798,7 @@ def test_available_sections_empty_when_no_subdirs(
 
 
 def test_available_sections_empty_when_lens_root_missing(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     """Lens root that does not exist on disk → empty list, no crash."""
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
@@ -863,9 +833,7 @@ def test_available_sections_empty_when_lens_root_missing(
 
 
 def test_available_sections_excludes_hidden_dirs(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     """Dot-prefixed dirs (e.g. .git in a broad lens root) are never routing targets."""
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
@@ -895,9 +863,7 @@ def test_available_sections_excludes_hidden_dirs(
 
 
 def test_run_surfaces_core_drift_in_whats_new_and_state(
-    tmp_path,
-    init_pipeline_host,
-    read_current_run
+    tmp_path, init_pipeline_host, read_current_run
 ):
     """C2 drift-update stage wiring: a manifest core page that M flags as
     source-drifted is surfaced under 'Core pages to review (drift)' in the
@@ -951,9 +917,7 @@ def test_run_surfaces_core_drift_in_whats_new_and_state(
 
 
 def test_content_validator_dispatch_includes_plugin_root(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     """CCE-67: orchestrator must pass plugin_root in content-validator inputs
     so the subagent can locate scripts/lint/lint_runner.py at the absolute
@@ -991,9 +955,7 @@ def test_content_validator_dispatch_includes_plugin_root(
 
 
 def test_content_validator_payload_plugin_root_is_str_not_path(
-    tmp_path,
-    monkeypatch,
-    init_pipeline_host
+    tmp_path, monkeypatch, init_pipeline_host
 ):
     """CCE-67: plugin_root must be passed as str, not Path, to remain
     JSON-serializable. Path objects round-trip through the dispatcher's JSON

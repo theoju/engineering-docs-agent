@@ -8,6 +8,7 @@ every failure degrades to leaving the PR open (pre-CCE-101 behavior).
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -300,6 +301,68 @@ def test_skipping_bucket_counts_as_settled():
     outcome, _ = _run(gh, clock=clock)
     assert outcome["merged"] is True
     assert clock.t < 120  # settled immediately, no grace wait
+
+
+# ---------------------------------------------------------------------------
+# Task 8: run_pipeline wiring — auto-merge gate + digest merge_outcome
+# ---------------------------------------------------------------------------
+
+_FAKES = Path(__file__).parent / "fakes"
+
+
+def test_run_pipeline_wires_auto_merge_and_digest(tmp_path, monkeypatch, init_host):
+    """End-to-end wiring: a green non-partial dry-run pipeline merges its
+    PR, records auto_merge_succeeded, and partial stays false (info-only).
+    Asserts against current_run.json and the FakeGhClient call log."""
+    init_host({"version": "1", "dismissed_gap_flags": {}, "cursors": {}})
+
+    # Zero grace window: the wired _maybe_auto_merge uses the REAL
+    # time.sleep (bound as a default arg — monkeypatching time.sleep
+    # after import does NOT reach it). With grace 0 the zero-checks
+    # path breaks out of the poll loop on the first iteration, so the
+    # test never sleeps.
+    config_path = tmp_path / ".engineering-docs-agent" / "config.yml"
+    config_path.write_text(
+        config_path.read_text()
+        + "\nmerge:\n  policy: auto\n  checks_grace_seconds: 0\n"
+        + "  checks_timeout_seconds: 0\n"
+    )
+
+    fake = None
+
+    def _fake_factory(repo_root):
+        nonlocal fake
+        fake = FakeGhClient(
+            pr_create=GhResult(ok=True, value=11),
+            pr_view_commits=GhResult(ok=True, value=[{"authors": [_bot_author()]}]),
+            pr_checks=GhResult(ok=True, value=[]),
+        )
+        return fake
+
+    monkeypatch.setattr(orun, "GhClient", _fake_factory)
+
+    # The tmp host repo has no `origin` remote; stub ONLY `git push` to
+    # succeed so open_or_append_pr proceeds to pr_create (inverse of
+    # test_pipeline_integration.test_git_push_failure_adds_partial).
+    real_run = orun.subprocess.run
+
+    def selective(cmd, *a, **kw):
+        if isinstance(cmd, list) and cmd[:2] == ["git", "-C"] and "push" in cmd:
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(orun.subprocess, "run", selective)
+
+    rc = orun.run(tmp_path, dry_run_dir=_FAKES, no_pr=False)
+    assert rc == 0
+    assert ("pr_merge", (11,)) in fake.calls
+    current_run = json.loads(
+        (tmp_path / ".engineering-docs-agent" / "current_run.json").read_text()
+    )["current_run"]
+    assert any(
+        r.startswith("auto_merge_succeeded") for r in current_run["partial_reasons"]
+    )
+    assert current_run["partial"] is False  # info-only reasons never flip it
 
 
 def test_cancelled_check_fails_fast_as_red():

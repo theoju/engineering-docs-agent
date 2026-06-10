@@ -62,6 +62,38 @@ class GhClient:
             extract=lambda d: list(d.get("commits") or []),
         )
 
+    def pr_checks(self, pr_number: int) -> GhResult:
+        """CI check states for a PR, parsed per the CCE-83 vocabulary
+        (name/state/bucket — never statusCheckRollup/conclusion).
+
+        CCE-101: `gh pr checks` exit codes are data, not errors —
+        0 = all green, 8 = pending, 1 = failing OR "no checks reported".
+        Deliberately NOT routed through _run_json (check=True would turn
+        a pending poll into an exception). "No checks reported" maps to
+        ok-with-[] so the caller's zero-checks grace path can decide.
+        """
+        try:
+            r = subprocess.run(
+                ["gh", "pr", "checks", str(pr_number), "--json", "name,state,bucket"],
+                cwd=self._cwd,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            return GhResult(ok=False, error="gh_not_installed")
+        if "no checks reported" in (r.stderr or "").lower():
+            return GhResult(ok=True, value=[])
+        try:
+            data = json.loads(r.stdout or "null")
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, list):
+            return GhResult(ok=True, value=data)
+        return GhResult(
+            ok=False,
+            error=f"gh_pr_checks_failed: rc={r.returncode} {(r.stderr or '')[:200]}",
+        )
+
     def pr_close(self, pr_number: int, comment: str) -> GhResult:
         """Close a PR with an explanatory comment.
 

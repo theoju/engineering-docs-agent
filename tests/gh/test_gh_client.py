@@ -162,3 +162,65 @@ def test_fake_gh_client_default_responses():
     assert fake.pr_view_files(1).value == []
     assert fake.pr_list_for_branch("x").value is None
     assert fake.pr_create("x", "t", "b").value == 1
+
+
+def test_pr_checks_all_green(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    stdout = json.dumps([{"name": "pytest", "state": "SUCCESS", "bucket": "pass"}])
+    monkeypatch.setattr("gh_client.subprocess.run", _fake_run(stdout=stdout))
+    r = GhClient(tmp_path).pr_checks(7)
+    assert r.ok
+    assert r.value[0]["name"] == "pytest"
+
+
+def test_pr_checks_pending_exit_8_is_data_not_error(monkeypatch, tmp_path):
+    """gh pr checks exits 8 while checks are pending; the JSON on stdout
+    is still the payload. Treat it as data."""
+    from gh_client import GhClient
+
+    stdout = json.dumps([{"name": "pytest", "state": "PENDING", "bucket": "pending"}])
+    monkeypatch.setattr(
+        "gh_client.subprocess.run", _fake_run(stdout=stdout, returncode=8)
+    )
+    r = GhClient(tmp_path).pr_checks(7)
+    assert r.ok
+    assert r.value[0]["bucket"] == "pending"
+
+
+def test_pr_checks_no_checks_reported_is_empty_list(monkeypatch, tmp_path):
+    """No-App-token hosts: docs-agent PRs trigger no CI at all. gh exits
+    non-zero with 'no checks reported' — that is the zero-checks case,
+    not an error."""
+    from gh_client import GhClient
+
+    monkeypatch.setattr(
+        "gh_client.subprocess.run",
+        _fake_run(stderr="no checks reported on the 'x' branch", returncode=1),
+    )
+    r = GhClient(tmp_path).pr_checks(7)
+    assert r.ok
+    assert r.value == []
+
+
+def test_pr_checks_gh_not_installed(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    monkeypatch.setattr(
+        "gh_client.subprocess.run", _fake_run(raise_exc=FileNotFoundError())
+    )
+    r = GhClient(tmp_path).pr_checks(7)
+    assert not r.ok
+    assert r.error == "gh_not_installed"
+
+
+def test_pr_checks_garbage_nonzero_is_error(monkeypatch, tmp_path):
+    from gh_client import GhClient
+
+    monkeypatch.setattr(
+        "gh_client.subprocess.run",
+        _fake_run(stdout="boom", stderr="server error", returncode=1),
+    )
+    r = GhClient(tmp_path).pr_checks(7)
+    assert not r.ok
+    assert r.error.startswith("gh_pr_checks_failed")

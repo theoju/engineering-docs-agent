@@ -44,3 +44,23 @@ def test_fact_checker_bad_verdict_rejected():
     )
     assert parsed is None
     assert any("schema_invalid" in r for r in reasons)
+
+
+def test_page_author_schema_declares_evidence():
+    schema = json.loads((SCHEMAS / "page_author.schema.json").read_text())
+    assert "evidence" in schema["properties"]
+    assert (
+        schema["properties"]["evidence"]["properties"]["files_read"]["type"] == "array"
+    )
+
+
+def test_page_author_output_with_evidence_validates():
+    raw = {
+        "ok": True,
+        "path": "docs/site-src/core/page.md",
+        "action": "create",
+        "evidence": {"files_read": ["scripts/real_module.py"]},
+    }
+    parsed, reasons = validate_and_parse("page-author", raw)
+    assert reasons == []
+    assert parsed.ok

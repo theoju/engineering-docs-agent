@@ -299,3 +299,62 @@ notifications: {}
 """)
     with pytest.raises(ValidationError):
         validate(cfg, SCHEMA)
+
+
+_BASE_FOR_MERGE = """
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: { core: docs/core }
+sources: { git: { host: github } }
+lint: { tier1: default, tier2: {}, tier3: {} }
+publishing:
+  base_url: https://x
+  build_workflow: deploy.yml
+  url_map_rule: standard
+notifications: {}
+"""
+
+
+def test_merge_block_valid():
+    cfg = yaml.safe_load(
+        _BASE_FOR_MERGE
+        + """
+merge:
+  policy: auto
+  checks_grace_seconds: 120
+  checks_timeout_seconds: 900
+"""
+    )
+    validate(cfg, SCHEMA)
+
+
+def test_merge_policy_manual_valid():
+    cfg = yaml.safe_load(_BASE_FOR_MERGE + "\nmerge: { policy: manual }\n")
+    validate(cfg, SCHEMA)
+
+
+def test_merge_block_absent_valid():
+    """CCE-101: merge is optional — absent block means policy auto."""
+    cfg = yaml.safe_load(_BASE_FOR_MERGE)
+    validate(cfg, SCHEMA)
+
+
+def test_merge_unknown_policy_rejected():
+    cfg = yaml.safe_load(_BASE_FOR_MERGE + "\nmerge: { policy: rebase }\n")
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)
+
+
+def test_merge_unknown_key_rejected():
+    cfg = yaml.safe_load(_BASE_FOR_MERGE + "\nmerge: { method: squash }\n")
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)
+
+
+def test_merge_negative_grace_rejected():
+    cfg = yaml.safe_load(_BASE_FOR_MERGE + "\nmerge: { checks_grace_seconds: -1 }\n")
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)

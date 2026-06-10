@@ -66,8 +66,10 @@ A PR is left open, with the reason in the run digest and
 | `time_budget` / `checks_query_failed` / `commits_lookup_failed` / `merge_failed` | infrastructure                             | merge manually; recurs → file a ticket      |
 
 An unmerged PR is superseded the next night (D2 auto-close keeps the list
-clean), but `state.json` only advances on merge — so a left-open PR means
-the next run re-covers the same window.
+clean), but the `state.json` baseline on main only advances when the PR
+merges (the run writes the advance to the docs-agent branch; merge is what
+promotes it) — so a left-open PR means the next run re-covers the same
+window.
 
 ## Merge cadence invariant
 

@@ -29,7 +29,7 @@ Auto-merge is the default closure mechanism. A fully-green, non-partial, untouch
 
 You merge manually only when a PR is left open, and the reason is always recorded in the run digest and `current_run.partial_reasons`. The full reason table and per-reason operator actions live in the [merge-gate section of the nightly runbook](docs-agent-nightly.md#merge-gate-cce-101). In short: `policy_manual` means the host opted out, `fact_check_warnings` means verify the flagged page first, `human_edited` means finish the review you started, and the CI/infrastructure reasons mean fix the underlying problem and merge by hand.
 
-After any manual merge, run `scripts/prune_merged_branches.py --apply` to clean up the local branch reference. Do not rebase or amend the docs-agent branch. Each branch has no rebase target — `state.json.last_successful_run` advances only on merge-to-main.
+After any manual merge, run `scripts/prune_merged_branches.py --apply` to clean up the local branch reference. Do not rebase or amend the docs-agent branch. Each branch has no rebase target — the `state.json.last_successful_run` baseline on main advances only when a docs-agent PR merges (each run writes the advance to its own branch; merge promotes it).
 
 ## Observation window (historical)
 

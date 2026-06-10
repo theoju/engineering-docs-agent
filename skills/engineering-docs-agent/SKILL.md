@@ -1,6 +1,6 @@
 ---
 name: engineering-docs-agent
-description: Run the nightly engineering-docs-agent pipeline. Invoked by GitHub Actions on cron and PR-merge events. Reads host config and state, dispatches 7 subagents in the documented order, opens/updates the docs PR.
+description: Run the nightly engineering-docs-agent pipeline. Invoked by GitHub Actions on cron and PR-merge events. Reads host config and state, dispatches 8 subagents in the documented order, opens/updates the docs PR.
 model: opus
 tools:
   - Bash

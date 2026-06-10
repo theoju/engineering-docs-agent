@@ -62,7 +62,7 @@ claude plugin marketplace add /path/to/engineering-docs-agent
 claude plugin install engineering-docs-agent@engineering-docs-agent-marketplace
 ```
 
-That makes the seven agents resolvable without `--plugin-dir` workarounds. The marketplace registration reads `.claude-plugin/marketplace.json`; the plugin manifest is at `.claude-plugin/plugin.json`.
+That makes the eight agents resolvable without `--plugin-dir` workarounds. The marketplace registration reads `.claude-plugin/marketplace.json`; the plugin manifest is at `.claude-plugin/plugin.json`.
 
 ### Lens paths and editable paths
 

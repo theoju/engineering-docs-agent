@@ -1,6 +1,6 @@
 # engineering-docs-agent — agent guidelines
 
-A Claude Code plugin: seven specialized subagents turn merged PRs, commits, and Jira issues into a single nightly docs-update PR — voice-matched authoring, tiered linting, gap detection, and post-merge publish verification.
+A Claude Code plugin: eight specialized subagents turn merged PRs, commits, and Jira issues into a single nightly docs-update PR — voice-matched authoring, tiered linting, factual-accuracy checking, gap detection, and post-merge publish verification.
 
 ## Generic plugin — runs on ANY host repo (critical)
 

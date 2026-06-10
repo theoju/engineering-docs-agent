@@ -953,6 +953,18 @@ def _load_core_manifest_pages(repo_root: Path, docs_dir: str) -> list[dict]:
     return pages if isinstance(pages, list) else []
 
 
+def _pr_changed_files(prs: list[dict]) -> set[str]:
+    """File paths across PRs' files[] arrays (dict-with-path or plain string).
+    Shared by source drift, citation drift, and page-author grounding."""
+    out: set[str] = set()
+    for pr in prs:
+        for f in pr.get("files") or []:
+            name = f.get("path") if isinstance(f, dict) else f
+            if isinstance(name, str) and name:
+                out.add(name)
+    return out
+
+
 def compute_source_drift(repo_root: Path, config: dict, prs: list[dict]) -> list[dict]:
     """Run the source-map generator and return drifted pages for this batch.
     Changed files = union of every PR's files[] (dict-with-path or plain string).
@@ -966,15 +978,7 @@ def compute_source_drift(repo_root: Path, config: dict, prs: list[dict]) -> list
     import source_drift
 
     source_map.generate_source_map(repo_root, docs_dir)
-    changed = sorted(
-        {
-            (f["path"] if isinstance(f, dict) else f)
-            for pr in prs
-            for f in (pr.get("files") or [])
-            if isinstance(f, (dict, str))
-            and (f.get("path") if isinstance(f, dict) else f)
-        }
-    )
+    changed = sorted(_pr_changed_files(prs))
     return source_drift.detect_drift(repo_root / docs_dir, changed)["drifted"]
 
 
@@ -1003,12 +1007,7 @@ def _changed_pages_from_map(
     source_to_pages = artifact.get("map")
     if not isinstance(source_to_pages, dict):
         return None
-    changed = {
-        (f["path"] if isinstance(f, dict) else f)
-        for pr in prs
-        for f in (pr.get("files") or [])
-        if isinstance(f, (dict, str)) and (f.get("path") if isinstance(f, dict) else f)
-    }
+    changed = _pr_changed_files(prs)
     pages: set[str] = set()
     for src, page_list in source_to_pages.items():
         if src in changed and isinstance(page_list, list):
@@ -1404,6 +1403,7 @@ def run(
 
         authored: list[str] = []
         authored_lens: dict[str, str] = {}
+        pr_by_number = {pr.get("number"): pr for pr in prs}
         for (lens, hint), batch_summaries in per_target.items():
             try:
                 lens_path, _opts = resolve_lens(config, lens)
@@ -1433,15 +1433,12 @@ def run(
             if _dk:
                 fm_template["doc_kind"] = _dk
             # CCE-110 layer 1: ground the author in the code the PRs touched.
-            grounding: set[str] = set()
-            for s in batch_summaries:
-                for pr in prs:
-                    if pr.get("number") != s.get("pr_number"):
-                        continue
-                    for f in pr.get("files") or []:
-                        fname = f.get("path") if isinstance(f, dict) else f
-                        if isinstance(fname, str) and fname:
-                            grounding.add(fname)
+            batch_prs = [
+                pr_by_number[s.get("pr_number")]
+                for s in batch_summaries
+                if s.get("pr_number") in pr_by_number
+            ]
+            grounding = _pr_changed_files(batch_prs)
             out, reasons = dispatch_validated(
                 "page-author",
                 {
@@ -1556,16 +1553,21 @@ def run(
         fact_warnings: list[str] = []
         fact_pages = [p for p in authored if Path(p).exists()]
         if fact_pages:
+            # Append (not insert(0)) so scripts/lint modules can never shadow
+            # stdlib or scripts/ modules already importable by this process.
             lint_dir = str(_PLUGIN_ROOT / "scripts" / "lint")
             if lint_dir not in sys.path:
-                sys.path.insert(0, lint_dir)
+                sys.path.append(lint_dir)
             import citation_exists as _citation_exists
 
             for page in fact_pages:
                 page_path = Path(page)
                 try:
                     page_text = page_path.read_text()
-                except OSError:
+                except (OSError, UnicodeDecodeError):
+                    # Unreadable or non-UTF-8 page: warn layer skips, never
+                    # crashes the run (UnicodeDecodeError is a ValueError,
+                    # not an OSError).
                     continue
                 cited_sources = _citation_exists.resolve_cited_sources(
                     page_text, repo_root

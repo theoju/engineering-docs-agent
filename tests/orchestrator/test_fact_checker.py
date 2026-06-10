@@ -239,6 +239,23 @@ def test_fact_checker_failure_is_info_only(init_host, tmp_path, read_current_run
     assert cr["partial"] is False  # info_only: never flips partial
 
 
+def test_fact_checker_skips_undecodable_page_without_crashing(
+    init_host, tmp_path, read_current_run
+):
+    # CCE-110 review fix: a page-author output that is not valid UTF-8 must be
+    # skipped by the warn layer (never crash the run). UnicodeDecodeError is a
+    # ValueError, not an OSError — the guard must catch both.
+    state_path = _host_with_module(init_host, tmp_path)
+    page = tmp_path / "docs" / "site-src" / "core" / "page.md"
+    page.write_bytes(b"\xff\xfe invalid utf-8 \xff")
+    fakes = tmp_path / "fakes"
+    _write_fakes(fakes)
+
+    rc = orchestrator_runner.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0
+    assert read_current_run(state_path)["fact_check_warnings"] == []
+
+
 def test_fact_checker_consistent_verdict_yields_no_warnings(
     init_host, tmp_path, read_current_run
 ):

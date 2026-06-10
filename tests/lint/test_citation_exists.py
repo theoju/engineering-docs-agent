@@ -165,6 +165,17 @@ def test_missing_page_file_blocks(tmp_path):
     assert out["results"][0]["message"] == "file not found"
 
 
+def test_undecodable_page_blocks_with_clear_message(tmp_path):
+    # A page that is not valid UTF-8 must block with a message, not crash the
+    # rule (a crash surfaces as lint_runner's opaque "empty output" block).
+    repo, cfg = _init_host(tmp_path)
+    page = repo / "page.md"
+    page.write_bytes(b"\xff\xfe invalid \xff")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 1
+    assert "not decodable" in out["results"][0]["message"]
+
+
 # ---------- regression: the two confabulated pages (condensed) ----------
 
 CONFABULATED_STATE_ADVANCEMENT = """\

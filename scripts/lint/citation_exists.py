@@ -137,7 +137,13 @@ def check_path(path: Path, repo_root: Path | None, files: set[str]) -> tuple[boo
         return True, "no git repo detected; citation check skipped"
     if not path.exists():
         return False, "file not found"
-    cites = extract_citations(path.read_text())
+    try:
+        text = path.read_text()
+    except UnicodeDecodeError:
+        return False, "file not decodable as UTF-8"
+    except OSError as e:
+        return False, f"file unreadable: {e}"
+    cites = extract_citations(text)
     problems: list[str] = []
     for cited in cites["paths"]:
         rel = _relativize(cited, repo_root)

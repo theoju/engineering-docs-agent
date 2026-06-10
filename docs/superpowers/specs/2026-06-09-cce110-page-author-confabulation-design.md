@@ -140,9 +140,10 @@ All inside the existing authoring loop in `scripts/orchestrator_runner.py`:
 
 1. page-author dispatched with `source_paths`.
 2. content-validator runs the lint suite; `citation_exists` rides Tier-1. A
-   block failure follows the existing block path — page excluded,
-   `partial_reasons` entry `citation_unverified:<page>:<token>`. No new
-   enforcement machinery.
+   block failure follows the existing block path — page excluded, and the
+   existing reason format applies:
+   `lint_block: <page> citation_exists: cites nonexistent test '<token>'`.
+   No new enforcement machinery, including no new reason format.
 3. For each surviving page, the orchestrator imports the Component-1
    extractor; pages with ≥1 resolvable cited source get one fact-checker
    dispatch, others skip.

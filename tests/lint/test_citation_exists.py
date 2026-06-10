@@ -60,3 +60,159 @@ def test_vocabulary_tokens_skipped():
     # No slash and not a test identifier -> not a citation.
     text = "`partial_reasons` `run.time_budget_seconds` `frontmatter_contract.py`"
     assert citation_exists.extract_citations(text) == {"paths": [], "tests": []}
+
+
+# ---------- verification + CLI (tmp git host) ----------
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+    )
+
+
+def _init_host(tmp_path: Path) -> tuple[Path, Path]:
+    """Arbitrary-host fixture: git repo with one module, one test, a config."""
+    repo = tmp_path / "host"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "tests").mkdir()
+    (repo / "scripts" / "real_module.py").write_text("def real_fn():\n    return 1\n")
+    (repo / "tests" / "test_real.py").write_text(
+        "def test_real_behavior():\n    assert True\n"
+    )
+    (repo / ".engineering-docs-agent").mkdir()
+    cfg = repo / ".engineering-docs-agent" / "config.yml"
+    cfg.write_text("lint: { tier1: default }\n")
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "T")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+    return repo, cfg
+
+
+def _run_cli(paths: list[Path], cfg: Path) -> tuple[int, dict]:
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--config",
+            str(cfg),
+            "--paths",
+            *[str(p) for p in paths],
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return r.returncode, json.loads(r.stdout)
+
+
+def test_existing_citations_pass(tmp_path):
+    repo, cfg = _init_host(tmp_path)
+    page = repo / "page.md"
+    page.write_text("Cites `scripts/real_module.py` and `test_real_behavior`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 0
+    assert out["rule"] == "citation_exists"
+    assert out["severity"] == "block"
+    assert out["results"][0]["ok"] is True
+
+
+def test_nonexistent_test_blocks(tmp_path):
+    repo, cfg = _init_host(tmp_path)
+    page = repo / "page.md"
+    page.write_text("Verified by `test_never_written`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 1
+    assert "cites nonexistent test 'test_never_written'" in out["results"][0]["message"]
+
+
+def test_nonexistent_path_blocks(tmp_path):
+    repo, cfg = _init_host(tmp_path)
+    page = repo / "page.md"
+    page.write_text("See `scripts/ghost.py` for the sentinel logic.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 1
+    assert "cites nonexistent path 'scripts/ghost.py'" in out["results"][0]["message"]
+
+
+def test_untracked_but_present_path_passes(tmp_path):
+    # A page authored in the same run may cite a file that exists on disk but
+    # is not yet tracked (e.g. a generated sibling). Existence on disk wins.
+    repo, cfg = _init_host(tmp_path)
+    (repo / "scripts" / "fresh.py").write_text("x = 1\n")  # not committed
+    page = repo / "page.md"
+    page.write_text("Cites `scripts/fresh.py`.\n")
+    rc, _ = _run_cli([page], cfg)
+    assert rc == 0
+
+
+def test_no_git_passes_trivially(tmp_path):
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("lint: { tier1: default }\n")
+    page = tmp_path / "page.md"
+    page.write_text("Cites `scripts/ghost.py` and `test_never_written`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 0
+    assert "skipped" in out["results"][0]["message"]
+
+
+def test_missing_page_file_blocks(tmp_path):
+    repo, cfg = _init_host(tmp_path)
+    rc, out = _run_cli([repo / "absent.md"], cfg)
+    assert rc == 1
+    assert out["results"][0]["message"] == "file not found"
+
+
+# ---------- regression: the two confabulated pages (condensed) ----------
+
+CONFABULATED_STATE_ADVANCEMENT = """\
+# Orchestrator state advancement
+
+Invariant 1 — no advance on partial. The runner records the decision in a
+sentinel file `.engineering-docs-agent/last_run_invariant.json`.
+
+Verified by `test_state_not_advanced_on_partial`,
+`test_state_advanced_on_clean`, and `test_state_no_sha_regression`.
+"""
+
+CONFABULATED_GIT_STAGING = """\
+# Orchestrator git staging
+
+The runner does not use git add -A; PR #97 replaced it with the pathspec
+form. Verified by `test_stage_uses_pathspec_not_add_all`.
+"""
+
+
+def test_regression_confabulated_state_advancement_blocks(tmp_path):
+    repo, cfg = _init_host(tmp_path)
+    page = repo / "state-advancement.md"
+    page.write_text(CONFABULATED_STATE_ADVANCEMENT)
+    rc, out = _run_cli([page], cfg)
+    assert rc == 1
+    msg = out["results"][0]["message"]
+    assert "test_state_not_advanced_on_partial" in msg
+    assert "test_state_advanced_on_clean" in msg
+    assert "test_state_no_sha_regression" in msg
+    assert "last_run_invariant.json" in msg
+
+
+def test_regression_confabulated_git_staging_blocks(tmp_path):
+    repo, cfg = _init_host(tmp_path)
+    page = repo / "git-staging.md"
+    page.write_text(CONFABULATED_GIT_STAGING)
+    rc, out = _run_cli([page], cfg)
+    assert rc == 1
+    assert "test_stage_uses_pathspec_not_add_all" in out["results"][0]["message"]
+
+
+# ---------- orchestrator-facing helper ----------
+
+
+def test_resolve_cited_sources_returns_existing_relative_paths(tmp_path):
+    repo, _ = _init_host(tmp_path)
+    text = "Cites `scripts/real_module.py:3` and `scripts/ghost.py`."
+    assert citation_exists.resolve_cited_sources(text, repo) == [
+        "scripts/real_module.py"
+    ]

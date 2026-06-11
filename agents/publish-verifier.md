@@ -58,7 +58,7 @@ The canonical schema is in §Output schema above. The shape described here is th
 
 ## Procedure
 
-1. Wait for `build_workflow` run with `event=push, head_branch=main` after `merged_pr_number` merge time. Poll `gh run list --workflow <build_workflow>` every 30s.
+1. Wait for a `build_workflow` run created at/after the `merged_pr_number` merge time, **regardless of trigger event** — host trigger models differ (push to main, pull_request-closed republish, manual workflow_dispatch). Poll `gh run list --workflow <build_workflow> --json databaseId,event,status,conclusion,createdAt` every 30s; select the newest run with `createdAt` ≥ the merge time and wait for `status=completed`. `conclusion=success` → proceed to URL checks; any other conclusion → emit `build_status: "failure"`.
 2. On success, derive each URL: `url_map_rule=standard` means `docs/site-src/foo/bar.md` → `<base_url>/foo/bar/` (strip the configured `source_dir` prefix, drop `.md`, add trailing slash). For `url_map_rule=custom`, use `publishing_config.url_regex` (a sed-like substitution).
 3. For each URL, `curl -s -o /tmp/page.html -w "%{http_code}" <url>`. Status 200 = verified. Other = failed.
 4. Optional fingerprint: compute a SHA of a content marker (e.g. the page title) and verify it appears in the body.

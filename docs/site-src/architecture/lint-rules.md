@@ -2,12 +2,13 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/61
+  - https://github.com/theoju/engineering-docs-agent/pull/135
 synthesized_into: []
 doc_kind: architecture
 description: How the tiered lint runner validates agent-authored Markdown — block vs warn severities, the Tier-1 default rule set, and per-rule opt-in for Tiers 2 and 3.
 source_files:
   - scripts/lint/lint_runner.py
-last_reviewed: "2026-06-10"
+last_reviewed: "2026-06-15"
 ---
 
 # Lint Rules
@@ -40,6 +41,18 @@ The page-author agent non-deterministically emits bare fences. Treating a missin
 Before this split, a single `markdown_hygiene` rule ran at block severity for all hygiene checks. One bare ` ``` ` fence emitted by the agent was enough to prevent an entire page from reaching the docs site. The structural checks (unpaired fences, heading jumps) deserve block severity; the language-tag check does not.
 
 The new module boundary makes the severity intent explicit and gives you a clear place to add future warn-only checks without touching the blocking rule.
+
+## Agent-authored frontmatter validation
+
+Every page the agent authors or edits must carry a required field set defined by the `AGENT_AUTHORED_REQUIRED` contract in `scripts/lint/lint_runner.py`. The Tier-1 rule checks for three fields:
+
+- `description` — one-line summary of the page's purpose.
+- `source_files` — list of repo-relative code paths the page describes.
+- `last_reviewed` — ISO date of the last agent or human review.
+
+A page missing any of these fields produces a `lint_block` partial reason. The page-author subagent's edit is rejected and the run is marked partial. Because CCE-101 auto-merge requires a non-partial run, a single non-compliant page blocks every nightly from merging until the frontmatter is fixed.
+
+Pages created before this contract was established need a one-time patch to add the three fields. After that, the page-author agent keeps them current on every subsequent edit.
 
 ## Running the linter
 

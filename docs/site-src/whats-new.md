@@ -8,6 +8,30 @@ synthesized_into: []
 
 # What's New
 
+## 2026-06-16T09:05:31.000147+00:00
+- PR #135: Added the required agent-authored frontmatter fields (description, source_files, last_reviewed, status) to three legacy architecture pages — bootstrap-fail-fast.md, index.md, and lint-rules.md — that predated the AGENT_AUTHORED_REQUIRED contract. Without these fields, every nightly page-author edit to these pages was failing Tier-1 frontmatter_schema/description_quality lint checks and being silently dropped, causing recurring partial runs.
+- PR #136: The orchestrator's nightly time budget (introduced in CCE-109) is now enforced throughout all three expensive phases: the page-author fan-out, the fact-checker loop, and the gap-detector loop. Previously the soft deadline was only checked at PR admission — completing minutes into a run — so dozens of Opus dispatches could start after the deadline and run until the 60-minute GitHub Actions timeout killed the entire workflow. The authoring loop now checks the deadline before each batch while guaranteeing at least one batch of forward progress; the fact-checker and gap-detector loops skip outright once the deadline has passed and flip `partial: true` on the PR so the CCE-101 auto-merge gate correctly withholds merging incomplete runs. Four new TDD-driven tests covering authoring truncation, fact-checker skip, gap-detector skip, and unlimited-budget passthrough were added alongside the fix.
+### Pages to review (source drift)
+- architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
+- architecture/cce10-source-collector-canonical-shape.md — changed: scripts/orchestrator_runner.py
+- architecture/cce12-source-collector-tool-use-diagnostics.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-decision-archive.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-source-map-drift.md — changed: scripts/orchestrator_runner.py
+- architecture/cce4-schema-enforcement.md — changed: scripts/orchestrator_runner.py
+- architecture/cce6-7-8-batch.md — changed: scripts/orchestrator_runner.py
+- architecture/index.md — changed: scripts/orchestrator_runner.py
+- archive/cce14-source-collector-prompt-hardening.md — changed: scripts/orchestrator_runner.py
+- archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
+- archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
+- archive/v0-1-1-hardening.md — changed: scripts/orchestrator_runner.py
+### Core pages to review (drift)
+- architecture/cce10-source-collector-canonical-shape.md (source)
+- architecture/cce12-source-collector-tool-use-diagnostics.md (source)
+- architecture/cce23-decision-archive.md (source)
+- architecture/cce23-source-map-drift.md (source)
+- architecture/cce4-schema-enforcement.md (source)
+- architecture/cce6-7-8-batch.md (source)
+
 ## 2026-06-10T18:20:27.473771+00:00
 - PR #126: A bulk backlog catch-up run processed the ~35-PR window that had been accumulating since 2026-05-29, adding 32 documentation pages across the archive and architecture sections and advancing the docs-agent `last_successful_run` baseline from `bdf0da1a` to `68090590`. The run also introduced a `.doc-source-map.json` drift-tracking artifact. Approximately 19 candidate architecture pages and 3 broken-link pages were dropped by Tier-1 lint due to missing required frontmatter (including `last_reviewed`) and will not auto-regenerate since the baseline has moved past their source PRs.
 - PR #127: Reverted 17 architecture documentation pages that were injected into docs/site-src/architecture/ by PR #126's forensic salvage. At least two pages — orchestrator-state-advancement.md and orchestrator-git-staging.md — contained factually inverted claims and cited tests that do not exist. The remaining 15 were unverified for accuracy. All 17 files were deleted and architecture/index.md was regenerated to list only the 15 verified pre-existing pages. The doom-loop baseline advance and 32 lint-gated backlog pages from the same run were kept intact.

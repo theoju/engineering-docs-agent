@@ -1360,6 +1360,7 @@
     ],
     "scripts/lint/lint_runner.py": [
       "architecture/engineering-docs-agent.md",
+      "architecture/lint-rules.md",
       "archive/v0-1-1-hardening.md"
     ],
     "scripts/lint/reading_grade.py": [
@@ -1369,12 +1370,14 @@
       "architecture/engineering-docs-agent.md"
     ],
     "scripts/orchestrator_runner.py": [
+      "architecture/bootstrap-fail-fast.md",
       "architecture/cce10-source-collector-canonical-shape.md",
       "architecture/cce12-source-collector-tool-use-diagnostics.md",
       "architecture/cce23-decision-archive.md",
       "architecture/cce23-source-map-drift.md",
       "architecture/cce4-schema-enforcement.md",
       "architecture/cce6-7-8-batch.md",
+      "architecture/index.md",
       "archive/cce14-source-collector-prompt-hardening.md",
       "archive/cce15-source-collector-root-cause-sweep.md",
       "archive/cce5-9-batch-prep-roadmap.md",
@@ -1528,6 +1531,9 @@
     ]
   },
   "patterns": {
+    "architecture/bootstrap-fail-fast.md": [
+      "scripts/orchestrator_runner.py"
+    ],
     "architecture/cce-capability-c-canonical-core-citations.md": [
       "backend/connectors/base.py",
       "core/**",
@@ -1624,6 +1630,12 @@
       "scripts/lint/frontmatter_schema.py",
       "scripts/lint/lint_runner.py",
       "scripts/lint/stub_redirect.py"
+    ],
+    "architecture/index.md": [
+      "scripts/orchestrator_runner.py"
+    ],
+    "architecture/lint-rules.md": [
+      "scripts/lint/lint_runner.py"
     ],
     "architecture/structured-docs-site-generation.md": [
       "agents/schemas/*.json",

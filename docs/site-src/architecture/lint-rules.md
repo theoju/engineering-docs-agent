@@ -2,12 +2,13 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/61
+  - https://github.com/theoju/engineering-docs-agent/pull/135
 synthesized_into: []
 doc_kind: architecture
 description: How the tiered lint runner validates agent-authored Markdown — block vs warn severities, the Tier-1 default rule set, and per-rule opt-in for Tiers 2 and 3.
 source_files:
   - scripts/lint/lint_runner.py
-last_reviewed: "2026-06-10"
+last_reviewed: "2026-06-17"
 ---
 
 # Lint Rules
@@ -40,6 +41,24 @@ The page-author agent non-deterministically emits bare fences. Treating a missin
 Before this split, a single `markdown_hygiene` rule ran at block severity for all hygiene checks. One bare ` ``` ` fence emitted by the agent was enough to prevent an entire page from reaching the docs site. The structural checks (unpaired fences, heading jumps) deserve block severity; the language-tag check does not.
 
 The new module boundary makes the severity intent explicit and gives you a clear place to add future warn-only checks without touching the blocking rule.
+
+## frontmatter rules
+
+The `frontmatter_schema` and `description_quality` rules are Tier-1 block-severity checks. Every agent-authored page must carry the fields declared in the `AGENT_AUTHORED_REQUIRED` contract: `description`, `source_files`, and `last_reviewed`.
+
+### frontmatter_schema (severity: block)
+
+Validates that required frontmatter keys are present and non-empty. A page missing any of the three required fields is rejected before it reaches the docs site. The nightly runner drops the edit and marks the run partial rather than publishing a page that fails schema.
+
+### description_quality (severity: block)
+
+Validates that the `description` field is a substantive sentence, not a placeholder or empty string. A one-word value or an empty `description: ""` fails this rule at the same block severity.
+
+### Why legacy pages must carry frontmatter
+
+Pages created before the `AGENT_AUTHORED_REQUIRED` contract was established have no `description`, `source_files`, or `last_reviewed` fields. Every nightly edit the agent attempts on one of these pages fails `frontmatter_schema`/`description_quality` lint and is dropped. The run is then marked partial, which blocks CCE-101 auto-merge.
+
+The fix is to add the missing fields directly to the page on `main` — once present, future agent edits pass Tier-1 lint cleanly and satisfy the auto-merge gate. PR #135 applied this fix to three legacy architecture pages: `bootstrap-fail-fast.md`, `index.md`, and `lint-rules.md`.
 
 ## Running the linter
 

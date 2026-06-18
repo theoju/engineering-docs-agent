@@ -40,6 +40,7 @@ _Operations: deployment workflows, configuration guides, and runbooks._
 - **Setup and Onboarding** — This is the single canonical setup guide for the engineering-docs-agent plugin. A duplicate root-level draft (`docs/setup-guide.md`) was removed in PR #79 (CCE-60); this page is authoritative.
 - **Setup Framework Detection** — The setup skill probes the host repo root for a supported docs framework before writing any config. Detection is intentionally minimal: two files decide the outcome, and when neither is found, `framework: none` is recorded explicitly rather than left absent.
 - **Step summary observability** — When a nightly run encounters a partial or hard-failed subagent, the runner writes a formatted digest to GitHub Actions' built-in step summary. You can read this digest directly in the workflow run UI without downloading any forensics artifact.
+- **Time Budget Enforcement** — The nightly runner enforces a soft deadline (CCE-109) to prevent the 60-minute GitHub Actions job timeout from killing a run with all work discarded. This page explains where the deadline is checked, what happens when it fires, and what you see in partial runs.
 
-_30 pages · regenerated nightly_
+_31 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

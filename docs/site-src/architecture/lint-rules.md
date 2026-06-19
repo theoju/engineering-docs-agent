@@ -2,12 +2,13 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/61
+  - https://github.com/theoju/engineering-docs-agent/pull/135
 synthesized_into: []
 doc_kind: architecture
 description: How the tiered lint runner validates agent-authored Markdown — block vs warn severities, the Tier-1 default rule set, and per-rule opt-in for Tiers 2 and 3.
 source_files:
   - scripts/lint/lint_runner.py
-last_reviewed: "2026-06-10"
+last_reviewed: "2026-06-19"
 ---
 
 # Lint Rules
@@ -40,6 +41,16 @@ The page-author agent non-deterministically emits bare fences. Treating a missin
 Before this split, a single `markdown_hygiene` rule ran at block severity for all hygiene checks. One bare ` ``` ` fence emitted by the agent was enough to prevent an entire page from reaching the docs site. The structural checks (unpaired fences, heading jumps) deserve block severity; the language-tag check does not.
 
 The new module boundary makes the severity intent explicit and gives you a clear place to add future warn-only checks without touching the blocking rule.
+
+## Frontmatter rules and the `AGENT_AUTHORED_REQUIRED` contract
+
+The lint runner enforces a set of required frontmatter fields on agent-authored pages. The rule is defined against the `AGENT_AUTHORED_REQUIRED` constant and demands `description`, `source_files`, `last_reviewed`, and `status` on every page the agent writes.
+
+A missing field produces a `lint_block` finding — block severity. When the page-author subagent edits a page that lacks these fields, the orchestrator marks that page's result as partial. A partial page causes the entire docs-agent PR to carry `partial: true` in its body, which prevents CCE-101 auto-merge from firing.
+
+The consequence is a recurring drop loop: the nightly run touches the page, hits `lint_block` on the missing frontmatter, drops the edit, opens a partial PR, and auto-merge skips it. The fix is to ensure the fields are present on every page before the agent first edits it. PR #135 retroactively added the required fields to three architecture pages that predated the contract.
+
+If you add a new page manually, include all four fields. If you inherit a page from before the `AGENT_AUTHORED_REQUIRED` contract, add them before the next nightly run — otherwise the first agent edit will produce a partial PR.
 
 ## Running the linter
 

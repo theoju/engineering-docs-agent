@@ -26,6 +26,7 @@ _Operations: deployment workflows, configuration guides, and runbooks._
 - **Jira Conventions** — All Jira work for this project lives in the **Claude-Code-Extensions** project at `https://designitright.atlassian.net`. The key prefix is `CCE`.
 - **Nightly Cron Cadence** — The docs-agent runs automatically once per day at **07:07 UTC** via `.github/workflows/docs-agent-nightly.yml`. Each run opens a new `docs-agent/YYYY-MM-DDTHH` branch and PR against the host repo's docs site. The runner never appends commits to a prior PR — each nightly is a fresh snapshot.
 - **Nightly docs-agent CI** — The nightly authoring pipeline runs automatically at 07:07 UTC via `.github/workflows/docs-agent-nightly.yml`. It computes the change window against `state.json`, dispatches the subagent pipeline, and opens or appends a commit to a `docs-agent/YYYY-MM-DD` branch. A partial run still opens the PR with `partial: true` in the body — no run goes silent.
+- **Nightly run time budget** — The nightly runner enforces a soft time budget to stay inside the 60-minute GitHub Actions job hard kill. Every phase that dispatches subagents checks this deadline before starting a new dispatch. When the deadline passes, the run stops cleanly, marks the run partial, and lets the next nightly pick up where this one left off.
 - **Nightly Workflow Operations** — The nightly authoring pipeline runs via `.github/workflows/docs-agent-nightly.yml`. It fires daily at 07:07 UTC on a cron schedule and accepts manual `workflow_dispatch` triggers.
 - **Nightly Workflow Run Summary** — The nightly workflow writes a run summary to `$GITHUB_STEP_SUMMARY` after every execution. This gives you a fast read on what the last nightly did — state snapshot, partial status, any errors — without downloading the forensics artifact.
 - **Nightly Workflow: GitHub App Token** — The `docs-agent-nightly` workflow authenticates as the `docs-agent-bot` GitHub App rather than using the default `GITHUB_TOKEN`. This page explains why that matters and what you need to configure.
@@ -41,5 +42,5 @@ _Operations: deployment workflows, configuration guides, and runbooks._
 - **Setup Framework Detection** — The setup skill probes the host repo root for a supported docs framework before writing any config. Detection is intentionally minimal: two files decide the outcome, and when neither is found, `framework: none` is recorded explicitly rather than left absent.
 - **Step summary observability** — When a nightly run encounters a partial or hard-failed subagent, the runner writes a formatted digest to GitHub Actions' built-in step summary. You can read this digest directly in the workflow run UI without downloading any forensics artifact.
 
-_30 pages · regenerated nightly_
+_31 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

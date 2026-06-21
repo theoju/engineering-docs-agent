@@ -12,6 +12,7 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 
 - **CCE-109 Doom Loop Resolution: Backlog Catch-Up Run (2026-06-10)** — Since 2026-05-29, the nightly docs-agent had been stuck in a doom loop. Each CI run re-processed the full ~35-PR backlog window, hit the 60-minute job timeout, and exited without advancing `last_successful_run`. The next run would pick up the same window and repeat the cycle.
 - **Decision: Soft Time Budget for the Nightly Orchestrator Runner (CCE-109)** — **Date:** 2026-06-10
+- **Decision: Time-Budget Enforcement Inside the Fan-Out Loops (CCE-114)** — **Date:** 2026-06-10
 - **CCE-105: API Reference Grouping and JSON-Schema Contracts Extractor** — **Date:** 2026-06-09
 - **Decision: Nav Overhaul — Generated Nav Block Replaces awesome-pages (2026-06-09)** — **Date:** 2026-06-09
 - **Release Decision: v0.5.1 (2026-06-09)** — **PR:** #124
@@ -35,5 +36,5 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
 - **Specs archive** — _Auto-generated; 55 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_24 pages · regenerated nightly_
+_25 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

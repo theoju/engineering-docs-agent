@@ -30,10 +30,11 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **v0.1.1 Hardening** — v0.1.1 is a stabilization release. It tightens the contracts between pipeline stages, expands test coverage across the orchestrator and verification paths, and rounds out the Tier-1 lint rule set. No new capabilities are added; the focus is correctness under edge cases the initial release exposed.
 - **ADR: Required Status Checks Must Not Carry a Workflow-Level `paths:` Filter** — **CCE-91 — 2026-06-09**
 - **Auth-tier migration: drop explicit API key threading** — **PR #91 · merged 2026-06-09 · non-breaking**
+- **CCE-114: Authoring Deadline Enforcement — Decision Record** — **Date:** 2026-06-11
 - **Measurements archive** — _Auto-generated; 7 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **Plans archive** — _Auto-generated; 59 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
 - **Specs archive** — _Auto-generated; 55 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_24 pages · regenerated nightly_
+_25 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

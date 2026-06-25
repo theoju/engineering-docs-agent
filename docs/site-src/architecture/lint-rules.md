@@ -2,12 +2,13 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/61
+  - https://github.com/theoju/engineering-docs-agent/pull/135
 synthesized_into: []
 doc_kind: architecture
 description: How the tiered lint runner validates agent-authored Markdown — block vs warn severities, the Tier-1 default rule set, and per-rule opt-in for Tiers 2 and 3.
 source_files:
   - scripts/lint/lint_runner.py
-last_reviewed: "2026-06-10"
+last_reviewed: "2026-06-25"
 ---
 
 # Lint Rules
@@ -40,6 +41,20 @@ The page-author agent non-deterministically emits bare fences. Treating a missin
 Before this split, a single `markdown_hygiene` rule ran at block severity for all hygiene checks. One bare ` ``` ` fence emitted by the agent was enough to prevent an entire page from reaching the docs site. The structural checks (unpaired fences, heading jumps) deserve block severity; the language-tag check does not.
 
 The new module boundary makes the severity intent explicit and gives you a clear place to add future warn-only checks without touching the blocking rule.
+
+## Frontmatter rules
+
+The `frontmatter_schema` and `description_quality` rules are Tier-1 blocking checks that guard the agent-authored frontmatter contract.
+
+### frontmatter_schema (severity: block)
+
+Every agent-authored page must carry the full set of required keys: `description`, `source_files`, `last_reviewed`, and `status`. The runner rejects any page that is missing one or more of these fields with a `lint_block` reason, and the page-author's edit is dropped from the nightly PR rather than published with incomplete metadata.
+
+Pages created before the `AGENT_AUTHORED_REQUIRED` contract was established will be missing these keys. When that happens, the nightly run enters a partial state for every subsequent edit to those pages. Fix it by adding the missing fields directly on `main` — future page-author edits will then pass Tier-1 and flow through normally.
+
+### description_quality (severity: block)
+
+`description_quality` validates that the `description` frontmatter value is non-empty and substantive enough to surface in search. A present-but-empty `description: ""` satisfies `frontmatter_schema` but fails this rule, which is why both checks are needed.
 
 ## Running the linter
 

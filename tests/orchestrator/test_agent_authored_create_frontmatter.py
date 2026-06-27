@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "lint"))
 
 FAKES = Path(__file__).parent / "fakes"
 
@@ -67,3 +68,60 @@ def test_agent_authored_create_uses_agent_template(tmp_path, init_host, monkeypa
     assert isinstance(fm["description"], str) and len(fm["description"].split()) >= 6
     # the cited source_files are exactly the PR grounding handed to the author
     assert fm["source_files"] == captured["source_paths"]
+
+
+def _run_subprocess(tmp_path: Path):
+    import subprocess
+
+    runner_path = (
+        Path(__file__).parent.parent.parent / "scripts" / "orchestrator_runner.py"
+    )
+    return subprocess.run(
+        [
+            sys.executable,
+            str(runner_path),
+            "--repo-root",
+            str(tmp_path),
+            "--dry-run-subagents",
+            str(FAKES),
+            "--no-pr",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_created_agent_authored_page_passes_tier1_lint(tmp_path, init_host):
+    """End-to-end: the dry-run synth writes a page that the REAL lint
+    consumers accept (verify with the consumer, not test -f)."""
+    init_host(_SEED_STATE, config_yaml=CONFIG_AGENT_AUTHORED)
+    r = _run_subprocess(tmp_path)
+    assert r.returncode == 0, r.stderr
+    page = tmp_path / "docs" / "site-src" / "core" / "connectors" / "foo.md"
+    assert page.exists(), "agent-authored create should land in dry-run"
+
+    import frontmatter_schema
+    import description_quality
+
+    config = yaml.safe_load(CONFIG_AGENT_AUTHORED)
+    ok_fs, msg_fs = frontmatter_schema.check_path(page, config)
+    ok_dq, msg_dq = description_quality.check_path(page, config)
+    assert ok_fs, f"frontmatter_schema: {msg_fs}"
+    assert ok_dq, f"description_quality: {msg_dq}"
+
+
+def test_default_section_create_unaffected(tmp_path, init_host):
+    """Regression: a host with NO agent-authored section still gets the default
+    template and its page passes its own (default) required-field set."""
+    default_cfg = CONFIG_AGENT_AUTHORED.replace(
+        "    - {key: core, path: core/, title: Core, generator: agent-authored}\n",
+        "    - {key: core, path: core/, title: Core}\n",
+    )
+    init_host(_SEED_STATE, config_yaml=default_cfg)
+    r = _run_subprocess(tmp_path)
+    assert r.returncode == 0, r.stderr
+    page = tmp_path / "docs" / "site-src" / "core" / "connectors" / "foo.md"
+    assert page.exists()
+    text = page.read_text()
+    assert "status:" in text and "sources:" in text and "synthesized_into:" in text
+    assert "source_files:" not in text  # not the agent-authored set

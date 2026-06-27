@@ -123,11 +123,13 @@ def agent_authored_frontmatter_text(
 ) -> str:
     """YAML frontmatter block for a C2 agent-authored core page (dry-run synth).
 
-    Fields are emitted in AGENT_AUTHORED_REQUIRED order. ``description`` must be
-    a single plain-text line (callers pass a slug-derived title), so no YAML
-    escaping is needed — keeping this module yaml-free like its siblings.
+    Fields are emitted in AGENT_AUTHORED_REQUIRED order. ``description`` is
+    single-quoted so colons and other YAML special characters in synthesized
+    sentences are safe. Single quotes within the value are escaped by doubling
+    (standard YAML single-quoted scalar rule), keeping this module yaml-free.
     """
-    lines = ["---", f"description: {description}"]
+    safe_desc = description.replace("'", "''")
+    lines = ["---", f"description: '{safe_desc}'"]
     if source_files:
         lines.append("source_files:")
         lines.extend(f"  - {p}" for p in source_files)

@@ -944,6 +944,34 @@ def _synthesize_core_page(target_path: Path, page: dict, today: str) -> None:
     target_path.write_text(fm + _core_page_skeleton(page))
 
 
+def _synthesize_agent_description(summaries: list[dict], *, hint: str) -> str:
+    """Deterministic one-line description for a freshly-created agent-authored
+    page (CCE-117). Guarantees the description_quality invariants — >= 6 words,
+    not equal to the slug-derived H1, no trailing colon — by construction.
+    Pure; never raises on malformed input.
+    """
+    change = ""
+    for s in summaries or []:
+        if isinstance(s, dict):
+            wc = s.get("what_changed") or s.get("why")
+            if isinstance(wc, str) and wc.strip():
+                change = wc.strip()
+                break
+    base = hint[:-3] if hint.endswith(".md") else hint
+    topic = (
+        " ".join(base.replace("/", " ").replace("-", " ").replace("_", " ").split())
+        or "this page"
+    )
+    if change:
+        desc = f"Documents {topic}: {change}"
+    else:
+        desc = f"Reference documentation for {topic} in this codebase"
+    desc = desc.rstrip(":").strip()
+    if len(desc.split()) < 6:
+        desc = f"{desc} agent-authored reference for {topic}".rstrip(":").strip()
+    return desc
+
+
 def _resolve_docs_dir(config: dict) -> str | None:
     """The docs root for core pages: prefer ``site.docs_dir`` (what the manifest
     code and the source-map stage use), fall back to ``docs.source_dir`` for

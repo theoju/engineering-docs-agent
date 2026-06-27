@@ -65,3 +65,5 @@ def test_agent_authored_create_uses_agent_template(tmp_path, init_host, monkeypa
     assert set(fm) >= {"description", "source_files", "last_reviewed", "status"}, fm
     assert "sources" not in fm and "synthesized_into" not in fm, fm
     assert isinstance(fm["description"], str) and len(fm["description"].split()) >= 6
+    # the cited source_files are exactly the PR grounding handed to the author
+    assert fm["source_files"] == captured["source_paths"]

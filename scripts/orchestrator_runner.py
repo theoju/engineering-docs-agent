@@ -1512,15 +1512,14 @@ def run(
                 action == "create"
                 and fmc.section_generator_for(rel, config) == "agent-authored"
             ):
-                agent_fields = {
-                    "description": _synthesize_agent_description(
+                agent_fields = fmc.agent_authored_frontmatter_dict(
+                    description=_synthesize_agent_description(
                         batch_summaries, hint=hint
                     ),
-                    "source_files": sorted(grounding),
-                    "last_reviewed": now[:10],
-                    "status": "draft",
-                }
-                fm_template = dict(agent_fields)
+                    source_files=sorted(grounding),
+                    last_reviewed=now[:10],  # date portion (YYYY-MM-DD) of the run
+                )
+                fm_template = agent_fields
             else:
                 fm_template = fmc.default_frontmatter_dict(
                     [

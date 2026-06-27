@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 import sys
 from pathlib import Path
 
@@ -99,6 +100,15 @@ def test_created_agent_authored_page_passes_tier1_lint(tmp_path, init_host):
     assert r.returncode == 0, r.stderr
     page = tmp_path / "docs" / "site-src" / "core" / "connectors" / "foo.md"
     assert page.exists(), "agent-authored create should land in dry-run"
+
+    text = page.read_text()
+    # Lock that the YAML single-quoting path is genuinely exercised: the
+    # synthesized description always contains a colon, which is only valid
+    # YAML because agent_authored_frontmatter_text single-quotes the field.
+    assert "description: '" in text, "description must be single-quoted in YAML"
+    assert re.search(r"description: '.*:.*'", text), (
+        "colon inside single-quoted description"
+    )
 
     import frontmatter_schema
     import description_quality

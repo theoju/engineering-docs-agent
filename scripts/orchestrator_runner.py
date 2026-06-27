@@ -1494,24 +1494,45 @@ def run(
                 continue
             target_path.parent.mkdir(parents=True, exist_ok=True)
             action = "edit" if target_path.exists() else "create"
-            fm_template = fmc.default_frontmatter_dict(
-                [
-                    pr.get("url")
-                    for s in batch_summaries
-                    for pr in prs
-                    if pr.get("number") == s.get("pr_number")
-                ]
-            )
-            _dk = doc_kind_by_target.get((lens, hint))
-            if _dk:
-                fm_template["doc_kind"] = _dk
             # CCE-110 layer 1: ground the author in the code the PRs touched.
+            # Computed before the template so an agent-authored create can cite
+            # the same files in source_files (CCE-117).
             batch_prs = [
                 pr_by_number[s.get("pr_number")]
                 for s in batch_summaries
                 if s.get("pr_number") in pr_by_number
             ]
             grounding = _pr_changed_files(batch_prs)
+            # CCE-117: agent-authored sections require description/source_files/
+            # last_reviewed; the default template omits them, so Tier-1 lint
+            # would drop the new page. Create-only — edits keep the existing
+            # page's frontmatter. agent_fields is reused by the dry-run synth.
+            agent_fields = None
+            if (
+                action == "create"
+                and fmc.section_generator_for(rel, config) == "agent-authored"
+            ):
+                agent_fields = {
+                    "description": _synthesize_agent_description(
+                        batch_summaries, hint=hint
+                    ),
+                    "source_files": sorted(grounding),
+                    "last_reviewed": now[:10],
+                    "status": "draft",
+                }
+                fm_template = dict(agent_fields)
+            else:
+                fm_template = fmc.default_frontmatter_dict(
+                    [
+                        pr.get("url")
+                        for s in batch_summaries
+                        for pr in prs
+                        if pr.get("number") == s.get("pr_number")
+                    ]
+                )
+            _dk = doc_kind_by_target.get((lens, hint))
+            if _dk:
+                fm_template["doc_kind"] = _dk
             out, reasons = dispatch_validated(
                 "page-author",
                 {

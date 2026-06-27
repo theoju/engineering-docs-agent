@@ -944,11 +944,17 @@ def _synthesize_core_page(target_path: Path, page: dict, today: str) -> None:
     target_path.write_text(fm + _core_page_skeleton(page))
 
 
+# Mirrors description_quality._DEFAULTS["min_words"]; the synthesized
+# description must clear the rule's floor by construction (CCE-117).
+_DESC_MIN_WORDS = 6
+
+
 def _synthesize_agent_description(summaries: list[dict], *, hint: str) -> str:
     """Deterministic one-line description for a freshly-created agent-authored
     page (CCE-117). Guarantees the description_quality invariants — >= 6 words,
     not equal to the slug-derived H1, no trailing colon — by construction.
     Pure; never raises on malformed input.
+    Consumed by the incremental authoring create path (wired in CCE-117 Tasks 2–3).
     """
     change = ""
     for s in summaries or []:
@@ -962,12 +968,12 @@ def _synthesize_agent_description(summaries: list[dict], *, hint: str) -> str:
         " ".join(base.replace("/", " ").replace("-", " ").replace("_", " ").split())
         or "this page"
     )
-    if change:
+    if change and len(change.split()) >= 3:
         desc = f"Documents {topic}: {change}"
     else:
         desc = f"Reference documentation for {topic} in this codebase"
     desc = desc.rstrip(":").strip()
-    if len(desc.split()) < 6:
+    if len(desc.split()) < _DESC_MIN_WORDS:
         desc = f"{desc} agent-authored reference for {topic}".rstrip(":").strip()
     return desc
 

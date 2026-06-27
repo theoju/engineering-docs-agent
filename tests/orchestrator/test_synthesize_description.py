@@ -50,3 +50,20 @@ def test_tolerates_malformed_entries():
         hint="x.md",
     )
     assert isinstance(out, str) and len(out.split()) >= 6
+
+
+def test_what_changed_beats_why_when_both_present():
+    out = _syn(
+        [{"what_changed": "Adds foo connector logic", "why": "backward compat"}],
+        hint="connectors/foo.md",
+    )
+    assert "Adds foo connector logic" in out
+    assert "backward compat" not in out
+
+
+def test_no_padding_when_description_already_long():
+    out = _syn(
+        [{"what_changed": "Refactors the loader module for clarity"}],
+        hint="loader.md",
+    )
+    assert "agent-authored reference for" not in out

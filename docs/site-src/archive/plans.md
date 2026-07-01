@@ -1,11 +1,12 @@
 # Plans archive
 
-_Auto-generated; 59 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 60 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
 ## 2026-06
 
 | Title | Status | Summary |
 |---|---|---|
+| [CCE-99 Post-Merge Branch Prune Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-06-10-cce99-post-merge-prune.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-101 Auto-Merge Gate Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-06-10-cce101-auto-merge-gate.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-86 Release-Ops Runbook Polish — Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-06-09-cce86-release-rollback-runbook.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-110 Factual-Accuracy Guard Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-06-09-cce110-page-author-confabulation.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |

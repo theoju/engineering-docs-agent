@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- **CCE-117:** the incremental nightly authoring path now writes the agent-authored frontmatter set (`description`, `source_files`, `last_reviewed`, `status`) when creating a page in an `agent-authored` section, so Tier-1 `frontmatter_schema`/`description_quality` no longer drops those pages and the nightly run stops going partial on them. Also single-quotes the `description` field in `agent_authored_frontmatter_text` so synthesized sentences containing colons remain valid YAML.
+
 - **CCE-109 time budget now bounds the authoring fan-out (CCE-114).** The
   soft deadline was only checked at PR admission, which completes minutes
   into a run — the page-author fan-out (one dispatch per doc-target batch)

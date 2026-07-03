@@ -944,6 +944,40 @@ def _synthesize_core_page(target_path: Path, page: dict, today: str) -> None:
     target_path.write_text(fm + _core_page_skeleton(page))
 
 
+# Mirrors description_quality._DEFAULTS["min_words"]; the synthesized
+# description must clear the rule's floor by construction (CCE-117).
+_DESC_MIN_WORDS = 6
+
+
+def _synthesize_agent_description(summaries: list[dict], *, hint: str) -> str:
+    """Deterministic one-line description for a freshly-created agent-authored
+    page (CCE-117). Guarantees the description_quality invariants — >= 6 words,
+    not equal to the slug-derived H1, no trailing colon — by construction.
+    Pure; never raises on malformed input.
+    Consumed by the incremental authoring create path (wired in CCE-117 Tasks 2–3).
+    """
+    change = ""
+    for s in summaries or []:
+        if isinstance(s, dict):
+            wc = s.get("what_changed") or s.get("why")
+            if isinstance(wc, str) and wc.strip():
+                change = wc.strip()
+                break
+    base = hint[:-3] if hint.endswith(".md") else hint
+    topic = (
+        " ".join(base.replace("/", " ").replace("-", " ").replace("_", " ").split())
+        or "this page"
+    )
+    if change and len(change.split()) >= 3:
+        desc = f"Documents {topic}: {change}"
+    else:
+        desc = f"Reference documentation for {topic} in this codebase"
+    desc = desc.rstrip(":").strip()
+    if len(desc.split()) < _DESC_MIN_WORDS:
+        desc = f"{desc} agent-authored reference for {topic}".rstrip(":").strip()
+    return desc
+
+
 def _resolve_docs_dir(config: dict) -> str | None:
     """The docs root for core pages: prefer ``site.docs_dir`` (what the manifest
     code and the source-map stage use), fall back to ``docs.source_dir`` for
@@ -1460,24 +1494,44 @@ def run(
                 continue
             target_path.parent.mkdir(parents=True, exist_ok=True)
             action = "edit" if target_path.exists() else "create"
-            fm_template = fmc.default_frontmatter_dict(
-                [
-                    pr.get("url")
-                    for s in batch_summaries
-                    for pr in prs
-                    if pr.get("number") == s.get("pr_number")
-                ]
-            )
-            _dk = doc_kind_by_target.get((lens, hint))
-            if _dk:
-                fm_template["doc_kind"] = _dk
             # CCE-110 layer 1: ground the author in the code the PRs touched.
+            # Computed before the template so an agent-authored create can cite
+            # the same files in source_files (CCE-117).
             batch_prs = [
                 pr_by_number[s.get("pr_number")]
                 for s in batch_summaries
                 if s.get("pr_number") in pr_by_number
             ]
             grounding = _pr_changed_files(batch_prs)
+            # CCE-117: agent-authored sections require description/source_files/
+            # last_reviewed; the default template omits them, so Tier-1 lint
+            # would drop the new page. Create-only — edits keep the existing
+            # page's frontmatter. agent_fields is reused by the dry-run synth.
+            agent_fields = None
+            if (
+                action == "create"
+                and fmc.section_generator_for(rel, config) == "agent-authored"
+            ):
+                agent_fields = fmc.agent_authored_frontmatter_dict(
+                    description=_synthesize_agent_description(
+                        batch_summaries, hint=hint
+                    ),
+                    source_files=sorted(grounding),
+                    last_reviewed=now[:10],  # date portion (YYYY-MM-DD) of the run
+                )
+                fm_template = agent_fields
+            else:
+                fm_template = fmc.default_frontmatter_dict(
+                    [
+                        pr.get("url")
+                        for s in batch_summaries
+                        for pr in prs
+                        if pr.get("number") == s.get("pr_number")
+                    ]
+                )
+            _dk = doc_kind_by_target.get((lens, hint))
+            if _dk:
+                fm_template["doc_kind"] = _dk
             out, reasons = dispatch_validated(
                 "page-author",
                 {
@@ -1502,9 +1556,16 @@ def run(
                 authored.append(str(target_path))
                 authored_lens[str(target_path)] = lens
                 if dry_run_dir and not target_path.exists():
+                    # CCE-117: mirror the template branch so the dry-run synth
+                    # writes the same generator-aware frontmatter the real
+                    # page-author would, keeping tests on the real lint path.
+                    fm_text = (
+                        fmc.agent_authored_frontmatter_text(**agent_fields)
+                        if agent_fields is not None
+                        else fmc.default_frontmatter_text()
+                    )
                     target_path.write_text(
-                        fmc.default_frontmatter_text()
-                        + f"# {hint}\n\nGenerated by docs-agent.\n"
+                        fm_text + f"# {hint}\n\nGenerated by docs-agent.\n"
                     )
 
         # Content validation

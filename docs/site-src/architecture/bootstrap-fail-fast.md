@@ -2,12 +2,13 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/50
+  - https://github.com/theoju/engineering-docs-agent/pull/135
 synthesized_into: []
 doc_kind: architecture
 description: The four CCE-38 bootstrap safeguards that catch bad authored artifacts — strict frontmatter parsing, prose-contamination detection, post-write validation, and checklist-bypass recovery.
 source_files:
   - scripts/orchestrator_runner.py
-last_reviewed: "2026-06-10"
+last_reviewed: "2026-07-04"
 ---
 
 # Bootstrap fail-fast mechanisms
@@ -29,6 +30,14 @@ A new `description_quality` rule is registered as a Tier-1 default alongside the
 The rule fires during the post-write lint pass — after `dispatch_verified` confirms the artifact exists but before the PR is opened. Pages that fail are added to the partial-reasons list and flagged in the Slack/email digest rather than published silently with a thin description.
 
 Because it is Tier-1, it is **on by default**. Hosts that need to disable it must explicitly set `lint.tier1.description_quality: false` in their config.
+
+### Legacy pages predating the contract
+
+The `description_quality` rule (and the `frontmatter_schema` rule alongside it) checks against `scripts/frontmatter_contract.py`'s `AGENT_AUTHORED_REQUIRED` set — `description`, `source_files`, `last_reviewed`, `status` — for any page whose section `generator` is `agent-authored`. Pages authored before this contract existed don't automatically get a pass: if their frontmatter is missing one of those fields, Tier-1 blocks every subsequent edit to them, not just the first one.
+
+That's what happened to three of this lens's own architecture pages (`index.md`, `lint-rules.md`, and this page) before PR #135: they predated the frontmatter contract, so nightly `page-author` edits to them were dropped with a `lint_block` partial reason on every run — observed concretely in PR #134's 2026-06-10T18 catch-up run. A partial run then blocked CCE-101's auto-merge eligibility, so the failure wasn't just cosmetic — it kept the whole nightly PR from merging unattended.
+
+PR #135 backfilled the missing fields on all three pages and confirmed Tier-1 lint clean and `mkdocs build --strict` green before merging. There's no code-level fix here: the lesson is that any page under an `agent-authored` section needs its full frontmatter set from the day it's created, not retrofitted once lint starts complaining.
 
 ## dispatch_verified
 
@@ -56,3 +65,5 @@ The four mechanisms together close the patterns identified in the CCE-15/CCE-36 
 | Thin-description bypass        | `description_quality` Tier-1 rule       |
 
 None of these are breaking changes. Existing hosts gain the `description_quality` rule in their Tier-1 set automatically; all other behaviour is additive.
+
+PR #135 is the reminder that "additive" still has a one-time cost: a Tier-1 rule going live retroactively applies to every page already in an `agent-authored` section, so a repo adopting or extending this contract should audit its existing pages against `AGENT_AUTHORED_REQUIRED` before the next nightly run, not after it starts silently dropping edits.

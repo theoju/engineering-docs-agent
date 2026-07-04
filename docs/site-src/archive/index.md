@@ -10,7 +10,10 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **CCE-117: generator-aware frontmatter on the incremental create path** — Every nightly `docs-agent-nightly` run was completing — no CCE-114 time-budget
+- **CCE-115: make publish-verifier event-agnostic** — `publish-verifier` polls the host's downstream build workflow after a docs-agent PR merges, then checks that the changed pages are live. Before this change, the procedure (`agents/publish-verifier.md:61`) required a `build_workflow` run with `event=push` and `head_branch=main` — the shape produced when a merge to `main` fires the workflow directly.
 - **CCE-109 Doom Loop Resolution: Backlog Catch-Up Run (2026-06-10)** — Since 2026-05-29, the nightly docs-agent had been stuck in a doom loop. Each CI run re-processed the full ~35-PR backlog window, hit the 60-minute job timeout, and exited without advancing `last_successful_run`. The next run would pick up the same window and repeat the cycle.
+- **CCE-114: Time-Budget Enforcement Reaches the Page-Author Fan-Out** — CCE-109 gave the nightly runner a soft time budget (`resolve_time_budget`, `scripts/orchestrator_runner.py:339`) and a deadline check at PR admission (`scripts/orchestrator_runner.py:1394`): once the deadline passes, admission truncates to an oldest-first prefix, flips `partial`, and defers the rest to the next window. That closed the doom loop documented in the 2026-06-10 CCE-109 archive entry — but only at the front of the pipeline.
 - **Decision: Soft Time Budget for the Nightly Orchestrator Runner (CCE-109)** — **Date:** 2026-06-10
 - **CCE-105: API Reference Grouping and JSON-Schema Contracts Extractor** — **Date:** 2026-06-09
 - **Decision: Nav Overhaul — Generated Nav Block Replaces awesome-pages (2026-06-09)** — **Date:** 2026-06-09
@@ -31,9 +34,9 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **ADR: Required Status Checks Must Not Carry a Workflow-Level `paths:` Filter** — **CCE-91 — 2026-06-09**
 - **Auth-tier migration: drop explicit API key threading** — **PR #91 · merged 2026-06-09 · non-breaking**
 - **Measurements archive** — _Auto-generated; 7 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
-- **Plans archive** — _Auto-generated; 59 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Plans archive** — _Auto-generated; 61 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
-- **Specs archive** — _Auto-generated; 55 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Specs archive** — _Auto-generated; 57 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_24 pages · regenerated nightly_
+_27 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

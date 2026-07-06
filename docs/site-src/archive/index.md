@@ -10,7 +10,9 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **CCE-117: generator-aware frontmatter on the incremental create path** — **Ticket:** CCE-117
 - **CCE-109 Doom Loop Resolution: Backlog Catch-Up Run (2026-06-10)** — Since 2026-05-29, the nightly docs-agent had been stuck in a doom loop. Each CI run re-processed the full ~35-PR backlog window, hit the 60-minute job timeout, and exited without advancing `last_successful_run`. The next run would pick up the same window and repeat the cycle.
+- **CCE-114: Time Budget Now Bounds the Page-Author Fan-Out** — CCE-109 introduced a soft time budget (`resolve_time_budget` in `scripts/orchestrator_runner.py`, default `DEFAULT_TIME_BUDGET_SECONDS = 2700` — 45 minutes, chosen to sit below the workflow's 60-minute hard kill) so a large backlog window would truncate cleanly instead of running unbounded. The deadline check lived in exactly one place: the PR-admission loop in `run()`, gated on `deadline is not None and i > 0 and clock() > deadline`.
 - **Decision: Soft Time Budget for the Nightly Orchestrator Runner (CCE-109)** — **Date:** 2026-06-10
 - **CCE-105: API Reference Grouping and JSON-Schema Contracts Extractor** — **Date:** 2026-06-09
 - **Decision: Nav Overhaul — Generated Nav Block Replaces awesome-pages (2026-06-09)** — **Date:** 2026-06-09
@@ -31,9 +33,9 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **ADR: Required Status Checks Must Not Carry a Workflow-Level `paths:` Filter** — **CCE-91 — 2026-06-09**
 - **Auth-tier migration: drop explicit API key threading** — **PR #91 · merged 2026-06-09 · non-breaking**
 - **Measurements archive** — _Auto-generated; 7 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
-- **Plans archive** — _Auto-generated; 59 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Plans archive** — _Auto-generated; 61 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
-- **Specs archive** — _Auto-generated; 55 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Specs archive** — _Auto-generated; 57 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_24 pages · regenerated nightly_
+_26 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

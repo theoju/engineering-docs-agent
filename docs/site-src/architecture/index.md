@@ -4,17 +4,25 @@ status: draft
 description: Section landing page for architecture docs — component design, agent contracts, data flows, and system internals.
 source_files:
   - scripts/orchestrator_runner.py
-last_reviewed: "2026-06-10"
+  - scripts/frontmatter_contract.py
+last_reviewed: "2026-07-08"
 ---
 
 # Architecture
 
 _Architecture: component design, agent contracts, data flows, and system internals._
 
-<!-- docs-agent:overview:start -->
+## Frontmatter contract
 
+Every page carries a required frontmatter set, and the required fields are generator-aware (`scripts/frontmatter_contract.py`). Pages under the `agent-authored` section — Capability C2 core pages, including this one — require `description`, `source_files`, `last_reviewed`, and `status`. Every other section defaults to `status`, `sources`, `synthesized_into`.
+
+This isn't cosmetic. Tier-1 lint enforces the contract on every nightly run, and a page missing a required field has its page-author edits silently dropped rather than applied — the run still reports success, just without the content landing. Three legacy pages predated the contract and were running with the gap unnoticed: this page, `lint-rules.md`, and `bootstrap-fail-fast.md`. PR #135 retrofitted all three with the correct `agent-authored` frontmatter after the missing fields were traced as the cause of repeated partial runs and a blocker on CCE-101 auto-merge.
+
+<!-- docs-agent:overview:start -->
 **In this section**
 
+- **Bootstrap fail-fast mechanisms** — The C2 bootstrap pipeline (CCE-38) adds four structural safeguards that catch bad artifacts before they reach the published site. Before this work, the pipeline trusted `page-author`'s `ok: true` signal without independently verifying the written file — allowing bad YAML, missing frontmatter, and thin descriptions to slip through undetected.
+- **Lint Rules** — The lint runner (`scripts/lint/lint_runner.py`) validates agent-authored Markdown before it reaches the docs site. Rules are tiered: **block** rules prevent a page from being published; **warn** rules surface in the PR review but do not block it.
 - **Engineering Docs Agent** — A Claude Code plugin that turns merged PRs, Jira issues, and commits into a nightly docs-update PR — with voice-matched authoring, tiered linting, gap detection, and post-merge publish verification.
 - **Capability C2: Canonical Core Authoring** — Capability C2 is the part of the engineering-docs-agent pipeline responsible for writing and maintaining canonical core documentation pages. It runs as the `page-author` subagent and produces files under the `agent-authored` site section. Every page C2 touches carries a machine-verifiable frontmatter contract that downstream lint, source-map, and publish-verification stages depend on.
 - **CCE Capability C3 — Diagram Render Gate** — Capability C3 proves that every Mermaid diagram declared in the docs source actually renders in the built MkDocs site. It runs at build time as a post-build gate, distinct from the lint-time fence check.
@@ -28,9 +36,6 @@ _Architecture: component design, agent contracts, data flows, and system interna
 - **CCE-23: API Reference Generation** — CCE-23 adds a self-updating API reference section to any host repo's docs site. The setup skill scaffolds the section once; from then on, the three extractors regenerate their pages automatically at every `mkdocs build`.
 - **Decision Archive Index Generator (CCE-23)** — The archive-index generator (`scripts/archive_indexes.py`) turns directories of date-prefixed Markdown files into navigable index pages. It is capability D of the docs-agent: a pure read-then-write step that runs on every nightly pass and always overwrites its output.
 - **Source Map and Drift Detection (CCE-23)** — The source map (`scripts/source_map.py`) and drift detector (`scripts/source_drift.py`) together answer: when source code changes, which docs pages need a human review?
-- **Bootstrap fail-fast mechanisms** — The C2 bootstrap pipeline (CCE-38) adds four structural safeguards that catch bad artifacts before they reach the published site. Before this work, the pipeline trusted `page-author`'s `ok: true` signal without independently verifying the written file — allowing bad YAML, missing frontmatter, and thin descriptions to slip through undetected.
-- **Lint Rules** — The lint runner (`scripts/lint/lint_runner.py`) validates agent-authored Markdown before it reaches the docs site. Rules are tiered: **block** rules prevent a page from being published; **warn** rules surface in the PR review but do not block it.
 
 _15 pages · regenerated nightly_
-
 <!-- docs-agent:overview:end -->

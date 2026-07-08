@@ -2,12 +2,14 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/50
+  - https://github.com/theoju/engineering-docs-agent/pull/135
 synthesized_into: []
 doc_kind: architecture
 description: The four CCE-38 bootstrap safeguards that catch bad authored artifacts — strict frontmatter parsing, prose-contamination detection, post-write validation, and checklist-bypass recovery.
 source_files:
   - scripts/orchestrator_runner.py
-last_reviewed: "2026-06-10"
+  - scripts/frontmatter_contract.py
+last_reviewed: "2026-07-08"
 ---
 
 # Bootstrap fail-fast mechanisms
@@ -43,6 +45,14 @@ This closes the gap where `page-author` could report success while writing prose
 If the same run hour is re-entered — for example, after a transient CI failure — the orchestrator skips pages that already have a completed progress record rather than re-dispatching them. This makes same-hour re-runs safe and enables mid-run recovery without duplicating work or overwriting a correctly-authored page.
 
 Progress files are ephemeral and gitignored. The docs-agent PR contains only the authored pages; the `.bootstrap-progress/` directory never appears in the branch.
+
+## Frontmatter contract: this page's own gap (PR #135)
+
+`scripts/frontmatter_contract.py` defines the required frontmatter fields per site section — `AGENT_AUTHORED_REQUIRED` (`description`, `source_files`, `last_reviewed`, `status`) for Capability C2 core pages, `DEFAULT_REQUIRED` (`status`, `sources`, `synthesized_into`) everywhere else. A page missing a required field for its section doesn't fail loudly: `page-author` edits to it are silently dropped rather than applied, and the run still reports success with the content gap invisible.
+
+This page ran with exactly that gap. `bootstrap-fail-fast.md` — along with `index.md` and `lint-rules.md` — predated the `agent-authored` contract and lacked the required fields, so nightly `page-author` edits to all three were dropped for every run until the gap was traced as a repeated cause of partial runs and a blocker on CCE-101 auto-merge. PR #135 retrofitted the missing fields on all three pages, closing the gap.
+
+The irony isn't lost: the four mechanisms this page documents exist to catch bad or missing frontmatter before it reaches the published site, and the site's own architecture docs were quietly exempt from the contract they describe.
 
 ## Failure modes addressed
 

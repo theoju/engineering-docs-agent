@@ -2,12 +2,13 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/61
+  - https://github.com/theoju/engineering-docs-agent/pull/135
 synthesized_into: []
 doc_kind: architecture
 description: How the tiered lint runner validates agent-authored Markdown — block vs warn severities, the Tier-1 default rule set, and per-rule opt-in for Tiers 2 and 3.
 source_files:
   - scripts/lint/lint_runner.py
-last_reviewed: "2026-06-10"
+last_reviewed: "2026-07-08"
 ---
 
 # Lint Rules
@@ -40,6 +41,12 @@ The page-author agent non-deterministically emits bare fences. Treating a missin
 Before this split, a single `markdown_hygiene` rule ran at block severity for all hygiene checks. One bare ` ``` ` fence emitted by the agent was enough to prevent an entire page from reaching the docs site. The structural checks (unpaired fences, heading jumps) deserve block severity; the language-tag check does not.
 
 The new module boundary makes the severity intent explicit and gives you a clear place to add future warn-only checks without touching the blocking rule.
+
+## Frontmatter is Tier-1 enforced, too
+
+The linter doesn't only check the body of a page — `scripts/frontmatter_contract.py` defines the required frontmatter fields per site section, and Tier-1 lint enforces that set on every nightly run. Pages under the `agent-authored` section (Capability C2 core, including this one) require `description`, `source_files`, `last_reviewed`, and `status`; every other section defaults to `status`, `sources`, `synthesized_into`.
+
+A page missing a required field doesn't fail loudly. `page-author` edits to it are silently dropped rather than applied, and the run still reports success — just without the content landing. This page, `index.md`, and `bootstrap-fail-fast.md` predated the `agent-authored` contract and ran with that gap unnoticed until PR #135 retrofitted the missing fields, closing a repeated cause of partial runs and a blocker on CCE-101 auto-merge.
 
 ## Running the linter
 

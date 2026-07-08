@@ -8,6 +8,46 @@ synthesized_into: []
 
 # What's New
 
+## 2026-07-08T07:55:55.303445+00:00
+- PR #135: Added the required agent-authored frontmatter (description, source_files, last_reviewed, status) to three legacy architecture pages (index.md, lint-rules.md, bootstrap-fail-fast.md) that predated the frontmatter contract.
+- PR #136: The orchestrator's soft time-budget deadline, previously checked only at PR admission, is now enforced inside the expensive per-run loops: the page-author fan-out checks the deadline before dispatching each doc-target batch (while still guaranteeing at least one batch runs so tight budgets make forward progress), and the fact-checker and gap-detector loops skip outright once the deadline has passed. A budget cutoff in the fact-checker loop now flips the run's `partial` flag rather than being treated as info-only, since un-fact-checked pages must not pass the CCE-101 auto-merge gate. All cuts leave the generated PR open for operator review rather than discarding the run.
+- PR #137: Fixed the publish-verifier subagent (agents/publish-verifier.md) so its first step selects the newest run of the configured build_workflow with createdAt at or after the merge time, regardless of which event triggered it (push, pull_request:closed, workflow_dispatch, etc.), then waits for status=completed and maps the conclusion to build_status. Previously it only matched runs with event=push and head_branch=main.
+- PR #139: Adds the spec and implementation plan for CCE-99: a global PostToolUse hook on `gh pr merge` that prunes local `[gone]` feature branches after a merge, verifying the full 40-character SHA against the merged PR's headRefOid before force-deleting squash-merged branches. The actual hook implementation lives in the operator's user-global `~/.claude/` config (ship-skill worker, tests, settings registration) and is already live; this PR only adds the in-repo design artifacts (spec + plan) documenting that work.
+- PR #156: Fixed the incremental docs-authoring path so that creating a new page in an 'agent-authored' section generates generator-aware frontmatter instead of the generic default template. A new deterministic helper, `_synthesize_agent_description`, builds a description that satisfies the mechanical `description_quality` lint rule (minimum word count, not equal to the H1, no trailing colon), and the create path now populates `description`/`source_files`/`last_reviewed`/`status` via the canonical `agent_authored_frontmatter_dict`, reusing the PR's grounding data for `source_files`. A related bug in `frontmatter_contract.py` was fixed by single-quoting the YAML `description` field so descriptions containing a colon-space sequence no longer produce invalid YAML. The dry-run path mirrors the same branch so tests exercise the real production behavior.
+### Gaps flagged
+- theoju/engineering-docs-agent#136: Not dismissed and no allowlist paths configured (empty list, no match possible). Size filter thresholds are unset in config, so the size gate can't screen this out; falling to LLM judgment. Files touched are scripts/orchestrator_runner.py plus tests/changelog — a core orchestration change that alters deadline-check semantics across three separate loops (authoring truncation, fact-checker skip-and-flip-to-partial, gap-detector skip) and changes how the CCE-101 auto-merge gate treats unfact-checked pages (partial, not info-only). This is cross-cutting behavior/policy change to a production nightly pipeline with multi-loop interaction — the kind of change a senior engineer would expect a written spec or plan for, even though the PR body itself contains good rationale and root-cause forensics.
+- theoju/engineering-docs-agent#156: No allowlist match and size_filter thresholds are unset (empty object), so falls to LLM judgment. The PR changes orchestrator frontmatter-generation behavior for agent-authored pages (a user-visible/system-behavior change fixing a recurring nightly lint-block that silently dropped ~20 architecture pages) and touches a shared contract module (frontmatter_contract.py). This is exactly the class of change (subsystem behavior change, cross-cutting helper) a senior engineer would expect a written spec/plan for — and indeed the PR already includes both docs/superpowers/specs/2026-06-27-cce117-agent-authored-create-frontmatter-design.md and a matching plan file.
+### Pages to review (source drift)
+- architecture/bootstrap-fail-fast.md — changed: scripts/frontmatter_contract.py, scripts/orchestrator_runner.py
+- architecture/cce-capability-c-canonical-core-citations.md — changed: docs/superpowers/plans/2026-06-10-cce99-post-merge-prune.md, docs/superpowers/plans/2026-06-27-cce117-agent-authored-create-frontmatter.md, docs/superpowers/specs/2026-06-10-cce99-ship-post-merge-prune-design.md, docs/superpowers/specs/2026-06-27-cce117-agent-authored-create-frontmatter-design.md
+- architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-06-10-cce99-post-merge-prune.md, docs/superpowers/plans/2026-06-27-cce117-agent-authored-create-frontmatter.md, docs/superpowers/specs/2026-06-10-cce99-ship-post-merge-prune-design.md, docs/superpowers/specs/2026-06-27-cce117-agent-authored-create-frontmatter-design.md
+- architecture/cce10-source-collector-canonical-shape.md — changed: scripts/orchestrator_runner.py
+- architecture/cce12-source-collector-tool-use-diagnostics.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-decision-archive.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-source-map-drift.md — changed: scripts/orchestrator_runner.py
+- architecture/cce32-github-pages-publish-target.md — changed: docs/superpowers/plans/2026-06-10-cce99-post-merge-prune.md, docs/superpowers/plans/2026-06-27-cce117-agent-authored-create-frontmatter.md
+- architecture/cce4-schema-enforcement.md — changed: agents/publish-verifier.md, scripts/orchestrator_runner.py
+- architecture/cce6-7-8-batch.md — changed: scripts/orchestrator_runner.py
+- architecture/index.md — changed: scripts/frontmatter_contract.py, scripts/orchestrator_runner.py
+- architecture/structured-docs-site-generation.md — changed: docs/superpowers/plans/2026-06-10-cce99-post-merge-prune.md, docs/superpowers/plans/2026-06-27-cce117-agent-authored-create-frontmatter.md, docs/superpowers/specs/2026-06-10-cce99-ship-post-merge-prune-design.md, docs/superpowers/specs/2026-06-27-cce117-agent-authored-create-frontmatter-design.md
+- archive/cce14-source-collector-prompt-hardening.md — changed: scripts/orchestrator_runner.py
+- archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
+- archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
+- archive/v0-1-1-hardening.md — changed: scripts/orchestrator_runner.py
+### Pages to review (citation drift)
+- architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+### Core pages to review (drift)
+- architecture/cce-capability-c-canonical-core-citations.md (source, citation)
+- architecture/cce-capability-c2-canonical-core-authoring.md (source)
+- architecture/cce10-source-collector-canonical-shape.md (source)
+- architecture/cce12-source-collector-tool-use-diagnostics.md (source)
+- architecture/cce23-decision-archive.md (source)
+- architecture/cce23-source-map-drift.md (source)
+- architecture/cce32-github-pages-publish-target.md (source)
+- architecture/cce4-schema-enforcement.md (source)
+- architecture/cce6-7-8-batch.md (source)
+- architecture/structured-docs-site-generation.md (source)
+
 ## 2026-06-10T18:20:27.473771+00:00
 - PR #126: A bulk backlog catch-up run processed the ~35-PR window that had been accumulating since 2026-05-29, adding 32 documentation pages across the archive and architecture sections and advancing the docs-agent `last_successful_run` baseline from `bdf0da1a` to `68090590`. The run also introduced a `.doc-source-map.json` drift-tracking artifact. Approximately 19 candidate architecture pages and 3 broken-link pages were dropped by Tier-1 lint due to missing required frontmatter (including `last_reviewed`) and will not auto-regenerate since the baseline has moved past their source PRs.
 - PR #127: Reverted 17 architecture documentation pages that were injected into docs/site-src/architecture/ by PR #126's forensic salvage. At least two pages — orchestrator-state-advancement.md and orchestrator-git-staging.md — contained factually inverted claims and cited tests that do not exist. The remaining 15 were unverified for accuracy. All 17 files were deleted and architecture/index.md was regenerated to list only the 15 verified pre-existing pages. The doom-loop baseline advance and 32 lint-gated backlog pages from the same run were kept intact.

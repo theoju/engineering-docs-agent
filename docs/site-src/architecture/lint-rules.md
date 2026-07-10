@@ -1,18 +1,20 @@
 ---
 status: draft
 sources:
-  - https://github.com/theoju/engineering-docs-agent/pull/61
+  - https://github.com/theoju/engineering-docs-agent/pull/135
 synthesized_into: []
 doc_kind: architecture
 description: How the tiered lint runner validates agent-authored Markdown — block vs warn severities, the Tier-1 default rule set, and per-rule opt-in for Tiers 2 and 3.
 source_files:
   - scripts/lint/lint_runner.py
-last_reviewed: "2026-06-10"
+last_reviewed: "2026-07-10"
 ---
 
 # Lint Rules
 
 The lint runner (`scripts/lint/lint_runner.py`) validates agent-authored Markdown before it reaches the docs site. Rules are tiered: **block** rules prevent a page from being published; **warn** rules surface in the PR review but do not block it.
+
+As of PR #135, this page carries the full `AGENT_AUTHORED_REQUIRED` frontmatter set (`description`, `source_files`, `last_reviewed`, `status` — see `scripts/frontmatter_contract.py`). It predated the frontmatter contract and was missing those fields, so nightly `page-author` edits here failed Tier-1 `frontmatter_schema`/`description_quality` lint and were silently dropped as a `lint_block` partial reason — the same failure mode this page documents below. With the fields in place, edits to this page now pass Tier-1 lint, which unblocks CCE-101's auto-merge gate (eligible = non-partial AND zero fact-checker warnings AND no human commits).
 
 All Tier-1 rules are enabled by default when the host repo sets `lint.tier1: default`. Tier-2 and Tier-3 rules are opt-in per rule in the host config.
 

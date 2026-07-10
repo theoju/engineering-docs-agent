@@ -1,11 +1,13 @@
 # Specs archive
 
-_Auto-generated; 55 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 57 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
 ## 2026-06
 
 | Title | Status | Summary |
 |---|---|---|
+| [CCE-117: generator-aware frontmatter on the incremental create path — design](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-06-27-cce117-agent-authored-create-frontmatter-design.md) | — | **Date:** 2026-06-27 |
+| [CCE-99: post-merge local branch prune — design](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-06-10-cce99-ship-post-merge-prune-design.md) | — | **Date:** 2026-06-10 |
 | [CCE-101: docs-agent merge gate — auto-merge by default, setup-time opt-out](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-06-10-cce101-merge-gate-design.md) | — | - **Status:** approved (brainstorm 2026-06-10) |
 | [CCE-86 — release-ops runbook polish](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-06-09-cce86-release-rollback-runbook-design.md) | approved | The v0.5.0 release execution surfaced operational knowledge that lives nowhere durable: |
 | [CCE-110: Factual-accuracy guard for page-author confabulation — design](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-06-09-cce110-page-author-confabulation-design.md) | — | **Date:** 2026-06-09 |

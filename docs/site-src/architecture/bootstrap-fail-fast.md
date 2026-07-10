@@ -2,17 +2,20 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/50
+  - https://github.com/theoju/engineering-docs-agent/pull/135
 synthesized_into: []
 doc_kind: architecture
 description: The four CCE-38 bootstrap safeguards that catch bad authored artifacts — strict frontmatter parsing, prose-contamination detection, post-write validation, and checklist-bypass recovery.
 source_files:
   - scripts/orchestrator_runner.py
-last_reviewed: "2026-06-10"
+last_reviewed: "2026-07-10"
 ---
 
 # Bootstrap fail-fast mechanisms
 
 The C2 bootstrap pipeline (CCE-38) adds four structural safeguards that catch bad artifacts before they reach the published site. Before this work, the pipeline trusted `page-author`'s `ok: true` signal without independently verifying the written file — allowing bad YAML, missing frontmatter, and thin descriptions to slip through undetected.
+
+As of PR #135, this page carries the full `AGENT_AUTHORED_REQUIRED` frontmatter set (`description`, `source_files`, `last_reviewed`, `status` — see `scripts/frontmatter_contract.py`), alongside its sibling architecture pages [Architecture](index.md) and [Lint Rules](lint-rules.md). All three predated the frontmatter contract and were missing those fields, so nightly `page-author` edits here failed Tier-1 `frontmatter_schema`/`description_quality` lint and were silently dropped as a `lint_block` partial reason — the exact failure mode observed in PR #134's edit to `index.md`. With the fields in place, edits to this page now pass Tier-1 lint, which unblocks CCE-101's auto-merge gate (eligible = non-partial AND zero fact-checker warnings AND no human commits).
 
 Three uncaptured intervention patterns from the CCE-15/CCE-36 release retrospective drove this work: checklist-bypass recovery, prose-contamination detection, and post-write artifact validation. CCE-38 formalises each as a structural check rather than an ad-hoc retry.
 

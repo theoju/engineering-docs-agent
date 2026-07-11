@@ -2,12 +2,13 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/61
+  - https://github.com/theoju/engineering-docs-agent/pull/135
 synthesized_into: []
 doc_kind: architecture
 description: How the tiered lint runner validates agent-authored Markdown — block vs warn severities, the Tier-1 default rule set, and per-rule opt-in for Tiers 2 and 3.
 source_files:
   - scripts/lint/lint_runner.py
-last_reviewed: "2026-06-10"
+last_reviewed: "2026-07-11"
 ---
 
 # Lint Rules

@@ -765,6 +765,23 @@ def dispatch_validated(
     return raw, dispatch_reasons
 
 
+def _record_dispatch_reasons(state: dict, reasons: list[str], *, ok: bool) -> None:
+    """Record dispatch_validated reasons onto the run state. (CCE-118)
+
+    A dispatch that returned usable output (``ok=True``) can only carry benign
+    ``prose_contamination_rescued`` diagnostics — a schema failure forces the
+    dispatch output to None (see ``dispatch_validated`` above) — so its reasons
+    are recorded ``info_only`` and must NOT flip ``partial``. When the dispatch
+    failed (``ok=False``) the reasons explain dropped work and DO flip
+    ``partial``.
+
+    Advisory layers (fact-checker, deterministic generators) record
+    ``info_only=True`` directly and do not route through this helper.
+    """
+    for r in reasons:
+        add_partial(state, r, info_only=ok)
+
+
 def dispatch_verified(
     name: str,
     inputs: dict,
@@ -1330,8 +1347,7 @@ def run(
         sources, reasons = dispatch_validated(
             "source-collector", sc_inputs, dry_run_dir=dry_run_dir, cwd=repo_root
         )
-        for r in reasons:
-            add_partial(state, r)
+        _record_dispatch_reasons(state, reasons, ok=sources is not None)
         if sources is None:
             if not reasons:
                 add_partial(state, "source_collector_invalid: returned None")
@@ -1421,8 +1437,7 @@ def run(
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,
             )
-            for r in reasons:
-                add_partial(state, r)
+            _record_dispatch_reasons(state, reasons, ok=summary is not None)
             if summary is None:
                 if not reasons:
                     add_partial(state, f"pr_summarizer_invalid: pr={pr['number']}")
@@ -1546,8 +1561,7 @@ def run(
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,
             )
-            for r in reasons:
-                add_partial(state, r)
+            _record_dispatch_reasons(state, reasons, ok=out is not None)
             if out is None:
                 if not reasons:
                     add_partial(state, f"page_author_invalid: {rel}")
@@ -1581,8 +1595,7 @@ def run(
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,
             )
-            for r in reasons:
-                add_partial(state, r)
+            _record_dispatch_reasons(state, reasons, ok=validation is not None)
             if validation is None:
                 if not reasons:
                     add_partial(state, "content_validator_invalid: returned None")
@@ -1811,8 +1824,7 @@ def run(
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,
             )
-            for r in reasons:
-                add_partial(state, r)
+            _record_dispatch_reasons(state, reasons, ok=verdict is not None)
             if verdict is None:
                 if not reasons:
                     add_partial(state, f"gap_detector_invalid: pr_id={pr_id}")
@@ -2003,8 +2015,7 @@ def run(
             dry_run_dir=dry_run_dir,
             cwd=repo_root,
         )
-        for r in reasons:
-            add_partial(state, r)
+        _record_dispatch_reasons(state, reasons, ok=notifier_result is not None)
         if notifier_result is None:
             if not reasons:
                 add_partial(state, "notifier_invalid: returned None")

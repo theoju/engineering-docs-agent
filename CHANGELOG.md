@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- **CCE-118 (item 1):** a benign JSON rescue no longer flips a run to `partial`. Six blocking-pipeline dispatch callsites (source-collector, pr-summarizer, page-author, content-validator, gap-detector, notifier) recorded their dispatch reasons as partial-flipping, so a subagent that emitted valid JSON wrapped in prose — recovered by `_rescue_json_object` and schema-validated — still marked the whole run partial and blocked CCE-101 auto-merge (the recurring nightly toil; PR #170 exemplar). They now route through `_record_dispatch_reasons(state, reasons, ok=<dispatch succeeded>)`: a dispatch that returns usable output can only carry benign `prose_contamination_rescued` diagnostics (a schema failure forces `out=None`), so those are `info_only`; genuine failures still flip `partial`. Fact-checker advisory reasons and the contradiction-warning gate are unchanged.
+
 - **CCE-117:** the incremental nightly authoring path now writes the agent-authored frontmatter set (`description`, `source_files`, `last_reviewed`, `status`) when creating a page in an `agent-authored` section, so Tier-1 `frontmatter_schema`/`description_quality` no longer drops those pages and the nightly run stops going partial on them. Also single-quotes the `description` field in `agent_authored_frontmatter_text` so synthesized sentences containing colons remain valid YAML.
 
 - **CCE-109 time budget now bounds the authoring fan-out (CCE-114).** The

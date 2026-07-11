@@ -71,6 +71,28 @@ def _current_branch(repo_root: Path) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def _worktree_checked_out_branches(repo_root: Path) -> set[str]:
+    """Branch names checked out in ANY worktree (including the current one).
+
+    `git branch -d`/`-D` both refuse to delete a branch that is checked out in
+    any worktree, so the pruner must exclude such branches rather than classify
+    them pruneable and then misreport a delete failure. `git worktree list
+    --porcelain` emits one `branch refs/heads/<name>` line per worktree that has
+    a branch checked out (detached worktrees emit `detached` and contribute
+    nothing). Old git / failure → empty set → falls back to prior behavior.
+    (CCE-116)
+    """
+    r = _run(["git", "worktree", "list", "--porcelain"], repo_root)
+    if r.returncode != 0:
+        return set()
+    prefix = "branch refs/heads/"
+    return {
+        line[len(prefix) :].strip()
+        for line in r.stdout.splitlines()
+        if line.startswith(prefix)
+    }
+
+
 def _all_local_branches(repo_root: Path) -> list[tuple[str, str, str]]:
     """Return [(name, sha, upstream_track)] for every local branch.
 
@@ -113,17 +135,23 @@ def find_pruneable_branches(
       - Its upstream tracks the gone state ([gone] marker), OR
       - Its name matches a worktree-orphan prefix.
 
-    Exclusions: protected names (main/master/develop by default), the
-    currently checked-out branch (deleting it would orphan the working
-    tree), and anything failing the basic git invariants.
+    Exclusions: protected names (main/master/develop by default), any branch
+    checked out in a worktree — the current one OR a linked one, since git
+    refuses to delete a checked-out branch (CCE-116) — and anything failing the
+    basic git invariants.
     """
     current = _current_branch(repo_root)
+    checked_out = _worktree_checked_out_branches(repo_root)
     protected = set(protect)
     out: list[Branch] = []
     for name, sha, track in _all_local_branches(repo_root):
         if name in protected:
             continue
         if name == current:
+            continue
+        if name in checked_out:
+            # Checked out in a linked worktree: git branch -d/-D would refuse.
+            # Exclude cleanly instead of misreporting a delete failure. (CCE-116)
             continue
         if track.lower() == "[gone]":
             out.append(Branch(name=name, sha=sha, reason="gone"))

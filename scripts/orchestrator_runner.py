@@ -765,6 +765,23 @@ def dispatch_validated(
     return raw, dispatch_reasons
 
 
+def _record_dispatch_reasons(state: dict, reasons: list[str], *, ok: bool) -> None:
+    """Record dispatch_validated reasons onto the run state. (CCE-118)
+
+    A dispatch that returned usable output (``ok=True``) can only carry benign
+    ``prose_contamination_rescued`` diagnostics — a schema failure forces the
+    dispatch output to None (see ``dispatch_validated`` above) — so its reasons
+    are recorded ``info_only`` and must NOT flip ``partial``. When the dispatch
+    failed (``ok=False``) the reasons explain dropped work and DO flip
+    ``partial``.
+
+    Advisory layers (fact-checker, deterministic generators) record
+    ``info_only=True`` directly and do not route through this helper.
+    """
+    for r in reasons:
+        add_partial(state, r, info_only=ok)
+
+
 def dispatch_verified(
     name: str,
     inputs: dict,

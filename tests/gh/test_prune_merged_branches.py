@@ -121,6 +121,37 @@ def test_find_pruneable_never_includes_current_branch(repo_with_origin):
     )
 
 
+def test_find_pruneable_excludes_branch_checked_out_in_linked_worktree(
+    repo_with_origin, tmp_path
+):
+    """CCE-116: a [gone] branch checked out in ANOTHER worktree cannot be
+    deleted (git branch -d/-D refuse), so it must be excluded from the prune
+    set — not classified `gone` and then misreported as skipped_unmerged."""
+    _make_branch(repo_with_origin, "feat/wt-live", extra_commit=True)
+    # Check the branch out in a linked worktree (main worktree stays on main).
+    wt_path = tmp_path / "linked-wt"
+    _run(["git", "worktree", "add", str(wt_path), "feat/wt-live"], cwd=repo_with_origin)
+    _delete_origin_branch(repo_with_origin, "feat/wt-live")
+    _run(["git", "fetch", "--prune"], cwd=repo_with_origin)
+
+    branches = pmb.find_pruneable_branches(repo_with_origin)
+    names = [b.name for b in branches]
+    assert "feat/wt-live" not in names, (
+        "a branch checked out in a linked worktree must be excluded — "
+        "git refuses to delete it, so classifying it pruneable misreports the outcome"
+    )
+
+
+def test_find_pruneable_still_flags_gone_branch_not_in_any_worktree(repo_with_origin):
+    """Regression guard for CCE-116: the worktree exclusion must not suppress a
+    normal [gone] branch that is not checked out anywhere."""
+    _make_branch(repo_with_origin, "feat/wt-none", extra_commit=True)
+    _delete_origin_branch(repo_with_origin, "feat/wt-none")
+    _run(["git", "fetch", "--prune"], cwd=repo_with_origin)
+    branches = pmb.find_pruneable_branches(repo_with_origin)
+    assert "feat/wt-none" in [b.name for b in branches]
+
+
 def test_find_pruneable_flags_worktree_orphans_without_origin(repo_with_origin):
     """CCE-100 floor: detect the `worktree-*` orphan refs the Workflow
     tool's isolation mode leaves behind. They have no origin counterpart;

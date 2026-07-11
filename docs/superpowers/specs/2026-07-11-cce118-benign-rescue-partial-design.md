@@ -60,17 +60,23 @@ So `prose_contamination_rescued` riding on a successful dispatch is a diagnostic
 not a degradation. It should be recorded (visible in `partial_reasons`) but must
 not flip `partial`.
 
-## The five affected callsites
+## The affected callsites
 
 All are blocking-pipeline dispatches whose reasons currently flip partial:
 
-| Dispatch          | Line | Success variable         |
-| ----------------- | ---- | ------------------------ |
-| source-collector  | 1333 | `sources is not None`    |
-| pr-summarizer     | 1424 | `summary is not None`    |
-| page-author       | 1549 | `out is not None`        |
-| content-validator | 1584 | `validation is not None` |
-| gap-detector      | 1814 | `verdict is not None`    |
+| Dispatch          | Success variable              |
+| ----------------- | ----------------------------- |
+| source-collector  | `sources is not None`         |
+| pr-summarizer     | `summary is not None`         |
+| page-author       | `out is not None`             |
+| content-validator | `validation is not None`      |
+| gap-detector      | `verdict is not None`         |
+| notifier          | `notifier_result is not None` |
+
+(The notifier callsite was found during implementation — same bug: a
+prose-wrapped-but-valid notifier response would flip partial. Line numbers
+omitted because inserting the helper shifts them; `grep _record_dispatch_reasons`
+for the current sites.)
 
 Advisory layers (fact-checker `:1708/:1713`; the deterministic generators at
 `:1228/:1232/:1236/:1748/:1766/:1777`) already record `info_only=True` directly and

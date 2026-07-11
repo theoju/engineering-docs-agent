@@ -4,7 +4,7 @@
 
 **Goal:** A blocking-pipeline dispatch that succeeds via prose-contamination rescue must not flip the run to `partial`.
 
-**Architecture:** One pure helper `_record_dispatch_reasons(state, reasons, *, ok)` in `scripts/orchestrator_runner.py` that records dispatch reasons `info_only=ok`. Five callsites (source-collector, pr-summarizer, page-author, content-validator, gap-detector) switch their `for r in reasons: add_partial(state, r)` loop to the helper, passing `ok=<success_var> is not None`.
+**Architecture:** One pure helper `_record_dispatch_reasons(state, reasons, *, ok)` in `scripts/orchestrator_runner.py` that records dispatch reasons `info_only=ok`. Six callsites (source-collector, pr-summarizer, page-author, content-validator, gap-detector, notifier — the notifier was found during implementation) switch their `for r in reasons: add_partial(state, r)` loop to the helper, passing `ok=<success_var> is not None`.
 
 **Tech Stack:** Python stdlib, pytest, fixture-driven dry-run path.
 

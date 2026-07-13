@@ -735,6 +735,7 @@ def dispatch_validated(
     *,
     dry_run_dir: Path | None,
     cwd: Path | None = None,
+    inject: dict | None = None,
 ) -> tuple[dict | None, list[str]]:
     """Compose dispatch_subagent with validate_and_parse.
 
@@ -745,6 +746,14 @@ def dispatch_validated(
       Schema-invalid:               (None, [...reasons including any rescue tag])
       Dispatch-None:                (None, []) — caller adds its own generic reason
       Schema-missing:               (None, ["schema_missing: <name>"])
+
+    ``inject`` (CCE-120): orchestrator-owned fields to stamp onto the raw
+    agent output BEFORE validation. ``inject`` values override the agent's
+    echo (``{**raw, **inject}``), so a field the orchestrator already owns
+    (e.g. gap-detector's ``pr_id``) is authoritative and never depends on the
+    LLM reproducing it. ``inject=None`` is a pure pass-through — the other
+    call sites are unaffected. Only applied when ``raw`` is a dict; a non-dict
+    agent response falls through to normal schema rejection unchanged.
     """
     # CCE-15: pass an out_reasons collector so dispatch_subagent can
     # surface prose-contamination rescue events; merge them into the
@@ -756,6 +765,13 @@ def dispatch_validated(
     )
     if raw is None:
         return None, dispatch_reasons
+    # CCE-120: stamp orchestrator-owned fields (e.g. pr_id) before validation
+    # so a value the orchestrator already owns is never sourced from the LLM's
+    # echo. inject wins over the agent's own value (authoritative + defends a
+    # wrong echo). The isinstance guard leaves a non-dict response to normal
+    # schema rejection.
+    if inject and isinstance(raw, dict):
+        raw = {**raw, **inject}
     from contracts import validate_and_parse
 
     validated, reasons = validate_and_parse(name, raw)

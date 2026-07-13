@@ -89,10 +89,15 @@ def test_missing_prid_does_not_flip_partial_and_prid_flows_downstream(
     assert cr["partial"] is False, cr["partial_reasons"]
 
     # Downstream proof: the injected pr_id reached the verdict and rendered
-    # into the What's-New "Gaps flagged" block. In a remote-less test host the
-    # orchestrator resolves pr_id to "unknown/unknown#1".
+    # into the What's-New "Gaps flagged" block as "- <owner>/<name>#1: allowlist
+    # hit". Assert only the environment-independent suffix (PR number + reasoning)
+    # — the owner/name resolves differently per host (a remote-less local host
+    # yields "unknown/unknown"; CI resolves the real slug via GITHUB_REPOSITORY),
+    # and a verdict that OMITTED pr_id could only survive validation to be
+    # flagged at all because the injection filled it. So "#1: allowlist hit"
+    # proves the fix end-to-end without coupling to the host's repo slug.
     whats_new = (tmp_path / "docs" / "site-src" / "whats-new.md").read_text()
-    assert "unknown/unknown#1" in whats_new, whats_new
+    assert "#1: allowlist hit" in whats_new, whats_new
 
 
 def test_missing_needs_spec_still_flips_partial(tmp_path, init_host, read_current_run):

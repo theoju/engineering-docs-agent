@@ -30,6 +30,9 @@ docs:
   agent_editable_paths: ["docs/site-src/**"]
   lens_paths:
     core: docs/site-src/core
+# site:/sections is copied wholesale for CCE-118 parity; the gap loop under
+# test never reads it (it needs only sources.git, gap_detection, and the PR
+# from source-collector). Kept verbatim so run() behaves identically.
 site:
   docs_dir: docs/site-src
   sections:

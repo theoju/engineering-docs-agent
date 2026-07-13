@@ -766,10 +766,7 @@ def dispatch_validated(
     if raw is None:
         return None, dispatch_reasons
     # CCE-120: stamp orchestrator-owned fields (e.g. pr_id) before validation
-    # so a value the orchestrator already owns is never sourced from the LLM's
-    # echo. inject wins over the agent's own value (authoritative + defends a
-    # wrong echo). The isinstance guard leaves a non-dict response to normal
-    # schema rejection.
+    # (see the docstring for the override/pass-through/non-dict contract).
     if inject and isinstance(raw, dict):
         raw = {**raw, **inject}
     from contracts import validate_and_parse

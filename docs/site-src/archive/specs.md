@@ -1,6 +1,13 @@
 # Specs archive
 
-_Auto-generated; 57 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 59 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+
+## 2026-07
+
+| Title | Status | Summary |
+|---|---|---|
+| [CCE-118 (item 1): a benign JSON rescue must not flip a run to `partial` — design](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-07-11-cce118-benign-rescue-partial-design.md) | — | **Date:** 2026-07-11 |
+| [CCE-116: prune skips branches checked out in a linked worktree — design](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-07-11-cce116-worktree-prune-skip-design.md) | — | **Date:** 2026-07-11 |
 
 ## 2026-06
 

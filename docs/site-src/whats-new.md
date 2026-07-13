@@ -8,6 +8,40 @@ synthesized_into: []
 
 # What's New
 
+## 2026-07-12T07:49:36.422023+00:00
+- PR #171: Fixed a bug where the nightly docs-agent orchestrator would flip a run to `partial` even when a subagent's dispatch succeeded and returned valid, schema-passing JSON (merely wrapped in prose and recovered via `_rescue_json_object`). Six blocking-pipeline dispatch callsites (source-collector, pr-summarizer, page-author, content-validator, gap-detector, notifier) previously recorded dispatch reasons via `add_partial(state, r)` with the default `info_only=False`, which unconditionally flagged the run partial. These callsites now route through a new `_record_dispatch_reasons(state, reasons, *, ok=<dispatch succeeded>)` helper: benign prose-wrapped-but-valid rescues are recorded `info_only` (no partial flip), while genuine dispatch failures still flip `partial` as before. Fact-checker advisory reasons and the contradiction-warning auto-merge gate are unchanged.
+### Pages to review (source drift)
+- architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
+- architecture/cce-capability-c-canonical-core-citations.md — changed: docs/superpowers/plans/2026-07-11-cce118-benign-rescue-partial.md, docs/superpowers/specs/2026-07-11-cce118-benign-rescue-partial-design.md
+- architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-07-11-cce118-benign-rescue-partial.md, docs/superpowers/specs/2026-07-11-cce118-benign-rescue-partial-design.md
+- architecture/cce10-source-collector-canonical-shape.md — changed: scripts/orchestrator_runner.py
+- architecture/cce12-source-collector-tool-use-diagnostics.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-decision-archive.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-source-map-drift.md — changed: scripts/orchestrator_runner.py
+- architecture/cce32-github-pages-publish-target.md — changed: docs/superpowers/plans/2026-07-11-cce118-benign-rescue-partial.md
+- architecture/cce4-schema-enforcement.md — changed: scripts/orchestrator_runner.py
+- architecture/cce6-7-8-batch.md — changed: scripts/orchestrator_runner.py
+- architecture/index.md — changed: scripts/orchestrator_runner.py
+- architecture/orchestrator.md — changed: CHANGELOG.md, scripts/orchestrator_runner.py
+- architecture/structured-docs-site-generation.md — changed: docs/superpowers/plans/2026-07-11-cce118-benign-rescue-partial.md, docs/superpowers/specs/2026-07-11-cce118-benign-rescue-partial-design.md
+- archive/cce14-source-collector-prompt-hardening.md — changed: scripts/orchestrator_runner.py
+- archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
+- archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
+- archive/v0-1-1-hardening.md — changed: scripts/orchestrator_runner.py
+### Pages to review (citation drift)
+- architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+### Core pages to review (drift)
+- architecture/cce-capability-c-canonical-core-citations.md (source, citation)
+- architecture/cce-capability-c2-canonical-core-authoring.md (source)
+- architecture/cce10-source-collector-canonical-shape.md (source)
+- architecture/cce12-source-collector-tool-use-diagnostics.md (source)
+- architecture/cce23-decision-archive.md (source)
+- architecture/cce23-source-map-drift.md (source)
+- architecture/cce32-github-pages-publish-target.md (source)
+- architecture/cce4-schema-enforcement.md (source)
+- architecture/cce6-7-8-batch.md (source)
+- architecture/structured-docs-site-generation.md (source)
+
 ## 2026-07-11T07:44:36.263542+00:00
 - PR #135: Added the required agent-authored frontmatter (description, source_files, last_reviewed) to three legacy architecture pages — docs/site-src/architecture/index.md, lint-rules.md, and bootstrap-fail-fast.md — which predated the agent-authored contract.
 - PR #136: The orchestrator's soft time-budget check (from CCE-109) previously ran only at PR admission and at the CCE-101 merge gate, leaving the page-author fan-out loop unbounded once that gate had passed. This PR adds an explicit deadline check before each doc-target authoring dispatch in the authoring loop, and makes the fact-checker and gap-detector loops skip outright (flipping the run to partial) once the deadline has expired, instead of continuing to spawn work past the soft budget.

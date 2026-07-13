@@ -10,6 +10,7 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **A benign JSON rescue no longer flips a run to `partial`** — Every nightly run that triggered a JSON rescue on a blocking-pipeline subagent
 - **CCE-99: post-merge local branch prune hook** — Merged feature branches were lingering locally after `gh pr merge` because nothing pruned them. The 2026-06-04 sweep recovered 13 stale `[gone]` refs; a follow-up sweep on 2026-06-10 recovered 7 more. CCE-90 had already shipped an in-repo floor (`scripts/prune_merged_branches.py`), but that only helps when an operator remembers to run it, and only inside this repo.
 - **Decision: Publish-Verifier Run Selection Is Event-Agnostic (CCE-115)** — The `publish-verifier` subagent's step 1 no longer filters build-workflow runs by trigger event. It now selects the newest `build_workflow` run whose `createdAt` is at or after the merge time, whatever fired it, then polls that run until `status=completed` and maps its `conclusion` to `build_status`.
 - **CCE-109 Doom Loop Resolution: Backlog Catch-Up Run (2026-06-10)** — Since 2026-05-29, the nightly docs-agent had been stuck in a doom loop. Each CI run re-processed the full ~35-PR backlog window, hit the 60-minute job timeout, and exited without advancing `last_successful_run`. The next run would pick up the same window and repeat the cycle.
@@ -34,9 +35,9 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **ADR: Required Status Checks Must Not Carry a Workflow-Level `paths:` Filter** — **CCE-91 — 2026-06-09**
 - **Auth-tier migration: drop explicit API key threading** — **PR #91 · merged 2026-06-09 · non-breaking**
 - **Measurements archive** — _Auto-generated; 7 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
-- **Plans archive** — _Auto-generated; 61 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Plans archive** — _Auto-generated; 62 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
-- **Specs archive** — _Auto-generated; 57 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Specs archive** — _Auto-generated; 59 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_27 pages · regenerated nightly_
+_28 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

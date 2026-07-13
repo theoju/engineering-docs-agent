@@ -1839,6 +1839,7 @@ def run(
                 },
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,
+                inject={"pr_id": pr_id},  # CCE-120: orchestrator-authoritative identity
             )
             _record_dispatch_reasons(state, reasons, ok=verdict is not None)
             if verdict is None:

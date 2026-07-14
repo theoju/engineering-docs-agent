@@ -2292,7 +2292,7 @@ def _remote_already_processed_window(
         return False
 
 
-def _format_partial_digest(partial_reasons: list[str]) -> str:
+def _format_partial_digest(partial_reasons: list[str], *, partial: bool = True) -> str:
     """Single-source format for partial_reasons.
 
     Used by:
@@ -2301,10 +2301,23 @@ def _format_partial_digest(partial_reasons: list[str]) -> str:
 
     Returns an empty string when partial_reasons is empty so callers
     can detect the no-reasons case without re-checking the list.
+
+    CCE-121: the header reflects the run's ``partial`` FLAG, not merely the
+    presence of reasons. Since CCE-118, ``partial_reasons`` also carries
+    ``info_only`` advisory reasons (benign prose-contamination rescues) that
+    do NOT flip ``partial`` — so a non-partial run renders those under an
+    INFO header, never the "Partial run" warning (which would mislabel a clean,
+    auto-merged run). ``partial`` defaults to True for back-compat with callers
+    that predate the flag. Mirrors the PARTIAL/INFO split in _emit_exit_summary.
     """
     if not partial_reasons:
         return ""
-    lines = ["WARNING — Partial run", ""]
+    header = (
+        "WARNING — Partial run"
+        if partial
+        else "INFO — advisory notices (run not partial)"
+    )
+    lines = [header, ""]
     lines.extend(f"- {r}" for r in partial_reasons)
     return "\n".join(lines)
 
@@ -2374,7 +2387,7 @@ def _compose_pr_body(
         return "docs-agent run"
 
     if not has_files and not has_baseline and has_reasons and not has_warnings:
-        return _format_partial_digest(partial_reasons)
+        return _format_partial_digest(partial_reasons, partial=partial)
 
     sections: list[str] = []
 
@@ -2405,7 +2418,7 @@ def _compose_pr_body(
         sections.append("\n".join(warn_lines))
 
     if has_reasons:
-        digest = _format_partial_digest(partial_reasons)
+        digest = _format_partial_digest(partial_reasons, partial=partial)
         if digest:
             sections.append(digest)
 
@@ -2477,7 +2490,7 @@ def _write_step_summary(state: dict, repo_root: Path) -> None:
     reasons = cr.get("partial_reasons") or []
     if not reasons:
         return
-    digest = _format_partial_digest(reasons)
+    digest = _format_partial_digest(reasons, partial=bool(cr.get("partial")))
     if not digest:
         return
     section = "\n## docs-agent partial_reasons\n\n" + digest + "\n"

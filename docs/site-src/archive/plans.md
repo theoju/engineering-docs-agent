@@ -1,11 +1,12 @@
 # Plans archive
 
-_Auto-generated; 62 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 63 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
 ## 2026-07
 
 | Title | Status | Summary |
 |---|---|---|
+| [CCE-120: Orchestrator-injected gap-detector `pr_id` Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-12-cce120-gap-detector-prid-injection.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-118 (item 1): benign rescue must not flip partial — implementation plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-11-cce118-benign-rescue-partial.md) | — | > **For agentic workers:** TDD. Failing test → minimal implementation → green → commit. Steps use checkbox (`- [ ]`) syn… |
 
 ## 2026-06

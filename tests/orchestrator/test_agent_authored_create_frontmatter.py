@@ -158,3 +158,94 @@ def test_default_section_create_unaffected(tmp_path, init_host):
     text = page.read_text()
     assert "status:" in text and "sources:" in text and "synthesized_into:" in text
     assert "source_files:" not in text  # not the agent-authored set
+
+
+def test_reconciliation_overwrites_production_frontmatter_deviation(
+    tmp_path, init_host, monkeypatch
+):
+    """Production-seam proof (not only dry-run): the file is ABSENT before the run
+    (so `action == "create"`), then the page-author dispatch — standing in for the
+    real LLM — WRITES a deviating frontmatter file during dispatch (description
+    under the floor, `source_files` dropped). Because the file now exists, the
+    dry-run synth is skipped, and reconciliation still makes the deterministic
+    frontmatter authoritative, so the page passes REAL Tier-1 lint.
+    (CCE-119 Item A / AC2.)"""
+    init_host(_SEED_STATE, config_yaml=CONFIG_AGENT_AUTHORED)
+    target = tmp_path / "docs" / "site-src" / "core" / "connectors" / "foo.md"
+    assert not target.exists()  # production create: file absent before dispatch
+    import orchestrator_runner as runner
+
+    orig = runner.dispatch_validated
+
+    def fake_llm_create(name, payload, **kw):
+        if name == "page-author" and payload.get("action") == "create":
+            # Stand in for the real page-author LLM: write a DEVIATING
+            # frontmatter file during dispatch (ignoring the template's
+            # lint-guarded fields), as a create the orchestrator must reconcile.
+            p = Path(payload["target_path"])
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(
+                "---\ndescription: short\nstatus: draft\n---\n"
+                "# foo\n\nBody the author wrote about the foo connector.\n"
+            )
+            return {"ok": True, "path": payload["target_path"], "action": "create"}, []
+        return orig(name, payload, **kw)
+
+    monkeypatch.setattr(runner, "dispatch_validated", fake_llm_create)
+
+    rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+    assert rc == 0
+    assert target.exists()
+
+    text = target.read_text()
+    assert "Body the author wrote about the foo connector." in text  # body preserved
+    assert "description: short" not in text  # deviation overwritten
+
+    import frontmatter_schema
+    import description_quality
+
+    config = yaml.safe_load(CONFIG_AGENT_AUTHORED)
+    ok_fs, msg_fs = frontmatter_schema.check_path(target, config)
+    ok_dq, msg_dq = description_quality.check_path(target, config)
+    assert ok_fs, f"frontmatter_schema: {msg_fs}"
+    assert ok_dq, f"description_quality: {msg_dq}"
+
+
+def test_edit_of_agent_authored_page_is_not_clobbered(tmp_path, init_host):
+    """Regression: an EDIT of an existing agent-authored page with valid, RICHER
+    curated frontmatter (extra accumulated `source_files`, `status: published`)
+    must NOT be reconciled — reconciliation is create-only by design (spec
+    degradation table: `action == edit -> reconciliation skipped`). Clobbering an
+    edit would drop accumulated citations and silently revert a published page.
+    (CCE-119 Item A scope guard.)"""
+    init_host(_SEED_STATE, config_yaml=CONFIG_AGENT_AUTHORED)
+    target = tmp_path / "docs" / "site-src" / "core" / "connectors" / "foo.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Curated, richer-than-a-fresh-create frontmatter: two accumulated citations
+    # (only one is in this run's grounding) and a published status.
+    curated = (
+        "---\n"
+        "description: 'Documents the foo connector and its retry semantics in "
+        "full detail'\n"
+        "source_files:\n"
+        "  - backend/connectors/foo.py\n"
+        "  - backend/connectors/legacy_foo.py\n"
+        "last_reviewed: '2026-01-01'\n"
+        "status: published\n"
+        "---\n"
+        "# foo\n\nCurated body a human polished about the foo connector.\n"
+    )
+    target.write_text(curated)
+    import orchestrator_runner as runner
+
+    rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+    assert rc == 0
+
+    text = target.read_text()
+    # The edit path leaves the curated frontmatter untouched: accumulated
+    # citations survive, the published status is not reverted to draft, and the
+    # curated description/last_reviewed are intact.
+    assert text == curated, "an edit of an agent-authored page must not be clobbered"
+    assert "legacy_foo.py" in text  # accumulated citation not dropped
+    assert "status: published" in text  # not reverted to draft
+    assert "2026-01-01" in text  # curated last_reviewed preserved

@@ -1012,6 +1012,32 @@ def _synthesize_agent_description(
     return desc
 
 
+def _enforce_agent_frontmatter(path: Path, agent_fields: dict) -> None:
+    """CCE-119 Item A: make the orchestrator's deterministic ``agent_fields`` the
+    authoritative frontmatter of a freshly-created agent-authored page.
+
+    The page-author (the real LLM on the production dispatch path) is handed
+    these fields as a template but may reword or drop the lint-guarded ones; the
+    orchestrator's values win — declare-then-discharge, never trust the
+    subagent's own write. Strips whatever leading ``---`` block is on disk
+    (mirroring the fence convention of ``archive_indexes.parse_frontmatter``:
+    ``split("---", 2)``) and re-prepends
+    ``agent_authored_frontmatter_text(**agent_fields)``, keeping the body.
+    ``agent_fields`` carries only the four agent-authored keys (see Task 4's
+    decoupling), so this never passes an unexpected kwarg. Idempotent; a file
+    with no well-formed block keeps its whole text as the body.
+    """
+    import frontmatter_contract as fmc
+
+    text = path.read_text()
+    body = text
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) >= 3:
+            body = parts[2].lstrip("\n")
+    path.write_text(fmc.agent_authored_frontmatter_text(**agent_fields) + body)
+
+
 def _resolve_docs_dir(config: dict) -> str | None:
     """The docs root for core pages: prefer ``site.docs_dir`` (what the manifest
     code and the source-map stage use), fall back to ``docs.source_dir`` for

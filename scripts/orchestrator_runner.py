@@ -1005,10 +1005,10 @@ def _synthesize_agent_description(
     # hardcoded 6). Neutral, repeatable filler drawn from the topic; each append
     # re-strips a trailing colon so the invariant holds wherever the floor lands.
     filler = f"agent-authored reference for {topic}".split()
-    fi = 0
+    filler_index = 0
     while len(desc.split()) < min_words:
-        desc = f"{desc} {filler[fi % len(filler)]}".rstrip(":").strip()
-        fi += 1
+        desc = f"{desc} {filler[filler_index % len(filler)]}".rstrip(":").strip()
+        filler_index += 1
     return desc
 
 

@@ -120,6 +120,29 @@ def test_created_agent_authored_page_passes_tier1_lint(tmp_path, init_host):
     assert ok_dq, f"description_quality: {msg_dq}"
 
 
+def test_callsite_passes_resolved_min_words(tmp_path, init_host, monkeypatch):
+    """The authoring callsite resolves description_quality.min_words from the
+    host config and threads it into the synthesizer (CCE-119 Item B)."""
+    cfg = CONFIG_AGENT_AUTHORED.replace(
+        "lint: { tier1: default, tier2: {}, tier3: {} }",
+        "lint: { tier1: { description_quality: { min_words: 12 } }, tier2: {}, tier3: {} }",
+    )
+    init_host(_SEED_STATE, config_yaml=cfg)
+    import orchestrator_runner as runner
+
+    captured: dict = {}
+    orig = runner._synthesize_agent_description
+
+    def spy(summaries, *, hint, min_words):
+        captured["min_words"] = min_words
+        return orig(summaries, hint=hint, min_words=min_words)
+
+    monkeypatch.setattr(runner, "_synthesize_agent_description", spy)
+    rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=True)
+    assert rc == 0
+    assert captured["min_words"] == 12
+
+
 def test_default_section_create_unaffected(tmp_path, init_host):
     """Regression: a host with NO agent-authored section still gets the default
     template and its page passes its own (default) required-field set."""

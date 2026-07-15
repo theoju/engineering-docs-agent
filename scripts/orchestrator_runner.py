@@ -974,17 +974,15 @@ def _synthesize_core_page(target_path: Path, page: dict, today: str) -> None:
     target_path.write_text(fm + _core_page_skeleton(page))
 
 
-# Mirrors description_quality._DEFAULTS["min_words"]; the synthesized
-# description must clear the rule's floor by construction (CCE-117).
-_DESC_MIN_WORDS = 6
-
-
-def _synthesize_agent_description(summaries: list[dict], *, hint: str) -> str:
+def _synthesize_agent_description(
+    summaries: list[dict], *, hint: str, min_words: int
+) -> str:
     """Deterministic one-line description for a freshly-created agent-authored
-    page (CCE-117). Guarantees the description_quality invariants — >= 6 words,
-    not equal to the slug-derived H1, no trailing colon — by construction.
-    Pure; never raises on malformed input.
-    Consumed by the incremental authoring create path (wired in CCE-117 Tasks 2–3).
+    page (CCE-117). Guarantees the description_quality invariants — >= ``min_words``
+    words, not equal to the slug-derived H1, no trailing colon — by construction.
+    ``min_words`` is the host's resolved floor (CCE-119 Item B); pass
+    ``description_quality.resolve_min_words(config)``. Pure; never raises on
+    malformed input.
     """
     change = ""
     for s in summaries or []:
@@ -1003,8 +1001,14 @@ def _synthesize_agent_description(summaries: list[dict], *, hint: str) -> str:
     else:
         desc = f"Reference documentation for {topic} in this codebase"
     desc = desc.rstrip(":").strip()
-    if len(desc.split()) < _DESC_MIN_WORDS:
-        desc = f"{desc} agent-authored reference for {topic}".rstrip(":").strip()
+    # CCE-119 Item B: pad deterministically to the resolved floor (was a
+    # hardcoded 6). Neutral, repeatable filler drawn from the topic; each append
+    # re-strips a trailing colon so the invariant holds wherever the floor lands.
+    filler = f"agent-authored reference for {topic}".split()
+    fi = 0
+    while len(desc.split()) < min_words:
+        desc = f"{desc} {filler[fi % len(filler)]}".rstrip(":").strip()
+        fi += 1
     return desc
 
 
@@ -1492,6 +1496,16 @@ def run(
         authored: list[str] = []
         authored_lens: dict[str, str] = {}
         pr_by_number = {pr.get("number"): pr for pr in prs}
+        # CCE-119 Item B: resolve the description_quality min_words floor once
+        # from config (single source of truth in the lint rule) so an
+        # agent-authored create's synthesized description clears a host's
+        # possibly-raised threshold, not a hardcoded 6.
+        _lint_dir = str(_PLUGIN_ROOT / "scripts" / "lint")
+        if _lint_dir not in sys.path:
+            sys.path.append(_lint_dir)
+        import description_quality as _description_quality
+
+        _desc_min_words = _description_quality.resolve_min_words(config)
         for i, ((lens, hint), batch_summaries) in enumerate(per_target.items()):
             # CCE-114: the authoring fan-out is the most expensive phase (one
             # dispatch per batch), so it must respect the CCE-109 deadline —
@@ -1542,7 +1556,7 @@ def run(
             ):
                 agent_fields = fmc.agent_authored_frontmatter_dict(
                     description=_synthesize_agent_description(
-                        batch_summaries, hint=hint
+                        batch_summaries, hint=hint, min_words=_desc_min_words
                     ),
                     source_files=sorted(grounding),
                     last_reviewed=now[:10],  # date portion (YYYY-MM-DD) of the run

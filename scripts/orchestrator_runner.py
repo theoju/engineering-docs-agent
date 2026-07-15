@@ -974,17 +974,15 @@ def _synthesize_core_page(target_path: Path, page: dict, today: str) -> None:
     target_path.write_text(fm + _core_page_skeleton(page))
 
 
-# Mirrors description_quality._DEFAULTS["min_words"]; the synthesized
-# description must clear the rule's floor by construction (CCE-117).
-_DESC_MIN_WORDS = 6
-
-
-def _synthesize_agent_description(summaries: list[dict], *, hint: str) -> str:
+def _synthesize_agent_description(
+    summaries: list[dict], *, hint: str, min_words: int
+) -> str:
     """Deterministic one-line description for a freshly-created agent-authored
-    page (CCE-117). Guarantees the description_quality invariants — >= 6 words,
-    not equal to the slug-derived H1, no trailing colon — by construction.
-    Pure; never raises on malformed input.
-    Consumed by the incremental authoring create path (wired in CCE-117 Tasks 2–3).
+    page (CCE-117). Guarantees the description_quality invariants — >= ``min_words``
+    words, not equal to the slug-derived H1, no trailing colon — by construction.
+    ``min_words`` is the host's resolved floor (CCE-119 Item B); pass
+    ``description_quality.resolve_min_words(config)``. Pure; never raises on
+    malformed input.
     """
     change = ""
     for s in summaries or []:
@@ -1003,9 +1001,41 @@ def _synthesize_agent_description(summaries: list[dict], *, hint: str) -> str:
     else:
         desc = f"Reference documentation for {topic} in this codebase"
     desc = desc.rstrip(":").strip()
-    if len(desc.split()) < _DESC_MIN_WORDS:
-        desc = f"{desc} agent-authored reference for {topic}".rstrip(":").strip()
+    # CCE-119 Item B: pad deterministically to the resolved floor (was a
+    # hardcoded 6). Neutral, repeatable filler drawn from the topic; each append
+    # re-strips a trailing colon so the invariant holds wherever the floor lands.
+    filler = f"agent-authored reference for {topic}".split()
+    filler_index = 0
+    while len(desc.split()) < min_words:
+        desc = f"{desc} {filler[filler_index % len(filler)]}".rstrip(":").strip()
+        filler_index += 1
     return desc
+
+
+def _enforce_agent_frontmatter(path: Path, agent_fields: dict) -> None:
+    """CCE-119 Item A: make the orchestrator's deterministic ``agent_fields`` the
+    authoritative frontmatter of a freshly-created agent-authored page.
+
+    The page-author (the real LLM on the production dispatch path) is handed
+    these fields as a template but may reword or drop the lint-guarded ones; the
+    orchestrator's values win — declare-then-discharge, never trust the
+    subagent's own write. Strips whatever leading ``---`` block is on disk
+    (mirroring the fence convention of ``archive_indexes.parse_frontmatter``:
+    ``split("---", 2)``) and re-prepends
+    ``agent_authored_frontmatter_text(**agent_fields)``, keeping the body.
+    ``agent_fields`` carries only the four agent-authored keys (see Task 4's
+    decoupling), so this never passes an unexpected kwarg. Idempotent; a file
+    with no well-formed block keeps its whole text as the body.
+    """
+    import frontmatter_contract as fmc
+
+    text = path.read_text()
+    body = text
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) >= 3:
+            body = parts[2].lstrip("\n")
+    path.write_text(fmc.agent_authored_frontmatter_text(**agent_fields) + body)
 
 
 def _resolve_docs_dir(config: dict) -> str | None:
@@ -1492,6 +1522,16 @@ def run(
         authored: list[str] = []
         authored_lens: dict[str, str] = {}
         pr_by_number = {pr.get("number"): pr for pr in prs}
+        # CCE-119 Item B: resolve the description_quality min_words floor once
+        # from config (single source of truth in the lint rule) so an
+        # agent-authored create's synthesized description clears a host's
+        # possibly-raised threshold, not a hardcoded 6.
+        _lint_dir = str(_PLUGIN_ROOT / "scripts" / "lint")
+        if _lint_dir not in sys.path:
+            sys.path.append(_lint_dir)
+        import description_quality as _description_quality
+
+        _desc_min_words = _description_quality.resolve_min_words(config)
         for i, ((lens, hint), batch_summaries) in enumerate(per_target.items()):
             # CCE-114: the authoring fan-out is the most expensive phase (one
             # dispatch per batch), so it must respect the CCE-109 deadline —
@@ -1534,7 +1574,13 @@ def run(
             # CCE-117: agent-authored sections require description/source_files/
             # last_reviewed; the default template omits them, so Tier-1 lint
             # would drop the new page. Create-only — edits keep the existing
-            # page's frontmatter. agent_fields is reused by the dry-run synth.
+            # page's curated frontmatter (spec degradation table: an edit skips
+            # reconciliation, so accumulated source_files / a published status are
+            # never clobbered). `action` is captured above BEFORE dispatch, when
+            # the file does not yet exist, so a genuine production create — the
+            # LLM writes the page during dispatch — is still covered: `create`
+            # holds here and `target_path.exists()` is True at the reconciliation
+            # guard below. agent_fields is reused by the dry-run synth.
             agent_fields = None
             if (
                 action == "create"
@@ -1542,12 +1588,17 @@ def run(
             ):
                 agent_fields = fmc.agent_authored_frontmatter_dict(
                     description=_synthesize_agent_description(
-                        batch_summaries, hint=hint
+                        batch_summaries, hint=hint, min_words=_desc_min_words
                     ),
                     source_files=sorted(grounding),
                     last_reviewed=now[:10],  # date portion (YYYY-MM-DD) of the run
                 )
-                fm_template = agent_fields
+                # CCE-119 Item A: keep agent_fields the pure 4-field authoritative
+                # set. doc_kind is attached to a COPY below (it is routing-only —
+                # nothing reads it back from a page), so reconciliation's
+                # agent_authored_frontmatter_text(**agent_fields) can't hit the
+                # latent doc_kind TypeError.
+                fm_template = dict(agent_fields)
             else:
                 fm_template = fmc.default_frontmatter_dict(
                     [
@@ -1594,6 +1645,12 @@ def run(
                     target_path.write_text(
                         fm_text + f"# {hint}\n\nGenerated by docs-agent.\n"
                     )
+                if agent_fields is not None and target_path.exists():
+                    # CCE-119 Item A: enforce the deterministic frontmatter on the
+                    # written page (production: the LLM wrote it; dry-run: the synth
+                    # above wrote it). Runs on both paths; a no-op when the write
+                    # already matches.
+                    _enforce_agent_frontmatter(target_path, agent_fields)
 
         # Content validation
         if authored:

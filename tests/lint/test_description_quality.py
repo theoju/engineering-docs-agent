@@ -189,3 +189,21 @@ def test_lint_runner_includes_description_quality_in_tier1_default():
 
     rules = lint_runner.enabled_rules({"lint": {"tier1": "default"}})
     assert "description_quality" in rules
+
+
+def test_resolve_min_words_returns_default_when_no_override():
+    import description_quality as dq
+
+    assert dq.resolve_min_words({}) == dq._DEFAULTS["min_words"]
+    # a tier1 sentinel string ("default") still yields the default floor
+    assert (
+        dq.resolve_min_words({"lint": {"tier1": "default"}})
+        == dq._DEFAULTS["min_words"]
+    )
+
+
+def test_resolve_min_words_honors_host_override():
+    import description_quality as dq
+
+    cfg = {"lint": {"tier1": {"description_quality": {"min_words": 12}}}}
+    assert dq.resolve_min_words(cfg) == 12

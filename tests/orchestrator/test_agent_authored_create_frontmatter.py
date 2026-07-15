@@ -142,6 +142,21 @@ def test_callsite_passes_resolved_min_words(tmp_path, init_host, monkeypatch):
     assert rc == 0
     assert captured["min_words"] == 12
 
+    # Spec B5: close the loop end-to-end — the produced page must pass the REAL
+    # description_quality consumer AT the raised floor, not merely thread the
+    # value. A synthesizer that ignored the floor would land at 6-11 words and
+    # be rejected here (verify with the consumer tool, not test -f).
+    page = tmp_path / "docs" / "site-src" / "core" / "connectors" / "foo.md"
+    assert page.exists()
+    import description_quality
+    import frontmatter_schema
+
+    cfg_dict = yaml.safe_load(cfg)
+    ok_dq, msg_dq = description_quality.check_path(page, cfg_dict)
+    assert ok_dq, f"description_quality at min_words=12: {msg_dq}"
+    fm = frontmatter_schema.parse_frontmatter(page.read_text())
+    assert fm is not None and len(fm["description"].split()) >= 12, fm
+
 
 def test_default_section_create_unaffected(tmp_path, init_host):
     """Regression: a host with NO agent-authored section still gets the default

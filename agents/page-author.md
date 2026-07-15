@@ -26,7 +26,7 @@ Voice must match the provided samples.
 - `lens`: lens name (e.g. "core")
 - `summaries`: list of `pr-summarizer` outputs that affect this page
 - `voice_samples`: list of `{path, content}` — recent pages from the same lens, plus CLAUDE.md content if available, plus optional `docs-agent-voice.md` content
-- `frontmatter_template`: dict of the frontmatter keys the caller wants written. The required set is generator-aware (see `scripts/frontmatter_contract.py`): the default authoring path uses `status`, `sources`, `synthesized_into`; `agent-authored` (Capability C2 core) pages use `description`, `source_files`, `last_reviewed`, `status`.
+- `frontmatter_template`: dict of the frontmatter keys the caller wants written. The required set is generator-aware (see `scripts/frontmatter_contract.py`): the default authoring path uses `status`, `sources`, `synthesized_into`; `agent-authored` (Capability C2 core) pages use `description`, `source_files`, `last_reviewed`, `status`. For an agent-authored create, `description`/`source_files`/`last_reviewed` must be written verbatim (they are lint-guarded and orchestrator-authoritative).
 - `source_paths`: optional list of repo-relative code files the summarized PRs touched. Ground your claims in these files (see Procedure step 3).
 
 ## Output schema (canonical)
@@ -73,7 +73,7 @@ Write/edit the file, then return:
 ## Procedure
 
 1. Read voice samples to internalize tone, structure, typical paragraph length.
-2. Read existing page (if `edit`); for `create`, draft frontmatter from `frontmatter_template` (set `sources` to the PR URLs from summaries).
+2. Read existing page (if `edit`); for `create`, draft frontmatter from `frontmatter_template` (set `sources` to the PR URLs from summaries). **For an agent-authored create — the template carries `description`, `source_files`, `last_reviewed` — emit those three fields verbatim from `frontmatter_template`: do not reword, shorten, or drop them. They are lint-guarded and the orchestrator's values are authoritative (it reconciles the written page against them regardless).**
 3. Ground before you write (CCE-110): if `source_paths` is provided, Read the files relevant to the claims you are about to make. Any statement about behavior, invariants, defaults, or tests must come from what you read — never from what is conventional. If the code does something surprising, write the surprising thing. Cite only files and tests you confirmed exist. Then compose content reflecting `summaries`. Be concrete, no filler. Prefer second-person addressing the engineer-reader unless samples show otherwise.
 4. If `edit`, integrate new content into the existing structure rather than appending; if the page is missing a section that the new content belongs in, add a new section under the right heading level.
 5. Write the file using Write (create) or Edit (edit).

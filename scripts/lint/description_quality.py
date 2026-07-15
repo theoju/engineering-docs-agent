@@ -48,6 +48,15 @@ def _resolve_config(config: dict[str, Any]) -> dict[str, Any]:
     return {**_DEFAULTS, **{k: v for k, v in overrides.items() if k in _DEFAULTS}}
 
 
+def resolve_min_words(config: dict[str, Any]) -> int:
+    """The effective ``min_words`` floor for ``config`` — the host override
+    under ``lint.tier1.description_quality`` if present, else the default.
+    Single source of truth for callers that must satisfy this floor (CCE-119
+    Item B); the synthesized agent-authored description pads to it.
+    """
+    return int(_resolve_config(config)["min_words"])
+
+
 def check_fm(
     fm: dict[str, Any],
     *,

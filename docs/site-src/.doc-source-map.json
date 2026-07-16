@@ -18,7 +18,8 @@
       "architecture/cce4-schema-enforcement.md"
     ],
     "agents/page-author.md": [
-      "architecture/cce4-schema-enforcement.md"
+      "architecture/cce4-schema-enforcement.md",
+      "architecture/orchestrator.md"
     ],
     "agents/pr-summarizer.md": [
       "architecture/cce4-schema-enforcement.md"
@@ -1067,6 +1068,12 @@
       "architecture/cce32-github-pages-publish-target.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/plans/2026-07-14-cce119-create-path-frontmatter-fidelity.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/specs/2026-05-19-engineering-docs-agent-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1367,6 +1374,11 @@
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/specs/2026-07-14-cce119-create-path-frontmatter-fidelity-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/templates/sdd-fidelity-gate.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1398,6 +1410,9 @@
     ],
     "scripts/gh_client.py": [
       "archive/v0-1-1-hardening.md"
+    ],
+    "scripts/lint/description_quality.py": [
+      "architecture/orchestrator.md"
     ],
     "scripts/lint/diagrams.py": [
       "architecture/cce-capability-c3-diagram-render-gate.md",
@@ -1542,6 +1557,9 @@
     "tests/orchestrator/fakes_schema_invalid/fake_source_collector.json": [
       "architecture/cce4-schema-enforcement.md"
     ],
+    "tests/orchestrator/test_agent_authored_create_frontmatter.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_dispatch_debug_capture.py": [
       "archive/cce14-source-collector-prompt-hardening.md"
     ],
@@ -1566,6 +1584,9 @@
     "tests/orchestrator/test_dispatch_validated_inject.py": [
       "archive/2026-07-13-cce120-gap-detector-prid-injection.md"
     ],
+    "tests/orchestrator/test_enforce_agent_frontmatter.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_gap_detector_prid_injection.py": [
       "archive/2026-07-13-cce120-gap-detector-prid-injection.md"
     ],
@@ -1578,9 +1599,6 @@
     ],
     "tests/orchestrator/test_source_map_stage.py": [
       "architecture/cce-capability-c-canonical-core-citations.md"
-    ],
-    "tests/orchestrator/test_time_budget_authoring.py": [
-      "architecture/orchestrator.md"
     ],
     "tests/orchestrator/test_verify_runner.py": [
       "architecture/cce4-schema-enforcement.md",
@@ -1707,7 +1725,10 @@
     "architecture/orchestrator.md": [
       "CHANGELOG.md",
       "scripts/orchestrator_runner.py",
-      "tests/orchestrator/test_time_budget_authoring.py"
+      "agents/page-author.md",
+      "scripts/lint/description_quality.py",
+      "tests/orchestrator/test_enforce_agent_frontmatter.py",
+      "tests/orchestrator/test_agent_authored_create_frontmatter.py"
     ],
     "architecture/structured-docs-site-generation.md": [
       "agents/schemas/*.json",

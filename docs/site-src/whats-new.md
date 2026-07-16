@@ -8,6 +8,44 @@ synthesized_into: []
 
 # What's New
 
+## 2026-07-16T07:48:15.010916+00:00
+- PR #177: The nightly docs-agent PR body and GitHub step summary now render an INFO/advisory header for non-partial runs that merely carry benign, info-only rescue reasons, instead of the alarming 'WARNING — Partial run' banner. `_format_partial_digest` was changed to accept an explicit `partial` flag (matching the run's actual `partial` state) rather than inferring severity from whether `partial_reasons` was non-empty, and that flag is now threaded through all three call sites (`_compose_pr_body`'s two invocations and `_write_step_summary`).
+- PR #178: The nightly docs-agent orchestrator now enforces frontmatter fidelity on agent-authored 'create' pages in production, not just in dry-run: after the page-author subagent returns ok, the orchestrator overwrites the written page's frontmatter with its own deterministic agent_fields (via a new _enforce_agent_frontmatter step), preserving the authored body but no longer trusting the LLM's frontmatter output. Separately, the synthesized description's minimum-word floor is now resolved from the host's description_quality config via a new resolve_min_words(config) helper instead of a duplicated hardcoded constant, so hosts that raise lint.tier1.description_quality.min_words no longer have their agent-authored pages silently dropped by Tier-1 lint. Both fixes are scoped strictly to agent-authored create paths; edits and default-template sections are unchanged.
+### Gaps flagged
+- theoju/engineering-docs-agent#178: No allowlist match (config.allowlist_paths is empty) and size_filter has no min_loc/min_files thresholds to apply, so this falls to LLM judgment on the middle tier. The PR changes production dispatch behavior for the orchestrator (post-dispatch frontmatter reconciliation overwriting an LLM-authored page's frontmatter) and introduces a new public config-resolution function (resolve_min_words) that changes lint-floor behavior across hosts. This is exactly the class of change (production-path behavior change + new public surface affecting downstream consumers) a senior engineer would expect a written spec/plan for before merging — and indeed the PR itself includes a design spec and TDD plan under docs/superpowers/, confirming the change warranted one.
+### Pages to review (source drift)
+- architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
+- architecture/cce-capability-c-canonical-core-citations.md — changed: docs/superpowers/plans/2026-07-14-cce119-create-path-frontmatter-fidelity.md, docs/superpowers/specs/2026-07-14-cce119-create-path-frontmatter-fidelity-design.md
+- architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-07-14-cce119-create-path-frontmatter-fidelity.md, docs/superpowers/specs/2026-07-14-cce119-create-path-frontmatter-fidelity-design.md
+- architecture/cce10-source-collector-canonical-shape.md — changed: scripts/orchestrator_runner.py
+- architecture/cce12-source-collector-tool-use-diagnostics.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-decision-archive.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-source-map-drift.md — changed: scripts/orchestrator_runner.py
+- architecture/cce32-github-pages-publish-target.md — changed: docs/superpowers/plans/2026-07-14-cce119-create-path-frontmatter-fidelity.md
+- architecture/cce4-schema-enforcement.md — changed: agents/page-author.md, scripts/orchestrator_runner.py
+- architecture/cce6-7-8-batch.md — changed: scripts/orchestrator_runner.py
+- architecture/index.md — changed: scripts/orchestrator_runner.py
+- architecture/orchestrator.md — changed: CHANGELOG.md, agents/page-author.md, scripts/lint/description_quality.py, scripts/orchestrator_runner.py, tests/orchestrator/test_agent_authored_create_frontmatter.py, tests/orchestrator/test_enforce_agent_frontmatter.py
+- architecture/structured-docs-site-generation.md — changed: docs/superpowers/plans/2026-07-14-cce119-create-path-frontmatter-fidelity.md, docs/superpowers/specs/2026-07-14-cce119-create-path-frontmatter-fidelity-design.md
+- archive/2026-07-13-cce120-gap-detector-prid-injection.md — changed: scripts/orchestrator_runner.py
+- archive/cce14-source-collector-prompt-hardening.md — changed: scripts/orchestrator_runner.py
+- archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
+- archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
+- archive/v0-1-1-hardening.md — changed: scripts/orchestrator_runner.py
+### Pages to review (citation drift)
+- architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+### Core pages to review (drift)
+- architecture/cce-capability-c-canonical-core-citations.md (source, citation)
+- architecture/cce-capability-c2-canonical-core-authoring.md (source)
+- architecture/cce10-source-collector-canonical-shape.md (source)
+- architecture/cce12-source-collector-tool-use-diagnostics.md (source)
+- architecture/cce23-decision-archive.md (source)
+- architecture/cce23-source-map-drift.md (source)
+- architecture/cce32-github-pages-publish-target.md (source)
+- architecture/cce4-schema-enforcement.md (source)
+- architecture/cce6-7-8-batch.md (source)
+- architecture/structured-docs-site-generation.md (source)
+
 ## 2026-07-14T07:45:25.607522+00:00
 - PR #175: The docs-agent orchestrator now injects the `pr_id` field into the gap-detector agent's verdict itself, right after dispatch and before schema validation, instead of requiring the LLM subagent to echo back an identity value the orchestrator already constructs. `dispatch_validated` gained an optional `inject: dict | None = None` keyword parameter that merges `{**raw, **inject}` over the subagent's raw response (guarded to only apply when the response is a dict), letting orchestrator-owned fields override or fill in whatever the agent returned. The gap-detector call site now passes `inject={"pr_id": pr_id}`. The `needs_spec` field, which reflects the agent's actual judgment, remains required and unaffected — a genuinely empty verdict still correctly flips the run to partial.
 ### Gaps flagged

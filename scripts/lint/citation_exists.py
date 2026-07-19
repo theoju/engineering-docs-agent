@@ -175,6 +175,16 @@ def _relativize(path_str: str, repo_root: Path) -> str | None:
         return None
 
 
+def _symbol_defined(source: str, leaf: str) -> bool:
+    """True if `leaf` is defined in the file source: a def/class (any indent,
+    so methods count) or a module-level (column-0) assignment/annotation."""
+    name = re.escape(leaf)
+    pattern = re.compile(
+        rf"(?m)^\s*(?:async\s+)?(?:def|class)\s+{name}\b|^{name}\s*[:=]"
+    )
+    return bool(pattern.search(source))
+
+
 def check_path(path: Path, repo_root: Path | None, files: set[str]) -> tuple[bool, str]:
     if repo_root is None:
         return True, "no git repo detected; citation check skipped"
@@ -198,6 +208,19 @@ def check_path(path: Path, repo_root: Path | None, files: set[str]) -> tuple[boo
     for name in cites["tests"]:
         if not cited_test_exists(repo_root, name):
             problems.append(f"cites nonexistent test '{name}'")
+    for bare, leaf in extract_symbol_citations(text):
+        rel = _relativize(bare, repo_root)
+        if rel is None:
+            continue
+        target = repo_root / rel
+        if not target.exists():
+            continue  # nonexistent path already reported by the paths loop
+        try:
+            source = target.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue  # unreadable cited file: do not false-block
+        if not _symbol_defined(source, leaf):
+            problems.append(f"cites nonexistent symbol '{leaf}' in '{bare}'")
     if problems:
         return False, "; ".join(problems)
     return True, "ok"

@@ -73,7 +73,7 @@ processing. Use this in CI to block merges on broken citations.
 
 - Tokens are matched as substrings, not whole-word anchors. A token like
   `def load_config` matches any line containing that substring.
-- Empty tokens are skipped silently (`scripts/verify_citations.py:_iter_citations`). Pin every
+- Empty tokens are skipped silently (`scripts/verify_citations.py`). Pin every
   citation you want verified.
 - If a token becomes ambiguous after a refactor, tighten it to a more specific
   substring — one that appears on exactly one line in the file.

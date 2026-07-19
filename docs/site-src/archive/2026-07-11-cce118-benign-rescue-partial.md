@@ -21,7 +21,7 @@ fact-checker output robustness — `schema_invalid: fact-checker`,
 `fact_checker_unavailable`, and the fact-checker's own
 `prose_contamination_rescued`. That hypothesis was wrong. The fact-checker
 dispatch already records all of its reasons `info_only=True`
-(`scripts/orchestrator_runner.py:run` and `:1713`, per the CCE-110 advisory-layer
+(`scripts/orchestrator_runner.py` and `:1713`, per the CCE-110 advisory-layer
 design), so none of those three ever flipped `partial`.
 
 PR #170's actual `partial_reasons` were:

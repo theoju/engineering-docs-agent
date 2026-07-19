@@ -22,7 +22,7 @@ Two paths depending on context:
 - **Dry-run mode** (`dry_run_dir` set): reads a fixture from `<dir>/fake_<agent_name>.json` instead of spawning a process. All unit tests use this path.
 - **Production mode**: spawns `claude -p <prompt> --agent <name> --plugin-dir <root>` with `--setting-sources project,local` to skip user-level plugins that inject prose into stdout (CCE-15).
 
-The `--allowedTools` flag is populated from the `tools:` YAML frontmatter in `agents/<name>.md` when present (`scripts/orchestrator_runner.py:_AGENT_TOOLS_CACHE` → `_load_agent_allowed_tools`). Agents that declare no tools get no `--allowedTools` argument.
+The `--allowedTools` flag is populated from the `tools:` YAML frontmatter in `agents/<name>.md` when present (`scripts/orchestrator_runner.py` → `_load_agent_allowed_tools`). Agents that declare no tools get no `--allowedTools` argument.
 
 The subprocess always receives `CLAUDE_STOP_VERIFY=0` in its environment (CCE-10). Without this, a global `stop-verify` shell hook contaminates stdout with a prose preamble that breaks `json.loads`.
 

@@ -38,7 +38,7 @@ site:
       openapi: openapi.json
 ```
 
-`scripts/site_structure.py:_section_index_stub` reads this config block and produces a `ScaffoldFile` list. `apply_scaffold` writes the files; it never overwrites existing authored content.
+`scripts/site_structure.py` reads this config block and produces a `ScaffoldFile` list. `apply_scaffold` writes the files; it never overwrites existing authored content.
 
 ## Three extractors
 
@@ -64,7 +64,7 @@ When `openapi` is listed in `extractors` and the section config includes an `ope
 
 ## Config validation
 
-`scripts/state_io.py:StateError` (`_validate_lens_paths_are_editable`) enforces the invariant that every lens in `docs.lens_paths` is covered by at least one `docs.agent_editable_paths` glob. The check runs at config load time; a miscovered lens raises `ConfigError` immediately rather than silently producing writes the agent can't make.
+`scripts/state_io.py` (`_validate_lens_paths_are_editable`) enforces the invariant that every lens in `docs.lens_paths` is covered by at least one `docs.agent_editable_paths` glob. The check runs at config load time; a miscovered lens raises `ConfigError` immediately rather than silently producing writes the agent can't make.
 
 ## Build smoke test
 

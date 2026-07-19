@@ -44,7 +44,7 @@ Files are named `<UTC-timestamp>-<agent-name>.<suffix>` so multiple runs don't c
 
 The final assistant turn may contain interleaved `tool_use` and `text` blocks. `_extract_final_assistant_text` (`scripts/orchestrator_runner.py:_extract_final_assistant_text`) concatenates only the `text` blocks from the **last** assistant message that contains at least one text block.
 
-This is a forward-compatibility guard added in CCE-14: if the model ends on a purely tool-use turn (no text), the function walks backward to the preceding assistant turn rather than returning an empty string. Tests in `tests/orchestrator/test_dispatch_subagent_stream_json.py:test_extract_final_assistant_text_concatenates_multi_text_blocks` and `:63` cover both the multi-block concatenation and the last-assistant-only selection.
+This is a forward-compatibility guard added in CCE-14: if the model ends on a purely tool-use turn (no text), the function walks backward to the preceding assistant turn rather than returning an empty string. Tests in `tests/orchestrator/test_dispatch_subagent_stream_json.py` and `:63` cover both the multi-block concatenation and the last-assistant-only selection.
 
 ## Tool-use summary
 
@@ -78,7 +78,7 @@ Conclusion: stream-json dispatch mode is appropriate for diagnostic measurement.
 Several fixes landed alongside or shortly after CCE-12 that affect dispatch reliability:
 
 - **CCE-10** — `CLAUDE_STOP_VERIFY=0` is injected into the subprocess environment (`scripts/orchestrator_runner.py`) to prevent a global stop-verify hook from prepending prose to the agent's stdout and breaking `json.loads`.
-- **CCE-15** — `--setting-sources project,local` (`scripts/orchestrator_runner.py:_order_prs_oldest_first`) excludes the user-level settings.json where an explanatory-output-style plugin was injecting `★ Insight` preambles into subprocess context. This closed the contamination pathway that broke Run 4's output parsing in CCE-14.
+- **CCE-15** — `--setting-sources project,local` (`scripts/orchestrator_runner.py`) excludes the user-level settings.json where an explanatory-output-style plugin was injecting `★ Insight` preambles into subprocess context. This closed the contamination pathway that broke Run 4's output parsing in CCE-14.
 - **CCE-15 rescue path** — `_rescue_json_object` (`scripts/orchestrator_runner.py`) is a defense-in-depth fallback that extracts the first balanced JSON object from prose-contaminated output when `json.loads` fails on the canonical text.
 
 ## Tests

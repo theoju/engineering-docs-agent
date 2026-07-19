@@ -34,7 +34,7 @@ The `tool_use` block in `meta.json` includes total call count, per-tool breakdow
 
 Per-run latency in stream-json mode is dominated by the agent's tool-call decisions, not NDJSON parse overhead. CCE-12 measured 3–6 s for zero-tool-call runs vs. 74 s for a run that made five tool calls. Leave `DOCS_AGENT_DEBUG_DIR` unset in steady-state production.
 
-Implementation: `scripts/orchestrator_runner.py:_last_processed_merge_sha`.
+Implementation: `scripts/orchestrator_runner.py`.
 
 ## `_extract_final_assistant_text` hardening
 
@@ -57,7 +57,7 @@ CCE-14 Run 4 surfaced a second failure mode: the user-level `explanatory-output-
 
 CCE-15 added two mitigations, both in `scripts/orchestrator_runner.py`.
 
-**`--setting-sources project,local`** (`scripts/orchestrator_runner.py:_order_prs_oldest_first`): every `claude` subprocess receives this flag, which skips the user-level `settings.json` where the plugin is enabled. OAuth and keychain authentication are preserved — unlike `--bare`, this flag does not strip credentials.
+**`--setting-sources project,local`** (`scripts/orchestrator_runner.py`): every `claude` subprocess receives this flag, which skips the user-level `settings.json` where the plugin is enabled. OAuth and keychain authentication are preserved — unlike `--bare`, this flag does not strip credentials.
 
 **`_rescue_json_object`** (`scripts/orchestrator_runner.py`): a prose-tolerant rescue path invoked when strict `json.loads()` fails. The function locates the first `{`, scans forward tracking brace depth while honoring JSON string state (escaped characters, quoted strings), and attempts `json.loads()` on the balanced slice. On success it records `prose_contamination_rescued: <agent>` in `partial_reasons` so the event appears in state and in Slack/email notifications.
 

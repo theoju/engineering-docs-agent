@@ -79,6 +79,6 @@ The parameter defaults to `None` for backward compatibility: all existing `dispa
 | Test file                                           | What it pins                                                           |
 | --------------------------------------------------- | ---------------------------------------------------------------------- |
 | `tests/schemas/test_source_collector_schema.py`     | Schema tightening: phantom top-level and per-item fields rejected      |
-| `tests/orchestrator/test_dispatch_subagent.py:test_dispatch_passes_setting_sources_flag`  | `--setting-sources project,local` in argv, preceding `-p`              |
+| `tests/orchestrator/test_dispatch_subagent.py`  | `--setting-sources project,local` in argv, preceding `-p`              |
 | `tests/orchestrator/test_dispatch_rescue.py`        | `_rescue_json_object` algorithm + `out_reasons` append                 |
-| `tests/orchestrator/test_dispatch_validated.py:test_dispatch_validated_propagates_rescue_reason_to_partial_reasons` | Rescue reason flows through `dispatch_validated` into returned reasons |
+| `tests/orchestrator/test_dispatch_validated.py` | Rescue reason flows through `dispatch_validated` into returned reasons |

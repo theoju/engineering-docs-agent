@@ -42,7 +42,7 @@ The required top-level fields are `prs` and `jira_issues`. Two optional fields (
 }
 ```
 
-The schema is defined in `agents/schemas/source_collector.schema.json` and mirrored verbatim in the `## Output schema (canonical)` block of `agents/source-collector.md`. Both copies are enforced to stay identical by `tests/agents/test_schema_md_sync.py:test_md_schema_block_matches_canonical_schema_file`.
+The schema is defined in `agents/schemas/source_collector.schema.json` and mirrored verbatim in the `## Output schema (canonical)` block of `agents/source-collector.md`. Both copies are enforced to stay identical by `tests/agents/test_schema_md_sync.py`.
 
 ## What CCE-10 fixed: stdout contamination via `CLAUDE_STOP_VERIFY`
 
@@ -54,7 +54,7 @@ CCE-10 closes this by setting `CLAUDE_STOP_VERIFY=0` in the subprocess environme
 run_kwargs["env"] = {**os.environ, "CLAUDE_STOP_VERIFY": "0"}
 ```
 
-The env dict extends `os.environ` rather than replacing it, so PATH, credentials, and all other ambient variables still reach the child process. `tests/orchestrator/test_dispatch_subagent_env.py:test_dispatch_subagent_sets_stop_verify_off` enforces both invariants: `CLAUDE_STOP_VERIFY` must be `"0"`, and `PATH` must match the parent's `os.environ["PATH"]`.
+The env dict extends `os.environ` rather than replacing it, so PATH, credentials, and all other ambient variables still reach the child process. `tests/orchestrator/test_dispatch_subagent_env.py` enforces both invariants: `CLAUDE_STOP_VERIFY` must be `"0"`, and `PATH` must match the parent's `os.environ["PATH"]`.
 
 ## Defense-in-depth: `_rescue_json_object`
 
@@ -68,7 +68,7 @@ The rescue scans for the first balanced `{...}` in the output and attempts `json
 
 ## Schema–markdown sync enforcement
 
-Every agent's `.md` file must embed its output schema in a `## Output schema (canonical)` fenced JSON block, and that block must be byte-for-byte equivalent to the corresponding `.schema.json` file. The test at `tests/agents/test_schema_md_sync.py:test_md_schema_block_matches_canonical_schema_file` checks all seven agents. If you update `agents/schemas/source_collector.schema.json`, also update the inline block in `agents/source-collector.md`, or the test fails.
+Every agent's `.md` file must embed its output schema in a `## Output schema (canonical)` fenced JSON block, and that block must be byte-for-byte equivalent to the corresponding `.schema.json` file. The test at `tests/agents/test_schema_md_sync.py` checks all seven agents. If you update `agents/schemas/source_collector.schema.json`, also update the inline block in `agents/source-collector.md`, or the test fails.
 
 ## Forbidden output patterns
 
@@ -78,7 +78,7 @@ The `agents/source-collector.md` file enumerates seven forbidden output shapes w
 - **§7** — returning PRs whose `merge_sha` is outside `last_sha..head_sha` (3 of 5 runs in the CCE-16 baseline)
 - **§6b** — emitting `jira_issues: []` after a failed Jira fetch without `partial: true` + `error: "jira_auth_missing"`
 
-The orchestrator clips out-of-window PRs at `scripts/orchestrator_runner.py:_summarize_tool_use` (`_clip_prs_to_window`) as a safety net, but the contract requires the agent to clip first.
+The orchestrator clips out-of-window PRs at `scripts/orchestrator_runner.py` (`_clip_prs_to_window`) as a safety net, but the contract requires the agent to clip first.
 
 ## Gotchas & layering rules
 

@@ -11,7 +11,7 @@ When a nightly run encounters a partial or hard-failed subagent, the runner writ
 
 ## What the runner writes
 
-`_write_step_summary` in `scripts/orchestrator_runner.py:_write_step_summary` appends a `## docs-agent partial_reasons` section to `$GITHUB_STEP_SUMMARY` at the end of every run. It is called inside the `finally` block at `scripts/orchestrator_runner.py:run`, so it fires whether the run exits cleanly or raises.
+`_write_step_summary` in `scripts/orchestrator_runner.py:_write_step_summary` appends a `## docs-agent partial_reasons` section to `$GITHUB_STEP_SUMMARY` at the end of every run. It is called inside the `finally` block at `scripts/orchestrator_runner.py`, so it fires whether the run exits cleanly or raises.
 
 The section lists every entry in `state["current_run"]["partial_reasons"]` — one bullet per reason. Entries accumulate across the run's 22 `add_partial` call sites: subagent dispatch failures, lint blocks, source-collector errors, citation-drift failures, and more.
 
@@ -49,4 +49,4 @@ For deeper investigation — per-subagent prompt, stdout, stderr, and stream fil
 
 ## Relation to `state.json`
 
-`save_persistent_state` (called from `scripts/orchestrator_runner.py:run`) strips `current_run` from the on-disk `state.json` before committing. `partial_reasons` therefore never persists to the docs-agent branch. The step summary is the only durable first-class signal for reasons from a specific run; the forensics artifact is the only way to reconstruct the full subagent context after the runner exits.
+`save_persistent_state` (called from `scripts/orchestrator_runner.py`) strips `current_run` from the on-disk `state.json` before committing. `partial_reasons` therefore never persists to the docs-agent branch. The step summary is the only durable first-class signal for reasons from a specific run; the forensics artifact is the only way to reconstruct the full subagent context after the runner exits.

@@ -55,7 +55,7 @@ The dataclasses (`SourceCollectorResult`, `PrSummary`, `PageAuthorResult`, etc.)
 
 ## `dispatch_validated` — the call site wrapper
 
-`scripts/orchestrator_runner.py:_sha_in_window` composes `dispatch_subagent` with `validate_and_parse` and returns a two-tuple the orchestrator uses directly:
+`scripts/orchestrator_runner.py` composes `dispatch_subagent` with `validate_and_parse` and returns a two-tuple the orchestrator uses directly:
 
 ```
 dispatch_validated(name, inputs, *, dry_run_dir, cwd) → (dict | None, list[str])
@@ -88,4 +88,4 @@ When you update a schema — adding a field, changing a type, tightening `additi
 1. `agents/schemas/<name>.schema.json` — the canonical file read at runtime.
 2. The `## Output schema (canonical)` fenced block in `agents/<name>.md` — the in-file reference Claude reads when it acts as that agent.
 
-`tests/agents/test_schema_md_sync.py:test_md_schema_block_matches_canonical_schema_file` runs this check for all seven agents on every `pytest` invocation. It uses `json.loads` on both sides so whitespace and key ordering don't matter, but the parsed structures must be equal. The test message tells you which file to update and which direction the mismatch is in.
+`tests/agents/test_schema_md_sync.py` runs this check for all seven agents on every `pytest` invocation. It uses `json.loads` on both sides so whitespace and key ordering don't matter, but the parsed structures must be equal. The test message tells you which file to update and which direction the mismatch is in.

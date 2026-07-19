@@ -20,7 +20,7 @@ synthesized_into: []
 
 `agents/schemas/gap_detector.schema.json` marks `pr_id` as required. Nightly PR #173 (2026-07-12) went `partial` for exactly one reason: `schema_invalid: gap-detector: 'pr_id' is a required property`. That single reason was enough to block CCE-101 auto-merge, even though every other dispatch reason on that run was already `info_only`.
 
-The orchestrator already builds `pr_id` deterministically at `scripts/orchestrator_runner.py:run` — `f"{repo['owner']}/{repo['name']}#{pr['number']}"` — and passes it into the gap-detector dispatch. Requiring the LLM subagent to reliably echo that value back was fragile: an omission or a mangled echo turned orchestrator-owned identity into a point of failure the model had no reason to own reliably.
+The orchestrator already builds `pr_id` deterministically at `scripts/orchestrator_runner.py` — `f"{repo['owner']}/{repo['name']}#{pr['number']}"` — and passes it into the gap-detector dispatch. Requiring the LLM subagent to reliably echo that value back was fragile: an omission or a mangled echo turned orchestrator-owned identity into a point of failure the model had no reason to own reliably.
 
 ## Decision
 
@@ -34,7 +34,7 @@ from contracts import validate_and_parse
 validated, reasons = validate_and_parse(name, raw)
 ```
 
-The gap-detector call site (`scripts/orchestrator_runner.py:run`) is the only caller that passes `inject`:
+The gap-detector call site (`scripts/orchestrator_runner.py`) is the only caller that passes `inject`:
 
 ```python
 verdict, reasons = dispatch_validated(

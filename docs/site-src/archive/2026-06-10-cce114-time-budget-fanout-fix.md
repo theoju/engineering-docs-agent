@@ -18,9 +18,9 @@ That guard covered admission only. Page authoring — one Claude dispatch per `(
 
 ## The fix
 
-`scripts/orchestrator_runner.py:run` adds the same `at-least-one-progress` deadline check to the authoring loop, keyed off batch index `i` instead of PR index: batch 0 always dispatches, batch 1+ checks `clock() > deadline` first and breaks with a `time_budget_exceeded: authored {i}/{len(per_target)} page batches` partial reason if it has tripped.
+`scripts/orchestrator_runner.py` adds the same `at-least-one-progress` deadline check to the authoring loop, keyed off batch index `i` instead of PR index: batch 0 always dispatches, batch 1+ checks `clock() > deadline` first and breaks with a `time_budget_exceeded: authored {i}/{len(per_target)} page batches` partial reason if it has tripped.
 
-The two advisory loops downstream of authoring — fact-checker (`scripts/orchestrator_runner.py:run`) and gap-detector (`scripts/orchestrator_runner.py:run` onward) — get a stricter posture: skip outright on the first post-deadline check, no at-least-one exception. Both loops record a `time_budget_exceeded: ...` partial reason and flip the run to `partial`, deliberately **not** `info_only`, even though the rest of what those loops do (fact-check warnings, gap flags) is otherwise advisory. A page that was cut mid-authoring, or authored but never fact-checked, must not slip through the CCE-101 auto-merge gate — that gate keys directly off `partial`.
+The two advisory loops downstream of authoring — fact-checker (`scripts/orchestrator_runner.py`) and gap-detector (`scripts/orchestrator_runner.py` onward) — get a stricter posture: skip outright on the first post-deadline check, no at-least-one exception. Both loops record a `time_budget_exceeded: ...` partial reason and flip the run to `partial`, deliberately **not** `info_only`, even though the rest of what those loops do (fact-check warnings, gap flags) is otherwise advisory. A page that was cut mid-authoring, or authored but never fact-checked, must not slip through the CCE-101 auto-merge gate — that gate keys directly off `partial`.
 
 `tests/orchestrator/test_time_budget_authoring.py` pins all three loop guards plus the `time_budget_seconds=0` (unlimited) escape hatch, using a fake monotonic clock (`_fake_clock`) that returns a scripted sequence of values so each test controls exactly which check trips.
 
@@ -30,9 +30,9 @@ Admission and authoring both guarantee at least one unit of progress per run eve
 
 ## References
 
-- `scripts/orchestrator_runner.py:run_site_generators` — deadline computed once, or `None` for the unlimited case.
-- `scripts/orchestrator_runner.py:run` and `scripts/orchestrator_runner.py:run` — the two at-least-one-progress guards (admission, authoring).
-- `scripts/orchestrator_runner.py:run` and `scripts/orchestrator_runner.py:run` — the two skip-outright guards (fact-checker, gap-detector).
+- `scripts/orchestrator_runner.py` — deadline computed once, or `None` for the unlimited case.
+- `scripts/orchestrator_runner.py` and `scripts/orchestrator_runner.py` — the two at-least-one-progress guards (admission, authoring).
+- `scripts/orchestrator_runner.py` and `scripts/orchestrator_runner.py` — the two skip-outright guards (fact-checker, gap-detector).
 - `tests/orchestrator/test_time_budget_authoring.py` — regression coverage for all four loop behaviors.
 - `CHANGELOG.md` — "CCE-109 time budget now bounds the authoring fan-out (CCE-114)" under Unreleased/Fixed.
 - CCE-109 (original soft-deadline design, admission-only) and CCE-101 (the merge gate that keys off `partial`).

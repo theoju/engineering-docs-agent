@@ -32,7 +32,7 @@ Plain `yaml.safe_load` passes all of these silently; `actionlint` rejects them.
 - **Every PR** targeting `main` (no `paths:` filter — actionlint is a required status check; omitting the filter ensures GitHub never sees the check as absent and blocks merge).
 - **Push to `main`** only when `.github/workflows/**` or `.github/actionlint.yml` changes (post-merge runs are scoped to avoid noise).
 
-The job downloads `actionlint` at a pinned version (`1.7.7`) via the official download script, which verifies a checksum. The `Run actionlint` step (`actionlint.yml:36`) runs with `-color` and exits non-zero on any finding, blocking merge.
+The job downloads `actionlint` at a pinned version (`1.7.7`) via the official download script, which verifies a checksum. The `Run actionlint` step (`.github/workflows/actionlint.yml`) runs with `-color` and exits non-zero on any finding, blocking merge.
 
 ## Running actionlint locally
 
@@ -56,4 +56,4 @@ Fix all reported errors before pushing. A clean local run means the CI gate pass
 
 ## Updating the pinned version
 
-When you bump the `actionlint` version, update both the version tag in the download URL and the version argument on the same line (`.github/workflows/actionlint.yml:31`). The download script verifies a checksum; the version argument pins which release is fetched.
+When you bump the `actionlint` version, update both the version tag in the download URL and the version argument on the same line (`.github/workflows/actionlint.yml`). The download script verifies a checksum; the version argument pins which release is fetched.

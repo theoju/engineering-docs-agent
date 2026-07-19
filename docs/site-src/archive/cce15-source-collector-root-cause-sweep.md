@@ -36,19 +36,19 @@ The `explanatory-output-style` Claude plugin, when enabled in the user-level `se
 
 `agents/schemas/source_collector.schema.json` gained `additionalProperties: false` at the top level and inside each PR item's object definition. Any phantom field — `commits`, `status`, `summary`, anything not in `properties` — now produces a `ValidationError` at the `validate_and_parse` layer. The orchestrator records `schema_invalid: source-collector: ...` in `partial_reasons` rather than silently accepting a broken run.
 
-`tests/schemas/test_source_collector_schema.py:57` pins the Mode 1 regression with `test_phantom_top_level_field_rejected` and `test_phantom_per_pr_item_field_rejected`.
+`tests/schemas/test_source_collector_schema.py:test_phantom_top_level_field_rejected` pins the Mode 1 regression with `test_phantom_top_level_field_rejected` and `test_phantom_per_pr_item_field_rejected`.
 
 ### `--setting-sources project,local`
 
-`dispatch_subagent` in `scripts/orchestrator_runner.py:388` now passes `--setting-sources project,local` to every `claude` subprocess. This tells the CLI to skip the user-level `settings.json` — the file where the `explanatory-output-style` plugin is registered. Project and local settings still load, but this repo has no `.claude/` directory so neither contributes plugin-enable state.
+`dispatch_subagent` in `scripts/orchestrator_runner.py:_order_prs_oldest_first` now passes `--setting-sources project,local` to every `claude` subprocess. This tells the CLI to skip the user-level `settings.json` — the file where the `explanatory-output-style` plugin is registered. Project and local settings still load, but this repo has no `.claude/` directory so neither contributes plugin-enable state.
 
 `--bare` was evaluated first but rejected: it disables OAuth/keychain authentication, breaking any host that relies on credential inheritance rather than `ANTHROPIC_API_KEY`. `--setting-sources project,local` closes the SessionStart-hook pathway while preserving authentication.
 
-`tests/orchestrator/test_dispatch_subagent.py:190` (`test_dispatch_passes_setting_sources_flag`) pins the flag, its value, and its position (must precede `-p`).
+`tests/orchestrator/test_dispatch_subagent.py:test_dispatch_passes_setting_sources_flag` (`test_dispatch_passes_setting_sources_flag`) pins the flag, its value, and its position (must precede `-p`).
 
 ### `_rescue_json_object` — defense in depth
 
-`scripts/orchestrator_runner.py:128` adds `_rescue_json_object(text)` as a fallback when `json.loads()` on the canonical text fails. The algorithm:
+`scripts/orchestrator_runner.py` adds `_rescue_json_object(text)` as a fallback when `json.loads()` on the canonical text fails. The algorithm:
 
 1. Find the first `{` in the text.
 2. Scan forward, tracking brace depth while honoring JSON string state (open quote, escaped-quote skip).
@@ -61,7 +61,7 @@ The rescue is defense in depth: `--setting-sources` closes the known injection p
 
 ## `out_reasons` plumbing
 
-`dispatch_subagent` accepts an optional `out_reasons: list[str] | None = None` parameter. When the rescue path fires, it appends `prose_contamination_rescued: <name>` to this list. `dispatch_validated` in `scripts/orchestrator_runner.py:506` passes its own collector down and merges the result into the reasons tuple it returns:
+`dispatch_subagent` accepts an optional `out_reasons: list[str] | None = None` parameter. When the rescue path fires, it appends `prose_contamination_rescued: <name>` to this list. `dispatch_validated` in `scripts/orchestrator_runner.py:_sha_in_window` passes its own collector down and merges the result into the reasons tuple it returns:
 
 ```python
 dispatch_reasons: list[str] = []
@@ -72,13 +72,13 @@ raw = dispatch_subagent(
 
 Callers at the orchestrator level iterate over the returned `reasons` list and call `add_partial(state, r)` for each entry. A sustained rescue rate becomes observable without any log scraping — it accumulates in `state.json` and surfaces in the run digest.
 
-The parameter defaults to `None` for backward compatibility: all existing `dispatch_subagent` call sites that omit `out_reasons` continue to work unchanged. `tests/orchestrator/test_dispatch_rescue.py:127` (`test_dispatch_subagent_out_reasons_optional_backward_compatible`) pins this contract.
+The parameter defaults to `None` for backward compatibility: all existing `dispatch_subagent` call sites that omit `out_reasons` continue to work unchanged. `tests/orchestrator/test_dispatch_rescue.py:test_dispatch_subagent_out_reasons_optional_backward_compatible` (`test_dispatch_subagent_out_reasons_optional_backward_compatible`) pins this contract.
 
 ## Test coverage map
 
 | Test file                                           | What it pins                                                           |
 | --------------------------------------------------- | ---------------------------------------------------------------------- |
 | `tests/schemas/test_source_collector_schema.py`     | Schema tightening: phantom top-level and per-item fields rejected      |
-| `tests/orchestrator/test_dispatch_subagent.py:190`  | `--setting-sources project,local` in argv, preceding `-p`              |
+| `tests/orchestrator/test_dispatch_subagent.py:test_dispatch_passes_setting_sources_flag`  | `--setting-sources project,local` in argv, preceding `-p`              |
 | `tests/orchestrator/test_dispatch_rescue.py`        | `_rescue_json_object` algorithm + `out_reasons` append                 |
-| `tests/orchestrator/test_dispatch_validated.py:105` | Rescue reason flows through `dispatch_validated` into returned reasons |
+| `tests/orchestrator/test_dispatch_validated.py:test_dispatch_validated_propagates_rescue_reason_to_partial_reasons` | Rescue reason flows through `dispatch_validated` into returned reasons |

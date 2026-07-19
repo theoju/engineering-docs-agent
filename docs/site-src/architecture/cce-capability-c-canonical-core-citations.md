@@ -35,7 +35,7 @@ The connector base class is defined in
 `backend/connectors/base.py:12` <!--pin:class BaseConnector-->
 ```
 
-The verifier in `scripts/verify_citations.py:91` (`verify_citations`) scans
+The verifier in `scripts/verify_citations.py:verify_citations` (`verify_citations`) scans
 every Markdown file under `docs_dir`, resolves each citation against the
 repo tree, and classifies it into one of four states:
 
@@ -62,7 +62,7 @@ python scripts/verify_citations.py \
 ```
 
 `--fix` rewrites relocated citations in place. It patches only the matching
-span using byte offsets from the regex match (`verify_citations.py:141`), so
+span using byte offsets from the regex match (`scripts/verify_citations.py:verify_citations`), so
 look-alike text elsewhere on the same page is not disturbed.
 
 `--strict` exits non-zero if any `gone` or `ambiguous` citations remain after
@@ -72,7 +72,7 @@ processing. Use this in CI to block merges on broken citations.
 
 - Tokens are matched as substrings, not whole-word anchors. A token like
   `def load_config` matches any line containing that substring.
-- Empty tokens are skipped silently (`verify_citations.py:37`). Pin every
+- Empty tokens are skipped silently (`scripts/verify_citations.py:_iter_citations`). Pin every
   citation you want verified.
 - If a token becomes ambiguous after a refactor, tighten it to a more specific
   substring — one that appears on exactly one line in the file.

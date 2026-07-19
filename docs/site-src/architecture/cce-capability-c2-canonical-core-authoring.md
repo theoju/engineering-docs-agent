@@ -25,7 +25,7 @@ The orchestrator determines which pages fall under C2 by calling `scripts/frontm
 
 ## Frontmatter contract
 
-Agent-authored pages require four fields, defined as `AGENT_AUTHORED_REQUIRED` in `scripts/frontmatter_contract.py:14`:
+Agent-authored pages require four fields, defined as `AGENT_AUTHORED_REQUIRED` in `scripts/frontmatter_contract.py:AGENT_AUTHORED_REQUIRED`:
 
 ```
 description    – one-line plain-text summary of the page

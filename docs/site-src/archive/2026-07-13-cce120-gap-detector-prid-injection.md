@@ -20,11 +20,11 @@ synthesized_into: []
 
 `agents/schemas/gap_detector.schema.json` marks `pr_id` as required. Nightly PR #173 (2026-07-12) went `partial` for exactly one reason: `schema_invalid: gap-detector: 'pr_id' is a required property`. That single reason was enough to block CCE-101 auto-merge, even though every other dispatch reason on that run was already `info_only`.
 
-The orchestrator already builds `pr_id` deterministically at `scripts/orchestrator_runner.py:1819` — `f"{repo['owner']}/{repo['name']}#{pr['number']}"` — and passes it into the gap-detector dispatch. Requiring the LLM subagent to reliably echo that value back was fragile: an omission or a mangled echo turned orchestrator-owned identity into a point of failure the model had no reason to own reliably.
+The orchestrator already builds `pr_id` deterministically at `scripts/orchestrator_runner.py:run` — `f"{repo['owner']}/{repo['name']}#{pr['number']}"` — and passes it into the gap-detector dispatch. Requiring the LLM subagent to reliably echo that value back was fragile: an omission or a mangled echo turned orchestrator-owned identity into a point of failure the model had no reason to own reliably.
 
 ## Decision
 
-`dispatch_validated` (`scripts/orchestrator_runner.py:732`) gained an optional keyword parameter, `inject: dict | None = None`. After `dispatch_subagent` returns and before `validate_and_parse` runs, the function merges `{**raw, **inject}` — guarded by `isinstance(raw, dict)` — so orchestrator-owned fields override whatever the agent returned:
+`dispatch_validated` (`scripts/orchestrator_runner.py:dispatch_validated`) gained an optional keyword parameter, `inject: dict | None = None`. After `dispatch_subagent` returns and before `validate_and_parse` runs, the function merges `{**raw, **inject}` — guarded by `isinstance(raw, dict)` — so orchestrator-owned fields override whatever the agent returned:
 
 ```python
 if inject and isinstance(raw, dict):
@@ -34,7 +34,7 @@ from contracts import validate_and_parse
 validated, reasons = validate_and_parse(name, raw)
 ```
 
-The gap-detector call site (`scripts/orchestrator_runner.py:1822`) is the only caller that passes `inject`:
+The gap-detector call site (`scripts/orchestrator_runner.py:run`) is the only caller that passes `inject`:
 
 ```python
 verdict, reasons = dispatch_validated(
@@ -59,7 +59,7 @@ The input payload still carries `"pr_id": pr_id` for agent context, but the sche
 
 Two other approaches were considered and rejected:
 
-- **Relax the schema and give `GapVerdict.pr_id` a default.** Conceptually cleaner (the field would truly leave agent-owned territory), but it touches four surfaces and forces a field reorder on the frozen `GapVerdict` dataclass (`scripts/contracts.py:51`) — `needs_spec` would have to precede any newly-defaulted field. Higher churn and risk for the same outcome.
+- **Relax the schema and give `GapVerdict.pr_id` a default.** Conceptually cleaner (the field would truly leave agent-owned territory), but it touches four surfaces and forces a field reorder on the frozen `GapVerdict` dataclass (`scripts/contracts.py`) — `needs_spec` would have to precede any newly-defaulted field. Higher churn and risk for the same outcome.
 - **Prompt-harden the agent to always emit `pr_id`.** Non-deterministic; it doesn't remove the underlying fragility, just makes the failure rarer.
 
 Injecting at the orchestrator level keeps the schema, the `GapVerdict` dataclass, and the `agents/gap-detector.md` prompt all unchanged, while making `pr_id` always present, always type-valid, and authoritative — it now overrides a wrong echo as well as a missing one.

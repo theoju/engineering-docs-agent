@@ -12,12 +12,12 @@ The setup skill probes the host repo root for a supported docs framework before 
 
 ## Detection logic
 
-`scripts/setup_discover.py:8` (`detect_framework`) checks for exactly two indicators:
+`scripts/setup_discover.py:detect_framework` (`detect_framework`) checks for exactly two indicators:
 
 - `mkdocs.yml` at the repo root → `"mkdocs"`
 - `docusaurus.config.js` or `docusaurus.config.ts` at the repo root → `"docusaurus"`
 
-If neither file exists, the function returns `None`. The preflight script (`scripts/preflight_host.py:113`) normalises that to the string `"none"` before writing it into the proposed config:
+If neither file exists, the function returns `None`. The preflight script (`scripts/preflight_host.py:proposed_config`) normalises that to the string `"none"` before writing it into the proposed config:
 
 ```python
 "framework": framework or "none",
@@ -40,7 +40,7 @@ The page-author agent now explicitly tests for the none case and skips those sec
 
 ## Preflight warning
 
-When setup discovers no framework, `scripts/preflight_host.py:193` appends a `framework_none` entry to the warnings list with `severity: "info"` (not a blocking error). You will see:
+When setup discovers no framework, `scripts/preflight_host.py:compute_warnings` appends a `framework_none` entry to the warnings list with `severity: "info"` (not a blocking error). You will see:
 
 ```
 Warnings

@@ -127,7 +127,7 @@ gap_detection:
 
 `docs.agent_editable_paths` defines where the agent may write. Any page proposed outside these globs is rejected at runtime.
 
-**Invariant:** every `lens_paths` entry must be covered by at least one `agent_editable_paths` glob. The config loader enforces this at boot via `_validate_lens_paths_are_editable` in `scripts/state_io.py:21`. A lens with no matching editable glob means the agent reads docs it can never update.
+**Invariant:** every `lens_paths` entry must be covered by at least one `agent_editable_paths` glob. The config loader enforces this at boot via `_validate_lens_paths_are_editable` in `scripts/state_io.py:StateError`. A lens with no matching editable glob means the agent reads docs it can never update.
 
 The editable glob may be narrower than the lens path. A lens at `docs/` paired with editable `docs/generated/**` is valid — the agent reads everything under `docs/` but only writes to the `generated/` sub-path.
 

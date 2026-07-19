@@ -1,18 +1,19 @@
 ---
-description: How the engineering-docs-agent links documentation pages to their source
+description:
+  How the engineering-docs-agent links documentation pages to their source
   files through inline citations, pin tokens, and source-drift detection.
 source_files:
-- backend/connectors/base.py
-- core/**
-- docs/site-src/core/**
-- docs/superpowers/**
-- scripts/audit_docs.py
-- scripts/verify_citations.py
-- scripts/verify_docs_diagrams.py
-- scripts/{verify_docs_diagrams,audit_docs,build_doc_source_map}.py
-- site-src/core/**
-- tests/orchestrator/test_source_map_stage.py
-last_reviewed: '2026-05-27'
+  - backend/connectors/base.py
+  - core/**
+  - docs/site-src/core/**
+  - docs/superpowers/**
+  - scripts/audit_docs.py
+  - scripts/verify_citations.py
+  - scripts/verify_docs_diagrams.py
+  - scripts/{verify_docs_diagrams,audit_docs,build_doc_source_map}.py
+  - site-src/core/**
+  - tests/orchestrator/test_source_map_stage.py
+last_reviewed: "2026-05-27"
 status: draft
 doc_kind: architecture
 ---
@@ -35,16 +36,16 @@ The connector base class is defined in
 `backend/connectors/base.py:12` <!--pin:class BaseConnector-->
 ```
 
-The verifier in `scripts/verify_citations.py:verify_citations` (`verify_citations`) scans
+The verifier in `scripts/verify_citations.py:verify_citations` scans
 every Markdown file under `docs_dir`, resolves each citation against the
 repo tree, and classifies it into one of four states:
 
-| Status | Meaning |
-|--------|---------|
-| `ok` | Token found at the declared line number. |
-| `relocated` | Token found, but at a different line. Auto-fixable with `--fix`. |
-| `ambiguous` | Token appears on multiple lines; human review required. |
-| `gone` | Token not found anywhere in the file, or the file itself is missing. |
+| Status      | Meaning                                                              |
+| ----------- | -------------------------------------------------------------------- |
+| `ok`        | Token found at the declared line number.                             |
+| `relocated` | Token found, but at a different line. Auto-fixable with `--fix`.     |
+| `ambiguous` | Token appears on multiple lines; human review required.              |
+| `gone`      | Token not found anywhere in the file, or the file itself is missing. |
 
 The verifier returns a **ledger** — a dict with counts and per-status detail
 lists — rather than raising. Callers decide whether to block or warn based on

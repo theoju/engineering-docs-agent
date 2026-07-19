@@ -40,7 +40,7 @@ Implementation: `scripts/orchestrator_runner.py:_last_processed_merge_sha`.
 
 The prior implementation returned text from the last assistant message. If that message contained only `tool_use` blocks and no `text` blocks, the function returned `""` — even when an earlier assistant turn held the correct answer.
 
-CCE-14 hardened `_extract_final_assistant_text` (`scripts/orchestrator_runner.py:_rescue_json_object`) to walk all assistant events and track the last one that has at least one `text` block. The function concatenates all text blocks from that turn, skipping any trailing purely-`tool_use` turns.
+CCE-14 hardened `_extract_final_assistant_text` (`scripts/orchestrator_runner.py:_extract_final_assistant_text`) to walk all assistant events and track the last one that has at least one `text` block. The function concatenates all text blocks from that turn, skipping any trailing purely-`tool_use` turns.
 
 Two distinct cases are handled:
 
@@ -65,7 +65,7 @@ The `--setting-sources` flag closes the SessionStart-hook contamination pathway.
 
 ## `_summarize_tool_use`
 
-`_summarize_tool_use` (`scripts/orchestrator_runner.py:_strip_code_fence`) produces the `tool_use` block written to `meta.json` in stream-json mode.
+`_summarize_tool_use` (`scripts/orchestrator_runner.py:_summarize_tool_use`) produces the `tool_use` block written to `meta.json` in stream-json mode.
 
 Two-pass algorithm:
 

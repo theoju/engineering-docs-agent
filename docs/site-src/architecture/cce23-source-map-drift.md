@@ -53,7 +53,7 @@ The function is read-only. It imports `_collect_page_patterns` and `_glob_to_reg
 
 ## Orchestrator integration
 
-`compute_source_drift` (`scripts/orchestrator_runner.py:dispatch_subagent`) runs after page authoring on every nightly pass:
+`compute_source_drift` (`scripts/orchestrator_runner.py:compute_source_drift`) runs after page authoring on every nightly pass:
 
 1. Calls `source_map.generate_source_map(...)` to (re)generate the artifact against the current repo state.
 2. Collects the union of changed files across all PRs in the batch.
@@ -61,9 +61,9 @@ The function is read-only. It imports `_collect_page_patterns` and `_glob_to_reg
 
 The stage is best-effort. Any exception is caught, recorded as an `info_only` partial reason (`source_map_failed: <exc>`), and the run continues. Results land in `state["current_run"]["source_drift"]` and appear in the What's New entry under "Pages to review (source drift)".
 
-`compute_citation_drift` (`scripts/orchestrator_runner.py:dispatch_subagent`) then calls `_changed_pages_from_map` to read the inverted `map` from `.doc-source-map.json` and returns the set of pages whose mapped sources appear in the batch's changed-files list. Citation verification runs only on that set rather than the full docs tree. When the map is absent or unreadable, `_changed_pages_from_map` returns `None` and citation verification falls back to a full scan.
+`compute_citation_drift` (`scripts/orchestrator_runner.py:compute_citation_drift`) then calls `_changed_pages_from_map` to read the inverted `map` from `.doc-source-map.json` and returns the set of pages whose mapped sources appear in the batch's changed-files list. Citation verification runs only on that set rather than the full docs tree. When the map is absent or unreadable, `_changed_pages_from_map` returns `None` and citation verification falls back to a full scan.
 
-`compute_core_drift` (`scripts/orchestrator_runner.py:dispatch_subagent`) is a flag-only step that intersects the M (source drift) and C1 (citation drift) results with the pages listed in `.doc-core-manifest.json`. It writes nothing and dispatches nothing — it only surfaces which canonical-core pages have drifted so a human re-reviews them, regardless of page status.
+`compute_core_drift` (`scripts/orchestrator_runner.py:compute_core_drift`) is a flag-only step that intersects the M (source drift) and C1 (citation drift) results with the pages listed in `.doc-core-manifest.json`. It writes nothing and dispatches nothing — it only surfaces which canonical-core pages have drifted so a human re-reviews them, regardless of page status.
 
 ## Opting a page in
 

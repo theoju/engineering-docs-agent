@@ -28,7 +28,7 @@ The subprocess always receives `CLAUDE_STOP_VERIFY=0` in its environment (CCE-10
 
 ## Validated dispatch
 
-`dispatch_validated` composes `dispatch_subagent` with `contracts.validate_and_parse` (`scripts/orchestrator_runner.py:_sha_in_window`). Prefer `dispatch_validated` over raw `dispatch_subagent` at every call site; it returns `(dict | None, list[str])` — the parsed output and any partial reasons to forward to `add_partial`.
+`dispatch_validated` composes `dispatch_subagent` with `contracts.validate_and_parse` (`scripts/orchestrator_runner.py:dispatch_validated`). Prefer `dispatch_validated` over raw `dispatch_subagent` at every call site; it returns `(dict | None, list[str])` — the parsed output and any partial reasons to forward to `add_partial`.
 
 | Return | Meaning |
 |---|---|
@@ -55,13 +55,13 @@ Set `DOCS_AGENT_DEBUG_DIR` to a directory path before running the orchestrator. 
 | `<ts>-<agent>.stream.jsonl` | Raw NDJSON event stream |
 | `<ts>-<agent>.meta.json` | Return code, argv, and tool-use summary |
 
-In debug mode the CLI runs with `--output-format stream-json --verbose`. `_extract_final_assistant_text` (`scripts/orchestrator_runner.py:_rescue_json_object`) extracts the final assistant turn's concatenated text content, skipping turns that are tool-use only (CCE-14). `_summarize_tool_use` (`scripts/orchestrator_runner.py:_strip_code_fence`) produces the `tool_use` block in `meta.json`, capped at 50 entries.
+In debug mode the CLI runs with `--output-format stream-json --verbose`. `_extract_final_assistant_text` (`scripts/orchestrator_runner.py:_extract_final_assistant_text`) extracts the final assistant turn's concatenated text content, skipping turns that are tool-use only (CCE-14). `_summarize_tool_use` (`scripts/orchestrator_runner.py:_summarize_tool_use`) produces the `tool_use` block in `meta.json`, capped at 50 entries.
 
 Leave `DOCS_AGENT_DEBUG_DIR` unset in steady-state production. Stream-json mode adds per-invocation latency that scales with tool-call count; the CCE-12 baseline measured 3–6 s for zero-tool-call runs versus 74 s for a five-call outlier.
 
 ## Orchestrator run loop
 
-The `run` function (`scripts/orchestrator_runner.py:dispatch_verified`) executes the nightly pipeline in this order:
+The `run` function (`scripts/orchestrator_runner.py:run`) executes the nightly pipeline in this order:
 
 1. Load config (`load_config_validated`) and state (`load_state_validated`); rotate `current_run` — partial reasons from the prior run are dropped rather than carried forward (CCE-5).
 2. Dispatch `source-collector` to fetch PRs and Jira issues.
@@ -80,13 +80,13 @@ A partial failure at any stage sets `state['current_run']['partial'] = True` and
 
 ## Bootstrap entry (C2 core pages)
 
-`run_bootstrap_core` (`scripts/orchestrator_runner.py:_compose_whats_new`) is a separate entry point invoked with `--bootstrap-core`. It reads `<docs_dir>/.doc-core-manifest.json`, authors each declared page that has no file yet via `page-author`, and prints a JSON ledger. It is idempotent: existing files are skipped without touching them.
+`run_bootstrap_core` (`scripts/orchestrator_runner.py:run_bootstrap_core`) is a separate entry point invoked with `--bootstrap-core`. It reads `<docs_dir>/.doc-core-manifest.json`, authors each declared page that has no file yet via `page-author`, and prints a JSON ledger. It is idempotent: existing files are skipped without touching them.
 
-The dry-run path calls `_synthesize_core_page` (`scripts/orchestrator_runner.py:_clip_prs_to_window`) to write a frontmatter + skeleton body without invoking Claude, so tests exercise the full manifest-walk without API cost.
+The dry-run path calls `_synthesize_core_page` (`scripts/orchestrator_runner.py:_synthesize_core_page`) to write a frontmatter + skeleton body without invoking Claude, so tests exercise the full manifest-walk without API cost.
 
 ## Gotchas & layering rules
 
-The `_page_target_is_editable` check (`scripts/orchestrator_runner.py:_clip_prs_to_window`) runs twice — once in the nightly authoring loop and once in `run_bootstrap_core`. Both checks are required; removing either opens a path for the agent to write outside `agent_editable_paths`.
+The `_page_target_is_editable` check (`scripts/orchestrator_runner.py:_page_target_is_editable`) runs twice — once in the nightly authoring loop and once in `run_bootstrap_core`. Both checks are required; removing either opens a path for the agent to write outside `agent_editable_paths`.
 
 `load_state_validated` and `load_config_validated` raise typed exceptions (`StateError`, `ConfigError`). Catch them at the top of `run` and `run_bootstrap_core`; do not let them propagate to the CLI entry point or the exit code becomes unpredictable.
 

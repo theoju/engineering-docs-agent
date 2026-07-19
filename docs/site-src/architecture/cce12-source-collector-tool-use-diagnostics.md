@@ -24,7 +24,7 @@ export DOCS_AGENT_DEBUG_DIR=/tmp/cce-debug
 python3 scripts/orchestrator_runner.py --repo-root . --no-pr
 ```
 
-When `debug_dir` is truthy, `dispatch_subagent` switches from `--print` to `--output-format stream-json --verbose` (`scripts/orchestrator_runner.py:_last_processed_merge_sha`). The raw NDJSON event stream is consumed in-process, not piped through a file.
+When `debug_dir` is truthy, `dispatch_subagent` switches from `--print` to `--output-format stream-json --verbose` (`scripts/orchestrator_runner.py:dispatch_subagent`). The raw NDJSON event stream is consumed in-process, not piped through a file.
 
 ## Forensics artifacts
 
@@ -42,13 +42,13 @@ Files are named `<UTC-timestamp>-<agent-name>.<suffix>` so multiple runs don't c
 
 ## Extracting the canonical JSON
 
-The final assistant turn may contain interleaved `tool_use` and `text` blocks. `_extract_final_assistant_text` (`scripts/orchestrator_runner.py:_rescue_json_object`) concatenates only the `text` blocks from the **last** assistant message that contains at least one text block.
+The final assistant turn may contain interleaved `tool_use` and `text` blocks. `_extract_final_assistant_text` (`scripts/orchestrator_runner.py:_extract_final_assistant_text`) concatenates only the `text` blocks from the **last** assistant message that contains at least one text block.
 
 This is a forward-compatibility guard added in CCE-14: if the model ends on a purely tool-use turn (no text), the function walks backward to the preceding assistant turn rather than returning an empty string. Tests in `tests/orchestrator/test_dispatch_subagent_stream_json.py:test_extract_final_assistant_text_concatenates_multi_text_blocks` and `:63` cover both the multi-block concatenation and the last-assistant-only selection.
 
 ## Tool-use summary
 
-`_summarize_tool_use` (`scripts/orchestrator_runner.py:_strip_code_fence`) makes two passes over the event list:
+`_summarize_tool_use` (`scripts/orchestrator_runner.py:_summarize_tool_use`) makes two passes over the event list:
 
 1. Collect `tool_result` blocks from `user` events, keyed by `tool_use_id`, to capture `is_error` and `result_chars`.
 2. Collect `tool_use` blocks from `assistant` events and join with the outcomes from pass 1.

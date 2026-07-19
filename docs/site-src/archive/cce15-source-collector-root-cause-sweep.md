@@ -40,7 +40,7 @@ The `explanatory-output-style` Claude plugin, when enabled in the user-level `se
 
 ### `--setting-sources project,local`
 
-`dispatch_subagent` in `scripts/orchestrator_runner.py:_order_prs_oldest_first` now passes `--setting-sources project,local` to every `claude` subprocess. This tells the CLI to skip the user-level `settings.json` — the file where the `explanatory-output-style` plugin is registered. Project and local settings still load, but this repo has no `.claude/` directory so neither contributes plugin-enable state.
+`dispatch_subagent` in `scripts/orchestrator_runner.py:dispatch_subagent` now passes `--setting-sources project,local` to every `claude` subprocess. This tells the CLI to skip the user-level `settings.json` — the file where the `explanatory-output-style` plugin is registered. Project and local settings still load, but this repo has no `.claude/` directory so neither contributes plugin-enable state.
 
 `--bare` was evaluated first but rejected: it disables OAuth/keychain authentication, breaking any host that relies on credential inheritance rather than `ANTHROPIC_API_KEY`. `--setting-sources project,local` closes the SessionStart-hook pathway while preserving authentication.
 
@@ -61,7 +61,7 @@ The rescue is defense in depth: `--setting-sources` closes the known injection p
 
 ## `out_reasons` plumbing
 
-`dispatch_subagent` accepts an optional `out_reasons: list[str] | None = None` parameter. When the rescue path fires, it appends `prose_contamination_rescued: <name>` to this list. `dispatch_validated` in `scripts/orchestrator_runner.py:_sha_in_window` passes its own collector down and merges the result into the reasons tuple it returns:
+`dispatch_subagent` accepts an optional `out_reasons: list[str] | None = None` parameter. When the rescue path fires, it appends `prose_contamination_rescued: <name>` to this list. `dispatch_validated` in `scripts/orchestrator_runner.py:dispatch_validated` passes its own collector down and merges the result into the reasons tuple it returns:
 
 ```python
 dispatch_reasons: list[str] = []

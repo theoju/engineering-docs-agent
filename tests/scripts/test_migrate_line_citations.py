@@ -1,12 +1,13 @@
 from __future__ import annotations
-import subprocess, sys
+import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
-sys.path.insert(0, str(ROOT / "scripts" / "lint"))
-import migrate_line_citations as mlc  # noqa: E402
-import citation_exists  # noqa: E402
+# Import via the `scripts` namespace package (repo root is on sys.path through
+# conftest). Do NOT `sys.path.insert` the scripts dir and import bare modules:
+# that mutates process-wide sys.path and breaks later `from scripts.lint...`
+# namespace resolution in other suites (test_lint_runner). See CCE-122.
+from scripts import migrate_line_citations as mlc
+from scripts.lint import citation_exists
 
 
 def _git(repo: Path, *args: str) -> None:

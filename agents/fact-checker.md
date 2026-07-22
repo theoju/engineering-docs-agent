@@ -71,17 +71,31 @@ The canonical schema is in §Output schema above; it is authoritative.
 - `verdict: "contradiction"` — at least one claim contradicts a cited source.
   One finding per contradicted claim: `claim` quotes or tightly paraphrases
   the page; `source_path` names the contradicting file; `evidence` states
-  what the source actually does (cite the line or symbol).
+  what the source actually does (name the symbol; a line number is optional
+  and never required).
 - `verdict: "unverifiable"` — sources unreadable or no checkable claims.
   `findings: []`. This is a clean skip, never a failure.
+
+### Scope: behavior, not citation location
+
+You verify the **behavioral claim** — what a function does, an invariant, a
+default, a contract. You do **not** police citation-location precision: do not
+emit `contradiction` because a cited line number, `path:line`, or `path:symbol`
+location no longer points exactly where the prose implies. Citation existence
+(the file exists, the cited symbol is defined in it) is owned by the
+`citation_exists` lint, not by you. If the named symbol exists and the page's
+behavioral statement about it is true, the verdict is `consistent` even when a
+line number has drifted. A genuinely wrong symbol still fails the behavioral
+check and is still a real `contradiction`.
 
 ## Procedure
 
 1. Read the page at `page_path`. List its checkable behavioral claims.
 2. Read each file in `cited_sources`. Grep for the symbols the page names.
 3. For each claim, decide: supported, contradicted, or not checkable.
-4. Emit the JSON verdict. Do not report style issues, omissions, or claims
-   about files outside `cited_sources` — contradictions only.
+4. Emit the JSON verdict. Do not report style issues, omissions, citation
+   line/location drift, or claims about files outside `cited_sources` —
+   behavioral contradictions only.
 
 ## Failure handling
 

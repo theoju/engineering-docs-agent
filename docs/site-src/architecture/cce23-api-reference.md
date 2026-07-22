@@ -38,19 +38,19 @@ site:
       openapi: openapi.json
 ```
 
-`scripts/site_structure.py:80` reads this config block and produces a `ScaffoldFile` list. `apply_scaffold` writes the files; it never overwrites existing authored content.
+`scripts/site_structure.py` reads this config block and produces a `ScaffoldFile` list. `apply_scaffold` writes the files; it never overwrites existing authored content.
 
 ## Three extractors
 
 ### Python modules — `python-mkdocstrings`
 
-`site_structure.py:165` writes a `gen_ref_pages.py` at the docs root. At `mkdocs build` time, `mkdocs-gen-files` executes that script, which walks `SCAN_DIR` for `*.py` files (skipping `_`-prefixed and test modules), emits one page per module under `api/reference/`, and writes a `SUMMARY.md` for literate-nav.
+`scripts/site_structure.py` writes a `gen_ref_pages.py` at the docs root. At `mkdocs build` time, `mkdocs-gen-files` executes that script, which walks `SCAN_DIR` for `*.py` files (skipping `_`-prefixed and test modules), emits one page per module under `api/reference/`, and writes a `SUMMARY.md` for literate-nav.
 
 The generated pages land at `<docs_dir>/<api_path>/reference/<ident>.md` — for example, `pkg.calc` maps to `api/reference/pkg/calc.md`.
 
 ### JSON schemas — `json-schema`
 
-`scripts/contracts_doc.py:91` (`generate_contracts`) reads every `*.json` under the section's `sources` directories, renders a Markdown property table per schema, and writes pages to `<docs_dir>/<api_path>/contracts/`. An `index.md` links all contract pages.
+`scripts/contracts_doc.py:generate_contracts` (`generate_contracts`) reads every `*.json` under the section's `sources` directories, renders a Markdown property table per schema, and writes pages to `<docs_dir>/<api_path>/contracts/`. An `index.md` links all contract pages.
 
 Duplicate stems across sources are resolved by first-source-wins. Missing or malformed source directories are skipped with a `stderr` warning — the build continues and `generate_contracts` returns a `skipped` list so you can inspect what was dropped.
 
@@ -64,7 +64,7 @@ When `openapi` is listed in `extractors` and the section config includes an `ope
 
 ## Config validation
 
-`scripts/state_io.py:21` (`_validate_lens_paths_are_editable`) enforces the invariant that every lens in `docs.lens_paths` is covered by at least one `docs.agent_editable_paths` glob. The check runs at config load time; a miscovered lens raises `ConfigError` immediately rather than silently producing writes the agent can't make.
+`scripts/state_io.py` (`_validate_lens_paths_are_editable`) enforces the invariant that every lens in `docs.lens_paths` is covered by at least one `docs.agent_editable_paths` glob. The check runs at config load time; a miscovered lens raises `ConfigError` immediately rather than silently producing writes the agent can't make.
 
 ## Build smoke test
 

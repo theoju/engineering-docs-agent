@@ -32,10 +32,16 @@ SEVERITY = "block"
 
 _INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 _TEST_ID_RE = re.compile(r"^test_[a-z0-9_]+$")
-# dir/file.ext with optional :line or :start-end suffix; leading / allowed
-# (absolute paths are relativized or skipped at verification time).
-_REPO_PATH_RE = re.compile(r"^[\w.\-/]+/[\w.\-]+\.\w{1,8}(?::\d+(?:-\d+)?)?$")
+# dir/file.ext with an optional :line, :start-end, or :symbol suffix.
+_REPO_PATH_RE = re.compile(
+    r"^[\w.\-/]+/[\w.\-]+\.\w{1,8}(?::(?:\d+(?:-\d+)?|[A-Za-z_][\w.]*))?$"
+)
+# strips either a :line/:start-end or a :symbol suffix to the bare path
+_SUFFIX_RE = re.compile(r":(?:\d+(?:-\d+)?|[A-Za-z_][\w.]*)$")
 _LINE_SUFFIX_RE = re.compile(r":\d+(?:-\d+)?$")
+# advisory detector: any `path.ext:digits` span, slash optional (bare filenames
+# like `orchestrator_runner.py:128` are the worst offenders — unlinted AND drifting)
+_LINE_PIN_RE = re.compile(r"^[\w.\-/]+\.\w{1,8}:\d+(?:-\d+)?$")
 _PLACEHOLDER_MARKERS = ("<", ">", "*", "{", "}", "YYYY", "...")
 
 
@@ -81,10 +87,47 @@ def extract_citations(text: str) -> dict[str, list[str]]:
             if token not in tests:
                 tests.append(token)
         elif _REPO_PATH_RE.match(token):
-            bare = _LINE_SUFFIX_RE.sub("", token)
+            bare = _SUFFIX_RE.sub("", token)
             if bare not in paths:
                 paths.append(bare)
     return {"paths": paths, "tests": tests}
+
+
+def extract_symbol_citations(text: str) -> list[tuple[str, str]]:
+    """(bare_path, leaf_symbol) for every `path:symbol` citation in prose.
+
+    leaf = last dotted component (`Cls.method` -> `method`). Line-number and
+    bare-path citations yield nothing here. Used by check_path for the
+    deterministic symbol-existence guard."""
+    out: list[tuple[str, str]] = []
+    for token in _INLINE_CODE_RE.findall(strip_fenced_blocks(text)):
+        token = token.strip()
+        if not token or _is_placeholder(token) or not _REPO_PATH_RE.match(token):
+            continue
+        m = _SUFFIX_RE.search(token)
+        if not m or _LINE_SUFFIX_RE.search(token):  # no suffix, or a :line suffix
+            continue
+        bare = _SUFFIX_RE.sub("", token)
+        leaf = m.group(0)[1:].split(".")[-1]  # drop leading ':', take last component
+        pair = (bare, leaf)
+        if pair not in out:
+            out.append(pair)
+    return out
+
+
+def line_pinned_citations(text: str) -> list[str]:
+    """Inline `path:line` spans still using the fragile digit suffix (advisory).
+
+    Broader than _REPO_PATH_RE on purpose: catches bare-filename `foo.py:12`
+    too. Single source of the `:line` grammar for the citation_line_free rule."""
+    out: list[str] = []
+    for token in _INLINE_CODE_RE.findall(strip_fenced_blocks(text)):
+        token = token.strip()
+        if _is_placeholder(token):
+            continue
+        if _LINE_PIN_RE.match(token) and token not in out:
+            out.append(token)
+    return out
 
 
 def repo_root_for(config_path: Path) -> Path | None:
@@ -132,6 +175,16 @@ def _relativize(path_str: str, repo_root: Path) -> str | None:
         return None
 
 
+def _symbol_defined(source: str, leaf: str) -> bool:
+    """True if `leaf` is defined in the file source: a def/class (any indent,
+    so methods count) or a module-level (column-0) assignment/annotation."""
+    name = re.escape(leaf)
+    pattern = re.compile(
+        rf"(?m)^\s*(?:async\s+)?(?:def|class)\s+{name}\b|^{name}\s*[:=]"
+    )
+    return bool(pattern.search(source))
+
+
 def check_path(path: Path, repo_root: Path | None, files: set[str]) -> tuple[bool, str]:
     if repo_root is None:
         return True, "no git repo detected; citation check skipped"
@@ -155,6 +208,19 @@ def check_path(path: Path, repo_root: Path | None, files: set[str]) -> tuple[boo
     for name in cites["tests"]:
         if not cited_test_exists(repo_root, name):
             problems.append(f"cites nonexistent test '{name}'")
+    for bare, leaf in extract_symbol_citations(text):
+        rel = _relativize(bare, repo_root)
+        if rel is None:
+            continue
+        target = repo_root / rel
+        if not target.exists():
+            continue  # nonexistent path already reported by the paths loop
+        try:
+            source = target.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue  # unreadable cited file: do not false-block
+        if not _symbol_defined(source, leaf):
+            problems.append(f"cites nonexistent symbol '{leaf}' in '{bare}'")
     if problems:
         return False, "; ".join(problems)
     return True, "ok"

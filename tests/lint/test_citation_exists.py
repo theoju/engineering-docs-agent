@@ -227,3 +227,101 @@ def test_resolve_cited_sources_returns_existing_relative_paths(tmp_path):
     assert citation_exists.resolve_cited_sources(text, repo) == [
         "scripts/real_module.py"
     ]
+
+
+def test_symbol_suffix_stripped_to_bare_path():
+    # A path:symbol citation resolves to the bare path in ["paths"] (grounding
+    # must still receive a clean file path — the shared-helper contract).
+    assert citation_exists.extract_citations("`scripts/foo.py:run`")["paths"] == [
+        "scripts/foo.py"
+    ]
+    assert citation_exists.extract_citations("`scripts/foo.py:Cls.method`")[
+        "paths"
+    ] == ["scripts/foo.py"]
+
+
+def test_extract_symbol_citations_returns_path_and_leaf():
+    text = "See `scripts/foo.py:run` and `pkg/bar.py:Cls.method` and `scripts/baz.py`."
+    assert citation_exists.extract_symbol_citations(text) == [
+        ("scripts/foo.py", "run"),
+        ("pkg/bar.py", "method"),  # leaf = last dotted component
+    ]
+
+
+def test_line_pinned_citations_flags_digit_suffix_including_bare_filename():
+    text = (
+        "prose `scripts/foo.py:12` and `orchestrator_runner.py:128` and "
+        "`scripts/foo.py:10-20` but not `scripts/foo.py:run` or `scripts/foo.py`"
+    )
+    assert citation_exists.line_pinned_citations(text) == [
+        "scripts/foo.py:12",
+        "orchestrator_runner.py:128",
+        "scripts/foo.py:10-20",
+    ]
+
+
+def test_line_pinned_citations_ignores_fenced_blocks():
+    text = "intro\n```\n`scripts/foo.py:12`\n```\nafter `scripts/bar.py:7`\n"
+    assert citation_exists.line_pinned_citations(text) == ["scripts/bar.py:7"]
+
+
+def test_symbol_citation_present_passes(tmp_path):
+    repo, cfg = _init_host(tmp_path)
+    page = repo / "page.md"
+    page.write_text("The entry point is `scripts/real_module.py:real_fn`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 0, out
+    assert out["results"][0]["ok"] is True
+
+
+def test_confabulated_symbol_blocks(tmp_path):
+    repo, cfg = _init_host(tmp_path)
+    page = repo / "page.md"
+    page.write_text("See `scripts/real_module.py:ghost_fn` for the logic.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 1
+    assert (
+        "cites nonexistent symbol 'ghost_fn' in 'scripts/real_module.py'"
+        in (out["results"][0]["message"])
+    )
+
+
+def test_method_symbol_resolves_via_leaf(tmp_path):
+    repo, cfg = _init_host(tmp_path)
+    (repo / "scripts" / "svc.py").write_text(
+        "class Service:\n    def handle(self):\n        return 1\n"
+    )
+    page = repo / "page.md"
+    page.write_text("`scripts/svc.py:Service.handle` does the work.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 0, out
+
+
+def test_module_constant_symbol_resolves(tmp_path):
+    repo, cfg = _init_host(tmp_path)
+    (repo / "scripts" / "cfg.py").write_text("DEFAULT_BUDGET = 2700\n")
+    page = repo / "page.md"
+    page.write_text("The default is `scripts/cfg.py:DEFAULT_BUDGET`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 0, out
+
+
+def test_symbol_on_missing_file_reports_path_not_symbol(tmp_path):
+    # A :symbol cite to a nonexistent file reports the path problem (from the
+    # paths loop); the symbol loop must not crash or double-report.
+    repo, cfg = _init_host(tmp_path)
+    page = repo / "page.md"
+    page.write_text("See `scripts/ghost.py:whatever`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 1
+    msg = out["results"][0]["message"]
+    assert "cites nonexistent path 'scripts/ghost.py'" in msg
+    assert "nonexistent symbol" not in msg
+
+
+def test_resolve_cited_sources_handles_symbol_suffix(tmp_path):
+    repo, _ = _init_host(tmp_path)
+    text = "Cites `scripts/real_module.py:real_fn` and `scripts/ghost.py:x`."
+    assert citation_exists.resolve_cited_sources(text, repo) == [
+        "scripts/real_module.py"
+    ]

@@ -34,13 +34,13 @@ The `tool_use` block in `meta.json` includes total call count, per-tool breakdow
 
 Per-run latency in stream-json mode is dominated by the agent's tool-call decisions, not NDJSON parse overhead. CCE-12 measured 3–6 s for zero-tool-call runs vs. 74 s for a run that made five tool calls. Leave `DOCS_AGENT_DEBUG_DIR` unset in steady-state production.
 
-Implementation: `scripts/orchestrator_runner.py:405-464`.
+Implementation: `scripts/orchestrator_runner.py`.
 
 ## `_extract_final_assistant_text` hardening
 
 The prior implementation returned text from the last assistant message. If that message contained only `tool_use` blocks and no `text` blocks, the function returned `""` — even when an earlier assistant turn held the correct answer.
 
-CCE-14 hardened `_extract_final_assistant_text` (`scripts/orchestrator_runner.py:175-205`) to walk all assistant events and track the last one that has at least one `text` block. The function concatenates all text blocks from that turn, skipping any trailing purely-`tool_use` turns.
+CCE-14 hardened `_extract_final_assistant_text` (`scripts/orchestrator_runner.py:_extract_final_assistant_text`) to walk all assistant events and track the last one that has at least one `text` block. The function concatenates all text blocks from that turn, skipping any trailing purely-`tool_use` turns.
 
 Two distinct cases are handled:
 
@@ -49,7 +49,7 @@ Two distinct cases are handled:
 
 Concatenation handles turns where the model interleaves `tool_use` and `text` blocks within a single assistant message; only `text`-typed blocks contribute to the result.
 
-Tests covering these cases: `test_extract_final_assistant_text_skips_pure_tool_use_final_turn` and `test_extract_final_assistant_text_all_tool_only_returns_empty` in `tests/orchestrator/test_dispatch_subagent_stream_json.py:303-381`.
+Tests covering these cases: `test_extract_final_assistant_text_skips_pure_tool_use_final_turn` and `test_extract_final_assistant_text_all_tool_only_returns_empty` in `tests/orchestrator/test_dispatch_subagent_stream_json.py:test_extract_final_assistant_text_skips_pure_tool_use_final_turn`.
 
 ## Plugin contamination (CCE-14 Run 4 → CCE-15)
 
@@ -57,15 +57,15 @@ CCE-14 Run 4 surfaced a second failure mode: the user-level `explanatory-output-
 
 CCE-15 added two mitigations, both in `scripts/orchestrator_runner.py`.
 
-**`--setting-sources project,local`** (`scripts/orchestrator_runner.py:393-398`): every `claude` subprocess receives this flag, which skips the user-level `settings.json` where the plugin is enabled. OAuth and keychain authentication are preserved — unlike `--bare`, this flag does not strip credentials.
+**`--setting-sources project,local`** (`scripts/orchestrator_runner.py`): every `claude` subprocess receives this flag, which skips the user-level `settings.json` where the plugin is enabled. OAuth and keychain authentication are preserved — unlike `--bare`, this flag does not strip credentials.
 
-**`_rescue_json_object`** (`scripts/orchestrator_runner.py:128-172`): a prose-tolerant rescue path invoked when strict `json.loads()` fails. The function locates the first `{`, scans forward tracking brace depth while honoring JSON string state (escaped characters, quoted strings), and attempts `json.loads()` on the balanced slice. On success it records `prose_contamination_rescued: <agent>` in `partial_reasons` so the event appears in state and in Slack/email notifications.
+**`_rescue_json_object`** (`scripts/orchestrator_runner.py`): a prose-tolerant rescue path invoked when strict `json.loads()` fails. The function locates the first `{`, scans forward tracking brace depth while honoring JSON string state (escaped characters, quoted strings), and attempts `json.loads()` on the balanced slice. On success it records `prose_contamination_rescued: <agent>` in `partial_reasons` so the event appears in state and in Slack/email notifications.
 
 The `--setting-sources` flag closes the SessionStart-hook contamination pathway. `_rescue_json_object` handles other contamination patterns that may emerge.
 
 ## `_summarize_tool_use`
 
-`_summarize_tool_use` (`scripts/orchestrator_runner.py:208-270`) produces the `tool_use` block written to `meta.json` in stream-json mode.
+`_summarize_tool_use` (`scripts/orchestrator_runner.py:_summarize_tool_use`) produces the `tool_use` block written to `meta.json` in stream-json mode.
 
 Two-pass algorithm:
 

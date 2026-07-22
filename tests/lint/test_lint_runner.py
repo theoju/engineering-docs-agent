@@ -156,3 +156,28 @@ def test_lint_runner_empty_output_reports_block(tmp_path, monkeypatch):
     )
     assert out["severity"] == "block"
     assert any("empty output" in r["message"] for r in out["results"])
+
+
+def test_citation_line_free_registered_in_tier1(tmp_path):
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "lint"))
+    import lint_runner
+
+    assert "citation_line_free" in lint_runner.TIER1_DEFAULT
+
+
+def test_line_pinned_page_does_not_fail_aggregate_run(tmp_path):
+    # A page whose only issue is a :line citation must NOT fail the aggregate
+    # lint run — the advisory rule is warn, so the runner stays green.
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "lint"))
+    import lint_runner
+
+    repo = tmp_path / "host"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "scripts" / "m.py").write_text("def run():\n    return 1\n")
+    cfg = repo / "config.yml"
+    cfg.write_text("lint: { tier1: default }\n")
+    page = repo / "p.md"
+    page.write_text("# T\n\nThe `scripts/m.py:1` entry point runs nightly.\n")
+    out = lint_runner.run_rule("citation_line_free", cfg, [page])
+    assert out["severity"] == "warn"
+    assert any(not r["ok"] for r in out["results"])  # finding present

@@ -49,7 +49,7 @@ site:
 
 `sources` is a list of repo-relative directory paths. Each becomes one index page named after the directory's basename — e.g., `docs/superpowers/specs` → `decisions/specs.md`.
 
-`repo_url_base` is optional. When present, every entry in the index links to its source file at that base URL. When absent, the generator derives the URL from `git remote get-url origin` plus the current branch (`detect_repo` in `scripts/orchestrator_runner.py:28`). If detection fails (unknown remote, detached HEAD), entries render as plain text with no link.
+`repo_url_base` is optional. When present, every entry in the index links to its source file at that base URL. When absent, the generator derives the URL from `git remote get-url origin` plus the current branch (`detect_repo` in `scripts/orchestrator_runner.py`). If detection fails (unknown remote, detached HEAD), entries render as plain text with no link.
 
 ## Entry requirements
 
@@ -74,7 +74,7 @@ The generator never aborts mid-run. Each source is processed independently:
 
 ## Legacy lens-based path
 
-Before CCE-23, the orchestrator called `regenerate(archive_root)` for any `lens_paths` entry flagged `archive_index: true`. That function still lives in `scripts/archive_indexes.py:161` and generates per-subdirectory `index.md` files with a plain bullet list.
+Before CCE-23, the orchestrator called `regenerate(archive_root)` for any `lens_paths` entry flagged `archive_index: true`. That function still lives in `scripts/archive_indexes.py` and generates per-subdirectory `index.md` files with a plain bullet list.
 
 The legacy path is retained until the orchestrator-integration step folds `lens_paths` entries into `site:` sections. New setups should use the `archive-index` generator instead.
 

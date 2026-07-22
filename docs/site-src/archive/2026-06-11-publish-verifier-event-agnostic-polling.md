@@ -18,7 +18,7 @@ Before this fix, step 1 of `agents/publish-verifier.md` filtered candidate runs 
 
 ## Fix
 
-Run selection is now driven purely by timing, not trigger identity: `gh run list --workflow <build_workflow> --json databaseId,event,status,conclusion,createdAt`, polled every 30s, picking the newest run with `createdAt` at or after the merge time. The verifier waits for that run's `status` to reach `completed`, then maps `conclusion=success` to proceeding with the URL checks in steps 2–4, and any other conclusion to `build_status: "failure"`. The event/branch fields are still present in the polled JSON but no longer used as a selection filter — see `agents/publish-verifier.md:61`.
+Run selection is now driven purely by timing, not trigger identity: `gh run list --workflow <build_workflow> --json databaseId,event,status,conclusion,createdAt`, polled every 30s, picking the newest run with `createdAt` at or after the merge time. The verifier waits for that run's `status` to reach `completed`, then maps `conclusion=success` to proceeding with the URL checks in steps 2–4, and any other conclusion to `build_status: "failure"`. The event/branch fields are still present in the polled JSON but no longer used as a selection filter — see `agents/publish-verifier.md`.
 
 This makes the run-selection criterion agnostic to whether a host redeploys on `push`, `pull_request: closed`, or `workflow_dispatch`. No config change is required on hosts already publishing correctly; the fix only removes false-red reports on hosts whose trigger model differed from push-to-main.
 

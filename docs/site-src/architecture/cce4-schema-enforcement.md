@@ -39,7 +39,7 @@ Each agent's `.md` file in `agents/` also carries an `## Output schema (canonica
 
 ## `validate_and_parse` — the type boundary
 
-`scripts/contracts.py:89` is the central validation entry point.
+`scripts/contracts.py` is the central validation entry point.
 
 ```
 validate_and_parse(name: str, raw: dict) → tuple[dataclass | None, list[str]]
@@ -49,13 +49,13 @@ It does three things in sequence:
 
 1. Looks up `agents/schemas/<name>.schema.json`. Returns `(None, ["schema_missing: <name>"])` when the file doesn't exist — this catches new agents whose schema file wasn't committed yet.
 2. Calls `jsonschema.validate(raw, schema)`. On failure, returns `(None, ["schema_invalid: <name>: <message>"])` where `<message>` is the `jsonschema.ValidationError.message` string.
-3. Looks up the typed dataclass in `_DATACLASS_BY_NAME` (`contracts.py:78`) and constructs it from matching keys. Returns `(None, ["dataclass_missing: <name>"])` on an unknown agent name.
+3. Looks up the typed dataclass in `_DATACLASS_BY_NAME` (`scripts/contracts.py`) and constructs it from matching keys. Returns `(None, ["dataclass_missing: <name>"])` on an unknown agent name.
 
 The dataclasses (`SourceCollectorResult`, `PrSummary`, `PageAuthorResult`, etc.) are frozen. Downstream code in the orchestrator uses them as a typed view on top of the raw dict — adding a field to a schema requires adding it to the corresponding dataclass and the `.schema.json` in the same change.
 
 ## `dispatch_validated` — the call site wrapper
 
-`scripts/orchestrator_runner.py:486` composes `dispatch_subagent` with `validate_and_parse` and returns a two-tuple the orchestrator uses directly:
+`scripts/orchestrator_runner.py` composes `dispatch_subagent` with `validate_and_parse` and returns a two-tuple the orchestrator uses directly:
 
 ```
 dispatch_validated(name, inputs, *, dry_run_dir, cwd) → (dict | None, list[str])
@@ -88,4 +88,4 @@ When you update a schema — adding a field, changing a type, tightening `additi
 1. `agents/schemas/<name>.schema.json` — the canonical file read at runtime.
 2. The `## Output schema (canonical)` fenced block in `agents/<name>.md` — the in-file reference Claude reads when it acts as that agent.
 
-`test_schema_md_sync.py:30` runs this check for all seven agents on every `pytest` invocation. It uses `json.loads` on both sides so whitespace and key ordering don't matter, but the parsed structures must be equal. The test message tells you which file to update and which direction the mismatch is in.
+`tests/agents/test_schema_md_sync.py` runs this check for all seven agents on every `pytest` invocation. It uses `json.loads` on both sides so whitespace and key ordering don't matter, but the parsed structures must be equal. The test message tells you which file to update and which direction the mismatch is in.

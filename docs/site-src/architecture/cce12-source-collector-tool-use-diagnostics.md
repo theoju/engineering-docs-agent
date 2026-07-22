@@ -24,7 +24,7 @@ export DOCS_AGENT_DEBUG_DIR=/tmp/cce-debug
 python3 scripts/orchestrator_runner.py --repo-root . --no-pr
 ```
 
-When `debug_dir` is truthy, `dispatch_subagent` switches from `--print` to `--output-format stream-json --verbose` (`orchestrator_runner.py:407`). The raw NDJSON event stream is consumed in-process, not piped through a file.
+When `debug_dir` is truthy, `dispatch_subagent` switches from `--print` to `--output-format stream-json --verbose` (`scripts/orchestrator_runner.py:dispatch_subagent`). The raw NDJSON event stream is consumed in-process, not piped through a file.
 
 ## Forensics artifacts
 
@@ -42,13 +42,13 @@ Files are named `<UTC-timestamp>-<agent-name>.<suffix>` so multiple runs don't c
 
 ## Extracting the canonical JSON
 
-The final assistant turn may contain interleaved `tool_use` and `text` blocks. `_extract_final_assistant_text` (`orchestrator_runner.py:175`) concatenates only the `text` blocks from the **last** assistant message that contains at least one text block.
+The final assistant turn may contain interleaved `tool_use` and `text` blocks. `_extract_final_assistant_text` (`scripts/orchestrator_runner.py:_extract_final_assistant_text`) concatenates only the `text` blocks from the **last** assistant message that contains at least one text block.
 
-This is a forward-compatibility guard added in CCE-14: if the model ends on a purely tool-use turn (no text), the function walks backward to the preceding assistant turn rather than returning an empty string. Tests in `test_dispatch_subagent_stream_json.py:42` and `:63` cover both the multi-block concatenation and the last-assistant-only selection.
+This is a forward-compatibility guard added in CCE-14: if the model ends on a purely tool-use turn (no text), the function walks backward to the preceding assistant turn rather than returning an empty string. Tests in `tests/orchestrator/test_dispatch_subagent_stream_json.py` and `:63` cover both the multi-block concatenation and the last-assistant-only selection.
 
 ## Tool-use summary
 
-`_summarize_tool_use` (`orchestrator_runner.py:208`) makes two passes over the event list:
+`_summarize_tool_use` (`scripts/orchestrator_runner.py:_summarize_tool_use`) makes two passes over the event list:
 
 1. Collect `tool_result` blocks from `user` events, keyed by `tool_use_id`, to capture `is_error` and `result_chars`.
 2. Collect `tool_use` blocks from `assistant` events and join with the outcomes from pass 1.
@@ -77,9 +77,9 @@ Conclusion: stream-json dispatch mode is appropriate for diagnostic measurement.
 
 Several fixes landed alongside or shortly after CCE-12 that affect dispatch reliability:
 
-- **CCE-10** — `CLAUDE_STOP_VERIFY=0` is injected into the subprocess environment (`orchestrator_runner.py:419`) to prevent a global stop-verify hook from prepending prose to the agent's stdout and breaking `json.loads`.
-- **CCE-15** — `--setting-sources project,local` (`orchestrator_runner.py:393`) excludes the user-level settings.json where an explanatory-output-style plugin was injecting `★ Insight` preambles into subprocess context. This closed the contamination pathway that broke Run 4's output parsing in CCE-14.
-- **CCE-15 rescue path** — `_rescue_json_object` (`orchestrator_runner.py:128`) is a defense-in-depth fallback that extracts the first balanced JSON object from prose-contaminated output when `json.loads` fails on the canonical text.
+- **CCE-10** — `CLAUDE_STOP_VERIFY=0` is injected into the subprocess environment (`scripts/orchestrator_runner.py`) to prevent a global stop-verify hook from prepending prose to the agent's stdout and breaking `json.loads`.
+- **CCE-15** — `--setting-sources project,local` (`scripts/orchestrator_runner.py`) excludes the user-level settings.json where an explanatory-output-style plugin was injecting `★ Insight` preambles into subprocess context. This closed the contamination pathway that broke Run 4's output parsing in CCE-14.
+- **CCE-15 rescue path** — `_rescue_json_object` (`scripts/orchestrator_runner.py`) is a defense-in-depth fallback that extracts the first balanced JSON object from prose-contaminated output when `json.loads` fails on the canonical text.
 
 ## Tests
 

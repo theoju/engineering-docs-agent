@@ -60,13 +60,23 @@ def test_token_never_appears_in_reason_strings():
 
 
 @pytest.mark.xfail(
-    reason="publish-trigger is GitHub-only (orchestrator_runner.py workflow_run); "
-    "provider-aware dispatch tracked by the CCE-63 sibling trigger ticket",
+    reason="publish-trigger is GitHub-only: orchestrator_runner._maybe_auto_merge "
+    "dispatches gh.workflow_run(build_workflow) unconditionally (~line 2886). "
+    "Provider-aware dispatch for ci_provider: circleci is tracked by the CCE-63 "
+    "sibling trigger ticket. This strict-xfail flips to a hard failure the moment "
+    "that seam learns about ci_provider, forcing the implementer to update it.",
     strict=True,
 )
 def test_publish_trigger_is_provider_aware():
-    # AC6: DESIRED future behavior — a circleci host's post-merge publish is
-    # triggered via a CircleCI pipeline, not gh.workflow_run. Not built yet;
-    # this strict-xfail flips to a hard failure the moment it is, forcing the
-    # implementer to remove the marker.
-    assert hasattr(build_poller, "trigger_circleci_publish")
+    # AC6: the post-merge publish TRIGGER (distinct from this ticket's verify
+    # seam) is the second GitHub-only seam. It lives in orchestrator_runner's
+    # _maybe_auto_merge, NOT build_poller — so the fence must anchor THERE, or
+    # it never fires when the gap actually closes. DESIRED future state: the
+    # trigger dispatch branches on ci_provider. Today it does not (github-only).
+    import inspect
+
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import orchestrator_runner
+
+    trigger_src = inspect.getsource(orchestrator_runner._maybe_auto_merge)
+    assert "ci_provider" in trigger_src

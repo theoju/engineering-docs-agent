@@ -1,11 +1,13 @@
 # Plans archive
 
-_Auto-generated; 64 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 66 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
 ## 2026-07
 
 | Title | Status | Summary |
 |---|---|---|
+| [CCE-63 CircleCI publish-verifier provider seam Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-22-cce63-circleci-publish-verifier.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
+| [CCE-122 Stable Code Citations Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-19-cce122-stable-code-citations.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-119 Create-Path Frontmatter Fidelity Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-14-cce119-create-path-frontmatter-fidelity.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-120: Orchestrator-injected gap-detector `pr_id` Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-12-cce120-gap-detector-prid-injection.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-118 (item 1): benign rescue must not flip partial — implementation plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-11-cce118-benign-rescue-partial.md) | — | > **For agentic workers:** TDD. Failing test → minimal implementation → green → commit. Steps use checkbox (`- [ ]`) syn… |

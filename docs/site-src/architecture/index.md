@@ -13,9 +13,9 @@ last_reviewed: "2026-07-11"
 _Architecture: component design, agent contracts, data flows, and system internals._
 
 <!-- docs-agent:overview:start -->
-
 **In this section**
 
+- **Publish verifier** — After a docs-agent PR merges, the pipeline still has one job left: confirm the
 - **Orchestrator** — `run()` in `scripts/orchestrator_runner.py:run` is the nightly pipeline entry point. It runs as a straight-line sequence of stages against one window of merged PRs (`last_successful_run.head_sha` to the current `HEAD`):
 - **Bootstrap fail-fast mechanisms** — The C2 bootstrap pipeline (CCE-38) adds four structural safeguards that catch bad artifacts before they reach the published site. Before this work, the pipeline trusted `page-author`'s `ok: true` signal without independently verifying the written file — allowing bad YAML, missing frontmatter, and thin descriptions to slip through undetected.
 - **Lint Rules** — The lint runner (`scripts/lint/lint_runner.py`) validates agent-authored Markdown before it reaches the docs site. Rules are tiered: **block** rules prevent a page from being published; **warn** rules surface in the PR review but do not block it.
@@ -33,6 +33,5 @@ _Architecture: component design, agent contracts, data flows, and system interna
 - **Decision Archive Index Generator (CCE-23)** — The archive-index generator (`scripts/archive_indexes.py`) turns directories of date-prefixed Markdown files into navigable index pages. It is capability D of the docs-agent: a pure read-then-write step that runs on every nightly pass and always overwrites its output.
 - **Source Map and Drift Detection (CCE-23)** — The source map (`scripts/source_map.py`) and drift detector (`scripts/source_drift.py`) together answer: when source code changes, which docs pages need a human review?
 
-_16 pages · regenerated nightly_
-
+_17 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

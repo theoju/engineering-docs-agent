@@ -47,6 +47,31 @@ def test_redact_credentials_is_idempotent():
     assert once == twice
 
 
+# --- header-form secrets (CCE-63) -------------------------------------------
+
+
+def test_redact_credentials_masks_circle_token_header():
+    assert (
+        _redact_credentials("Circle-Token: abc123SECRET") == "Circle-Token: <redacted>"
+    )
+
+
+def test_redact_credentials_masks_authorization_bearer():
+    assert (
+        _redact_credentials("Authorization: Bearer abc123SECRET")
+        == "Authorization: Bearer <redacted>"
+    )
+
+
+def test_redact_credentials_header_masking_is_case_insensitive():
+    assert _redact_credentials("circle-token: xyz") == "circle-token: <redacted>"
+
+
+def test_redact_credentials_header_masking_is_idempotent():
+    once = _redact_credentials("Circle-Token: abc123SECRET")
+    assert _redact_credentials(once) == once
+
+
 # --- emit_stderr ------------------------------------------------------------
 
 

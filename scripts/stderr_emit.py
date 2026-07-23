@@ -39,14 +39,25 @@ _OBSERVABILITY_FLUSH = True
 # and https://; replaces any user[:pass] segment with `<redacted>`.
 _CREDENTIAL_URL_RE = re.compile(r"(https?://)[^@/\s]*@")
 
+# Header-form secrets (CCE-63): the URL regex above misses tokens sent as HTTP
+# headers. Masks the value after `Circle-Token:` and after `Authorization: Bearer`,
+# preserving the header name/scheme so logs stay legible. Case-insensitive.
+_CREDENTIAL_HEADER_RE = re.compile(
+    r"(Circle-Token\s*[:=]\s*|Authorization\s*[:=]\s*Bearer\s+)\S+",
+    re.IGNORECASE,
+)
+
 
 def _redact_credentials(text: str) -> str:
     """Replace `https?://user[:token]@host` with `https?://<redacted>@host`.
 
     Idempotent. Returns the input verbatim if no credential pattern matches.
     Moved verbatim from scripts/orchestrator_runner.py:1832-1846 (CCE-73 origin).
+    CCE-63: also masks `Circle-Token:` / `Authorization: Bearer` header values.
     """
-    return _CREDENTIAL_URL_RE.sub(r"\1<redacted>@", text)
+    text = _CREDENTIAL_URL_RE.sub(r"\1<redacted>@", text)
+    text = _CREDENTIAL_HEADER_RE.sub(r"\1<redacted>", text)
+    return text
 
 
 def emit_stderr(reason: str, *, info_only: bool = False) -> None:

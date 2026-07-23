@@ -36,15 +36,18 @@ class CircleCiTokenMissing(RuntimeError):
 
 
 class BuildPoller(Protocol):
-    """Contract every provider build-poller satisfies.
+    """Documented contract for a provider build-poller (spec §5.2).
 
+    The functional seam is the module-level ``poll_circleci`` below; this
+    Protocol is the object-oriented form a future provider-poller class may
+    implement. It is intentionally documentation-only for now — nothing
+    implements it while the CircleCI poll is an unvalidated stub (§10), so it
+    exists to name the contract, not to be enforced.
     Input: publishing config block, repo {owner,name}, merged PR number.
     Output: a build_status in {'success','failure','timeout'}.
     """
 
-    def build_status(
-        self, publishing_config: dict, repo: dict, pr_number: int
-    ) -> str: ...
+    def poll(self, publishing_config: dict, repo: dict, pr_number: int) -> str: ...
 
 
 @dataclass

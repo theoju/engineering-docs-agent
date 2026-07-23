@@ -6,6 +6,7 @@ from pathlib import Path
 
 # Allow importing from sibling script.
 sys.path.insert(0, str(Path(__file__).parent))
+from build_poller import resolve_build_verdict  # noqa: E402
 from gh_client import GhClient  # noqa: E402
 from orchestrator_runner import detect_repo, dispatch_subagent, dispatch_validated  # noqa: E402
 from state_io import (  # noqa: E402
@@ -64,30 +65,55 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
 
     state_path = repo_root / ".engineering-docs-agent" / "state.json"
     try:
-        verdict, verify_reasons = dispatch_validated(
-            "publish-verifier",
-            {
-                "merged_pr_number": pr_number,
-                "changed_paths": changed_paths,
-                "publishing_config": cfg.get("publishing", {}),
-                "repo": repo,
-            },
-            dry_run_dir=dry_run_dir,
-            cwd=repo_root,
-        )
-        for r in verify_reasons:
-            add_partial(state, r)
-        if verdict is None:
-            verdict = {"verified": [], "failed": [], "build_status": "verifier_invalid"}
+        provider = (cfg.get("publishing") or {}).get("ci_provider") or "github"
+        # Reasons to surface in the notifier digest. Stays empty on the github
+        # path (digest byte-for-byte unchanged); the non-github honest-degrade
+        # populates it so the operator sees WHY verification did not promote.
+        digest_partial_reasons: list[str] = []
+        if provider == "github":
+            verdict, verify_reasons = dispatch_validated(
+                "publish-verifier",
+                {
+                    "merged_pr_number": pr_number,
+                    "changed_paths": changed_paths,
+                    "publishing_config": cfg.get("publishing", {}),
+                    "repo": repo,
+                },
+                dry_run_dir=dry_run_dir,
+                cwd=repo_root,
+            )
+            for r in verify_reasons:
+                add_partial(state, r)
+            if verdict is None:
+                verdict = {
+                    "verified": [],
+                    "failed": [],
+                    "build_status": "verifier_invalid",
+                }
+        else:
+            # Non-github provider (e.g. circleci): honest degrade via the seam.
+            # No LLM dispatch, no live poll while UNVALIDATED_AGAINST_LIVE_HOST.
+            verdict, poll_reasons = resolve_build_verdict(
+                provider, cfg.get("publishing", {}), repo, pr_number
+            )
+            for r in poll_reasons:
+                add_partial(state, r)
+            digest_partial_reasons = poll_reasons
+        digest = {
+            "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
+            "verified": verdict.get("verified", []),
+            "failed_urls": verdict.get("failed", []),
+            "build_status": verdict.get("build_status"),
+        }
+        if digest_partial_reasons:
+            # Only added when non-empty → the github digest stays byte-for-byte,
+            # while a circleci degrade delivers its reason to the notifier's
+            # "Partial-run reasons" section (a clear, non-scary, informational line).
+            digest["partial_reasons"] = digest_partial_reasons
         _notifier_result, notifier_reasons = dispatch_validated(
             "notifier",
             {
-                "digest": {
-                    "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
-                    "verified": verdict.get("verified", []),
-                    "failed_urls": verdict.get("failed", []),
-                    "build_status": verdict.get("build_status"),
-                },
+                "digest": digest,
                 "slack_config": cfg.get("notifications", {}).get("slack", {}),
                 "email_config": cfg.get("notifications", {}).get("email", {}),
                 "mode": "verify",

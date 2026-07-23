@@ -47,6 +47,68 @@ def test_redact_credentials_is_idempotent():
     assert once == twice
 
 
+# --- header-form secrets (CCE-63) -------------------------------------------
+
+
+def test_redact_credentials_masks_circle_token_header():
+    assert (
+        _redact_credentials("Circle-Token: abc123SECRET") == "Circle-Token: <redacted>"
+    )
+
+
+def test_redact_credentials_masks_authorization_bearer():
+    assert (
+        _redact_credentials("Authorization: Bearer abc123SECRET")
+        == "Authorization: Bearer <redacted>"
+    )
+
+
+def test_redact_credentials_header_masking_is_case_insensitive():
+    assert _redact_credentials("circle-token: xyz") == "circle-token: <redacted>"
+
+
+def test_redact_credentials_header_masking_is_idempotent():
+    once = _redact_credentials("Circle-Token: abc123SECRET")
+    assert _redact_credentials(once) == once
+
+
+def test_redact_credentials_masks_single_quoted_dict_repr():
+    # str({"Circle-Token": token}) — the canonical leak vector when a header
+    # dict is logged or lands in an HTTP-client exception (CCE-63 review).
+    assert (
+        _redact_credentials("{'Circle-Token': 'abc123SECRET'}")
+        == "{'Circle-Token': '<redacted>'}"
+    )
+
+
+def test_redact_credentials_masks_double_quoted_dict_repr():
+    assert (
+        _redact_credentials('headers {"Circle-Token": "abc123SECRET", "X": "y"}')
+        == 'headers {"Circle-Token": "<redacted>", "X": "y"}'
+    )
+
+
+def test_redact_credentials_masks_authorization_basic():
+    assert (
+        _redact_credentials("Authorization: Basic dXNlcjpwYXNzSECRET")
+        == "Authorization: Basic <redacted>"
+    )
+
+
+def test_redact_credentials_masks_actual_auth_headers_repr():
+    # The exact str() a leak would produce from CircleCiClient.auth_headers().
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    from build_poller import CircleCiClient
+
+    leaked = f"request failed with {CircleCiClient(token='sk_live_REALSECRET').auth_headers()}"
+    out = _redact_credentials(leaked)
+    assert "sk_live_REALSECRET" not in out
+    assert "<redacted>" in out
+
+
 # --- emit_stderr ------------------------------------------------------------
 
 

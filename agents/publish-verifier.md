@@ -22,6 +22,7 @@ After a docs-agent PR merges:
 - `merged_pr_number`: int
 - `changed_paths`: list of repo-relative paths
 - `publishing_config`: `{ base_url, build_workflow, url_map_rule, verify_timeout_seconds }`
+- `ci_provider`: optional; `github` (default) or `circleci`. Only `github` reaches this agent — `circleci` is handled Python-side in scripts/build_poller.py (CCE-63). Do not branch on it here.
 - `repo`: `{ owner, name }`
 
 ## Output schema (canonical)

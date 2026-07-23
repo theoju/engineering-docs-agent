@@ -156,13 +156,14 @@ Open the host repo's **Settings → Secrets and variables → Actions**. You'll 
 
 **Secrets** (Settings → Secrets and variables → Actions → **Secrets** tab → New repository secret):
 
-| Secret                                      | What it is                                                                                                              | Where to get it      | Required?                   |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------- |
-| `CLAUDE_CODE_OAUTH_TOKEN`                   | The Claude CLI OAuth token (starts with `sk-ant-oat`)                                                                   | Part 1.1             | **Yes**                     |
-| `DOCS_AGENT_APP_PRIVATE_KEY`                | The contents of the `.pem` file downloaded in Part 1.2 step 10 (entire file, including the `-----BEGIN/END-----` lines) | Part 1.2 step 10     | **Yes**                     |
-| `JIRA_API_TOKEN`                            | Atlassian Cloud API token                                                                                               | Part 1.3             | Only if Jira enrichment     |
-| `SLACK_WEBHOOK_URL`                         | Slack incoming-webhook URL                                                                                              | Your Slack workspace | Only if Slack notifications |
-| `SMTP_SERVER`, `SMTP_USER`, `SMTP_PASSWORD` | SMTP creds                                                                                                              | Your email provider  | Only if email notifications |
+| Secret                                      | What it is                                                                                                              | Where to get it        | Required?                                                                                               |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN`                   | The Claude CLI OAuth token (starts with `sk-ant-oat`)                                                                   | Part 1.1               | **Yes**                                                                                                 |
+| `DOCS_AGENT_APP_PRIVATE_KEY`                | The contents of the `.pem` file downloaded in Part 1.2 step 10 (entire file, including the `-----BEGIN/END-----` lines) | Part 1.2 step 10       | **Yes**                                                                                                 |
+| `JIRA_API_TOKEN`                            | Atlassian Cloud API token                                                                                               | Part 1.3               | Only if Jira enrichment                                                                                 |
+| `SLACK_WEBHOOK_URL`                         | Slack incoming-webhook URL                                                                                              | Your Slack workspace   | Only if Slack notifications                                                                             |
+| `SMTP_SERVER`, `SMTP_USER`, `SMTP_PASSWORD` | SMTP creds                                                                                                              | Your email provider    | Only if email notifications                                                                             |
+| `CIRCLECI_TOKEN`                            | CircleCI API token (read-only pipeline/workflow/job scope)                                                              | CircleCI user settings | Reserved / not yet wired — only if `publishing.ci_provider: circleci` (CCE-63, modeled-but-unvalidated) |
 
 **Variables** (Settings → Secrets and variables → Actions → **Variables** tab → New repository variable):
 
@@ -257,6 +258,8 @@ For branch-protection purposes:
 - The docs-agent's own workflows do not need to be gated on user PRs.
 
 This is the path used by `theoju/advanced-data-import-system` (tracked in CCE-58).
+
+**Docs-publish verification on CircleCI** (`publishing.ci_provider: circleci`) is modeled but not yet end-to-end wired. `verify_runner` forks on the field and degrades honestly to a non-promoting "modeled but unvalidated" result rather than polling CircleCI (CCE-63); set `CIRCLECI_TOKEN` only once that lands. `advanced-data-import-system` publishes its docs via GitHub Actions and stays `ci_provider: github`.
 
 ## Part 5 — Optional add-ons
 

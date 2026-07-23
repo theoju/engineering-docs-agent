@@ -240,3 +240,34 @@ def test_verify_runner_circleci_notifies_with_sentinel(
     assert "notifier" in seen["names"]
     assert seen["digest"]["build_status"] == "circleci_unvalidated"
     assert seen["digest"]["failed_urls"] == [], "must not render as a hard failure"
+    # The human-readable reason must reach the notifier (renders in the
+    # "Partial-run reasons" section) — not just the opaque status token.
+    assert "circleci_provider_modeled_but_unvalidated" in seen["digest"].get(
+        "partial_reasons", []
+    )
+
+
+def test_verify_runner_github_digest_has_no_partial_reasons_key(
+    tmp_path, monkeypatch, init_host
+):
+    """Byte-for-byte guard: the github notifier digest must NOT gain a
+    partial_reasons key from the CCE-63 fork (added only on the non-github
+    honest-degrade path)."""
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+    import verify_runner
+
+    importlib.reload(verify_runner)
+    real = verify_runner.dispatch_validated
+    seen: dict = {"digest": None}
+
+    def capture(name, inputs, *, dry_run_dir, cwd=None, **kw):
+        if name == "notifier":
+            seen["digest"] = inputs["digest"]
+            return ({"slack_ok": True, "email_ok": True, "errors": []}, [])
+        return real(name, inputs, dry_run_dir=dry_run_dir, cwd=cwd)
+
+    monkeypatch.setattr(verify_runner, "dispatch_validated", capture)
+    init_host(SEEDED_STATE, config_yaml=CONFIG_YAML_GITHUB_EXPLICIT)
+    verify_runner.run(tmp_path, 42, dry_run_dir=FAKES_VERIFY_OK)
+
+    assert "partial_reasons" not in seen["digest"]

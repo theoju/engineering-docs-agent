@@ -66,6 +66,10 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
     state_path = repo_root / ".engineering-docs-agent" / "state.json"
     try:
         provider = (cfg.get("publishing") or {}).get("ci_provider") or "github"
+        # Reasons to surface in the notifier digest. Stays empty on the github
+        # path (digest byte-for-byte unchanged); the non-github honest-degrade
+        # populates it so the operator sees WHY verification did not promote.
+        digest_partial_reasons: list[str] = []
         if provider == "github":
             verdict, verify_reasons = dispatch_validated(
                 "publish-verifier",
@@ -94,15 +98,22 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
             )
             for r in poll_reasons:
                 add_partial(state, r)
+            digest_partial_reasons = poll_reasons
+        digest = {
+            "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
+            "verified": verdict.get("verified", []),
+            "failed_urls": verdict.get("failed", []),
+            "build_status": verdict.get("build_status"),
+        }
+        if digest_partial_reasons:
+            # Only added when non-empty → the github digest stays byte-for-byte,
+            # while a circleci degrade delivers its reason to the notifier's
+            # "Partial-run reasons" section (a clear, non-scary, informational line).
+            digest["partial_reasons"] = digest_partial_reasons
         _notifier_result, notifier_reasons = dispatch_validated(
             "notifier",
             {
-                "digest": {
-                    "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
-                    "verified": verdict.get("verified", []),
-                    "failed_urls": verdict.get("failed", []),
-                    "build_status": verdict.get("build_status"),
-                },
+                "digest": digest,
                 "slack_config": cfg.get("notifications", {}).get("slack", {}),
                 "email_config": cfg.get("notifications", {}).get("email", {}),
                 "mode": "verify",

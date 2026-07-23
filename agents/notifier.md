@@ -61,7 +61,7 @@ The canonical schema is in §Output schema above. The shape described here is th
    - Gap flags (each as a bullet linking the source PR)
    - Lint failures (block-severity get a warning prefix)
    - Partial-run reasons
-   - For verify mode: build status, verified URLs, failed URLs
+   - For verify mode: build status, verified URLs, failed URLs. A `build_status` that is not `success`/`failure`/`timeout` (e.g. a `*_unvalidated` sentinel from a modeled-but-unvalidated provider such as CircleCI, CCE-63) is INFORMATIONAL, not a failure — render it plainly alongside the Partial-run reasons, never with scary/failure wording when there are no failed URLs.
 4. If `slack_config.enabled`, POST JSON `{"text": "<title>", "blocks": [...]}` to webhook via `curl`.
 5. If `email_config.enabled`, send via `curl --url smtps://...` with SMTP creds, plain-text body.
 6. Aggregate errors; emit JSON response. Do not raise — notification failure is advisory.

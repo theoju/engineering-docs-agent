@@ -40,11 +40,19 @@ _OBSERVABILITY_FLUSH = True
 _CREDENTIAL_URL_RE = re.compile(r"(https?://)[^@/\s]*@")
 
 # Header-form secrets (CCE-63): the URL regex above misses tokens sent as HTTP
-# headers. Masks the value after `Circle-Token:` and after `Authorization: Bearer`,
-# preserving the header name/scheme so logs stay legible. Case-insensitive.
+# headers. Masks the value after a `Circle-Token`/`Authorization` header,
+# preserving the header name, an optional `Bearer`/`Basic` scheme, and any
+# surrounding quotes so logs stay legible. Tolerates the plain `Header: value`
+# form AND the quoted/dict-repr form `{'Circle-Token': 'value'}` that str()'ing
+# a header dict (CircleCiClient.auth_headers) produces — the canonical leak
+# vector. Case-insensitive.
 _CREDENTIAL_HEADER_RE = re.compile(
-    r"(Circle-Token\s*[:=]\s*|Authorization\s*[:=]\s*Bearer\s+)\S+",
-    re.IGNORECASE,
+    r"""(['"]?(?:Circle-Token|Authorization)['"]?\s*[:=]\s*)  # 1: header name + separator
+        ((?:Bearer|Basic)\s+)?                                # 2: optional auth scheme
+        (['"]?)                                               # 3: optional opening quote
+        [^"'\s,;}]+                                            # the secret value (dropped)
+    """,
+    re.IGNORECASE | re.VERBOSE,
 )
 
 
@@ -56,7 +64,7 @@ def _redact_credentials(text: str) -> str:
     CCE-63: also masks `Circle-Token:` / `Authorization: Bearer` header values.
     """
     text = _CREDENTIAL_URL_RE.sub(r"\1<redacted>@", text)
-    text = _CREDENTIAL_HEADER_RE.sub(r"\1<redacted>", text)
+    text = _CREDENTIAL_HEADER_RE.sub(r"\1\2\3<redacted>", text)
     return text
 
 

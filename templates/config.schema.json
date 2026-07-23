@@ -99,7 +99,7 @@
         "ci_provider": {
           "type": "string",
           "enum": ["github", "circleci"],
-          "description": "Which CI provider runs the docs publish workflow. Default `github` (no field present). `circleci` is reserved for a future publish-verifier extension; the field is accepted in config today but only `github` is wired through scripts/verify_runner.py."
+          "description": "Which CI provider runs the docs publish workflow. Default `github` (no field present). `circleci` is modeled but UNVALIDATED against a live host: scripts/verify_runner.py forks on this field and degrades honestly (a non-promoting 'modeled but unvalidated' result) rather than polling. Only `github` is end-to-end wired. See CCE-63."
         }
       }
     },

@@ -27,6 +27,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 RULE_NAME = "citation_exists"
 SEVERITY = "block"
 
@@ -237,6 +239,48 @@ def resolve_cited_sources(text: str, repo_root: Path) -> list[str]:
     return out
 
 
+def _load_config(config_path: Path) -> dict:
+    """Parse the host config YAML; degrade to {} on any read/parse error (the
+    lint must never crash on a malformed config — it just loses archive-lens
+    awareness and falls back to pure block)."""
+    try:
+        return yaml.safe_load(config_path.read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
+def archive_dirs(config: dict, repo_root: Path) -> list[Path]:
+    """Resolved dirs of every ``archive-index``-generator section (CCE-124).
+
+    Archive pages are historical records; their citations are true *as of
+    archival* and legitimately name code that has since moved or been removed,
+    so citation_exists is advisory (warn), not a build block, for pages under
+    these dirs. Empty when the host declares no such section — generic-first:
+    identical to the pre-CCE-124 pure-block behavior."""
+    site = config.get("site") or {}
+    docs_dir = site.get("docs_dir") or ""
+    out: list[Path] = []
+    for sec in site.get("sections") or []:
+        if isinstance(sec, dict) and sec.get("generator") == "archive-index":
+            out.append((repo_root / docs_dir / (sec.get("path") or "")).resolve())
+    return out
+
+
+def _under(path: Path, roots: list[Path]) -> bool:
+    """True if ``path`` resolves inside one of ``roots``."""
+    try:
+        rp = path.resolve()
+    except OSError:
+        return False
+    for r in roots:
+        try:
+            rp.relative_to(r)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
@@ -245,17 +289,23 @@ def main() -> int:
     args = parser.parse_args()
     repo_root = repo_root_for(args.config)
     files = tracked_files(repo_root) if repo_root else set()
-    results, any_failed = [], False
+    arch = archive_dirs(_load_config(args.config), repo_root) if repo_root else []
+    results, any_block_failed = [], False
     for p in args.paths:
         ok, message = check_path(p, repo_root, files)
-        results.append({"path": str(p), "ok": ok, "message": message})
-        if not ok:
-            any_failed = True
+        # Archive pages are historical records; citation existence there is
+        # advisory (warn), not a build block (CCE-124). Live lenses keep block.
+        severity = "warn" if _under(p, arch) else SEVERITY
+        results.append(
+            {"path": str(p), "ok": ok, "message": message, "severity": severity}
+        )
+        if not ok and severity == "block":
+            any_block_failed = True
     if args.json:
         json.dump(
             {"rule": RULE_NAME, "severity": SEVERITY, "results": results}, sys.stdout
         )
-    return 1 if any_failed else 0
+    return 1 if any_block_failed else 0
 
 
 if __name__ == "__main__":

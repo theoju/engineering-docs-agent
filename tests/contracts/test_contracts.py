@@ -71,6 +71,40 @@ def test_gap_detector_validates_and_parses():
     assert result.pr_id == "unknown/unknown#1"
 
 
+def test_gap_detector_null_needs_spec_is_valid_unjudged():
+    # CCE-125: null is the valid "couldn't judge" sentinel — it must validate
+    # (not schema_invalid) so the run stays non-partial.
+    from contracts import validate_and_parse, GapVerdict
+
+    obj, errors = validate_and_parse(
+        "gap-detector", {"pr_id": "o/r#1", "needs_spec": None}
+    )
+    assert errors == []
+    assert isinstance(obj, GapVerdict)
+    assert obj.needs_spec is None
+
+
+def test_gap_detector_absent_needs_spec_still_invalid():
+    # CCE-125: an omitted needs_spec is a genuine structural failure — it must
+    # still be schema_invalid (signal preserved), distinct from present-null.
+    from contracts import validate_and_parse
+
+    obj, errors = validate_and_parse("gap-detector", {"pr_id": "o/r#1"})
+    assert obj is None
+    assert any("needs_spec" in e for e in errors)
+
+
+def test_gap_detector_wrong_type_needs_spec_still_invalid():
+    # CCE-125: a non-null, non-boolean needs_spec is still schema_invalid.
+    from contracts import validate_and_parse
+
+    obj, errors = validate_and_parse(
+        "gap-detector", {"pr_id": "o/r#1", "needs_spec": "yes"}
+    )
+    assert obj is None
+    assert any("schema_invalid" in e for e in errors)
+
+
 def test_publish_verifier_validates_and_parses():
     from contracts import validate_and_parse, VerifyVerdict
 

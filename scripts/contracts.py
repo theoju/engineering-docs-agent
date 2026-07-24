@@ -51,7 +51,7 @@ class ValidationResult:
 @dataclass(frozen=True)
 class GapVerdict:
     pr_id: str
-    needs_spec: bool
+    needs_spec: bool | None  # CCE-125: None = "unjudged" (advisory, non-partial)
     reasoning: str = ""
     confidence: str = "medium"
     tier: str = "llm"

@@ -325,3 +325,84 @@ def test_resolve_cited_sources_handles_symbol_suffix(tmp_path):
     assert citation_exists.resolve_cited_sources(text, repo) == [
         "scripts/real_module.py"
     ]
+
+
+# ---------- archive-lens advisory severity (CCE-124) ----------
+
+_SITE_CFG = (
+    "lint: { tier1: default }\n"
+    "site:\n"
+    "  docs_dir: docs/site-src\n"
+    "  sections:\n"
+    "    - key: architecture\n"
+    "      path: architecture/\n"
+    "      generator: agent-authored\n"
+    "    - key: archive\n"
+    "      path: archive/\n"
+    "      generator: archive-index\n"
+)
+
+
+def _init_host_with_site(
+    tmp_path: Path, cfg_text: str = _SITE_CFG
+) -> tuple[Path, Path]:
+    repo, cfg = _init_host(tmp_path)
+    cfg.write_text(cfg_text)
+    (repo / "docs" / "site-src" / "archive").mkdir(parents=True)
+    (repo / "docs" / "site-src" / "architecture").mkdir(parents=True)
+    return repo, cfg
+
+
+def test_archive_page_bad_citation_is_warn_not_block(tmp_path):
+    repo, cfg = _init_host_with_site(tmp_path)
+    page = repo / "docs" / "site-src" / "archive" / "2026-07-22-x.md"
+    page.write_text("Historical note cites `scripts/removed_module.py`.\n")
+    rc, out = _run_cli([page], cfg)
+    res = out["results"][0]
+    assert res["ok"] is False
+    assert res["severity"] == "warn"
+    assert rc == 0  # warn-only: no block-failure, exit clean
+
+
+def test_live_page_same_bad_citation_still_blocks(tmp_path):
+    repo, cfg = _init_host_with_site(tmp_path)
+    page = repo / "docs" / "site-src" / "architecture" / "index.md"
+    page.write_text("Cites `scripts/removed_module.py`.\n")
+    rc, out = _run_cli([page], cfg)
+    res = out["results"][0]
+    assert res["ok"] is False
+    assert res["severity"] == "block"
+    assert rc == 1
+
+
+def test_no_archive_section_defaults_to_block(tmp_path):
+    # Generic-first: a host with no archive-index section behaves exactly as today.
+    repo, cfg = _init_host_with_site(tmp_path, cfg_text="lint: { tier1: default }\n")
+    page = repo / "docs" / "site-src" / "archive" / "2026-07-22-x.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text("Cites `scripts/removed_module.py`.\n")
+    rc, out = _run_cli([page], cfg)
+    res = out["results"][0]
+    assert res["ok"] is False
+    assert res["severity"] == "block"
+    assert rc == 1
+
+
+def test_clean_archive_page_passes_with_advisory_tag(tmp_path):
+    repo, cfg = _init_host_with_site(tmp_path)
+    page = repo / "docs" / "site-src" / "archive" / "2026-07-22-ok.md"
+    page.write_text("Cites `scripts/real_module.py` and `test_real_behavior`.\n")
+    rc, out = _run_cli([page], cfg)
+    res = out["results"][0]
+    assert res["ok"] is True
+    assert res["severity"] == "warn"  # advisory tag present even when passing
+    assert rc == 0
+
+
+def test_archive_dirs_resolves_only_archive_index_sections(tmp_path):
+    import yaml as _yaml
+
+    repo, cfg = _init_host_with_site(tmp_path)
+    config = _yaml.safe_load(cfg.read_text())
+    dirs = citation_exists.archive_dirs(config, repo)
+    assert dirs == [(repo / "docs" / "site-src" / "archive").resolve()]

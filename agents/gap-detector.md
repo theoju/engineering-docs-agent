@@ -32,7 +32,7 @@ judgment.
   "required": ["pr_id", "needs_spec"],
   "properties": {
     "pr_id": { "type": "string" },
-    "needs_spec": { "type": "boolean" },
+    "needs_spec": { "type": ["boolean", "null"] },
     "reasoning": { "type": "string" },
     "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
     "tier": { "type": "string" }
@@ -71,4 +71,4 @@ The canonical schema is in §Output schema above. The shape described here is th
 
 ## Failure handling
 
-If inputs are malformed, return `{"error": "malformed_input", "needs_spec": null}`.
+If inputs are malformed and you cannot judge, return `{"error": "malformed_input", "needs_spec": null}`. `null` is the valid "unjudged" value — the run records it as advisory (info-only) and does not fail. Only omit `needs_spec` or emit a non-boolean, non-null value if the agent itself has genuinely malfunctioned (those still fail the run).

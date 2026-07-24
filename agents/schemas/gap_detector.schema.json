@@ -5,7 +5,7 @@
   "required": ["pr_id", "needs_spec"],
   "properties": {
     "pr_id": { "type": "string" },
-    "needs_spec": { "type": "boolean" },
+    "needs_spec": { "type": ["boolean", "null"] },
     "reasoning": { "type": "string" },
     "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
     "tier": { "type": "string" }

@@ -5,7 +5,7 @@ _Auto-generated from JSON Schema; do not edit by hand — see `scripts/contracts
 | Property | Type | Required | Description |
 |---|---|---|---|
 | `pr_id` | string | yes |  |
-| `needs_spec` | boolean | yes |  |
+| `needs_spec` | boolean \| null | yes |  |
 | `reasoning` | string | no |  |
 | `confidence` | enum | no |  |
 | `tier` | string | no |  |

@@ -1901,6 +1901,17 @@ def run(
                 if not reasons:
                     add_partial(state, f"gap_detector_invalid: pr_id={pr_id}")
                 continue
+            if verdict.get("needs_spec") is None:
+                # CCE-125: a validated null needs_spec is the agent's "couldn't
+                # judge" sentinel — advisory, not dropped work. Record it
+                # info-only and skip it (never appended, so it stays out of
+                # "Gaps flagged" and the digest); the run stays non-partial.
+                add_partial(
+                    state,
+                    f"gap_detector_unjudged: pr_id={pr_id}",
+                    info_only=True,
+                )
+                continue
             gap_verdicts.append(verdict)
 
         # Prepend What's New entry (only if we have PRs to report)

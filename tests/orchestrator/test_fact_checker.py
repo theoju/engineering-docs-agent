@@ -239,6 +239,41 @@ def test_fact_checker_failure_is_info_only(init_host, tmp_path, read_current_run
     assert cr["partial"] is False  # info_only: never flips partial
 
 
+def test_fact_checker_prose_contamination_rescued_stays_info_only(
+    init_host, tmp_path, read_current_run, monkeypatch
+):
+    # CCE-125 regression lock: a benign prose-contamination rescue on the
+    # fact-checker (advisory) dispatch must NEVER flip the run to partial. The
+    # fact-checker records all its dispatch reasons info_only *directly*
+    # (orchestrator_runner.py: the `for r in fc_reasons: add_partial(..., info_only=True)`
+    # loop), distinct from the blocking-pipeline `_record_dispatch_reasons`
+    # helper already covered by test_record_dispatch_reasons.py. The dry-run
+    # path returns fixture JSON cleanly and cannot emit a rescue reason, so we
+    # inject it at the dispatch_validated boundary (mirrors CCE-118's harness).
+    state_path = _host_with_module(init_host, tmp_path)
+    _precreate_page(tmp_path, CITED_PAGE)
+    fakes = tmp_path / "fakes"
+    _write_fakes(fakes)  # with_fact_checker=True -> the fact-checker dispatch fires
+
+    rescue = "prose_contamination_rescued: fact-checker"
+    orig = orchestrator_runner.dispatch_validated
+
+    def spy(name, payload, **kw):
+        out, reasons = orig(name, payload, **kw)
+        if name == "fact-checker":
+            # fact-checker emitted valid JSON wrapped in prose: a benign rescue.
+            reasons = reasons + [rescue]
+        return out, reasons
+
+    monkeypatch.setattr(orchestrator_runner, "dispatch_validated", spy)
+    rc = orchestrator_runner.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0
+
+    cr = read_current_run(state_path)
+    assert rescue in cr["partial_reasons"], cr["partial_reasons"]
+    assert cr["partial"] is False, cr["partial_reasons"]
+
+
 def test_fact_checker_skips_undecodable_page_without_crashing(
     init_host, tmp_path, read_current_run
 ):

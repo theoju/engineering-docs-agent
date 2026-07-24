@@ -156,9 +156,12 @@ def main() -> int:
     for rule in rules:
         out = run_rule(rule, args.config, args.paths)
         aggregated["results"].append(out)
-        if out.get("severity") == "block":
-            if any(not r["ok"] for r in out["results"]):
+        # Per-result severity (CCE-124) overrides the rule-global severity; a
+        # result with no severity falls back to it (byte-for-byte prior behavior).
+        for r in out["results"]:
+            if not r["ok"] and r.get("severity", out.get("severity")) == "block":
                 any_block_failed = True
+                break
 
     if args.json:
         json.dump(aggregated, sys.stdout)

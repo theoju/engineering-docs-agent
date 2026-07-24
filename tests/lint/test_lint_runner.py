@@ -181,3 +181,72 @@ def test_line_pinned_page_does_not_fail_aggregate_run(tmp_path):
     out = lint_runner.run_rule("citation_line_free", cfg, [page])
     assert out["severity"] == "warn"
     assert any(not r["ok"] for r in out["results"])  # finding present
+
+
+# ---------- per-result severity gate (CCE-124) ----------
+
+
+def _run_main_with_stub(tmp_path, monkeypatch, rule_output):
+    """Invoke lint_runner.main() with a single stubbed rule returning rule_output."""
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "lint"))
+    import lint_runner
+
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("lint: { tier1: default }\n")
+    page = tmp_path / "p.md"
+    page.write_text("# x\n")
+    monkeypatch.setattr(lint_runner, "enabled_rules", lambda c: ["citation_exists"])
+    monkeypatch.setattr(lint_runner, "run_rule", lambda *a, **k: rule_output)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["lint_runner.py", "--config", str(cfg), "--paths", str(page), "--json"],
+    )
+    return lint_runner.main()
+
+
+def test_per_result_warn_does_not_fail_aggregate(tmp_path, monkeypatch):
+    # A failing result carrying per-result severity "warn" must NOT fail the run,
+    # even though the rule's top-level severity is "block" (CCE-124 archive lens).
+    rc = _run_main_with_stub(
+        tmp_path,
+        monkeypatch,
+        {
+            "rule": "citation_exists",
+            "severity": "block",
+            "results": [
+                {"path": "p.md", "ok": False, "message": "bad", "severity": "warn"}
+            ],
+        },
+    )
+    assert rc == 0
+
+
+def test_per_result_block_fails_aggregate(tmp_path, monkeypatch):
+    rc = _run_main_with_stub(
+        tmp_path,
+        monkeypatch,
+        {
+            "rule": "citation_exists",
+            "severity": "block",
+            "results": [
+                {"path": "p.md", "ok": False, "message": "bad", "severity": "block"}
+            ],
+        },
+    )
+    assert rc == 1
+
+
+def test_missing_per_result_severity_falls_back_to_rule_global(tmp_path, monkeypatch):
+    # Backward-compat: a result with no per-result severity uses the rule-global
+    # severity — a failing block-rule result still fails the run.
+    rc = _run_main_with_stub(
+        tmp_path,
+        monkeypatch,
+        {
+            "rule": "citation_exists",
+            "severity": "block",
+            "results": [{"path": "p.md", "ok": False, "message": "bad"}],
+        },
+    )
+    assert rc == 1

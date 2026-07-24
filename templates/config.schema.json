@@ -99,7 +99,7 @@
         "ci_provider": {
           "type": "string",
           "enum": ["github", "circleci"],
-          "description": "Which CI provider runs the docs publish workflow. Default `github` (no field present). `circleci` is modeled but UNVALIDATED against a live host: scripts/verify_runner.py forks on this field and degrades honestly (a non-promoting 'modeled but unvalidated' result) rather than polling. Only `github` is end-to-end wired. See CCE-63."
+          "description": "Which CI provider runs the docs publish workflow. Default `github` (no field present). `circleci` is modeled but UNVALIDATED against a live host. Both post-merge seams fork on this field and degrade honestly for a non-github provider rather than acting: scripts/verify_runner.py (verify) returns a non-promoting 'modeled but unvalidated' result instead of polling (CCE-63); _maybe_auto_merge (trigger) records an info_only pages_dispatch_skipped reason instead of a GitHub Actions dispatch (CCE-123). The real CircleCI poll and trigger are stubbed. Only `github` is end-to-end wired. See CCE-63, CCE-123."
         }
       }
     },

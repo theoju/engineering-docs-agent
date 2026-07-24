@@ -13,6 +13,7 @@ from typing import Any, Callable
 import yaml
 
 from gh_client import GhClient
+from build_poller import resolve_build_trigger
 from state_io import (
     ConfigError,
     StateError,
@@ -2046,6 +2047,7 @@ def run(
             fact_warnings=state["current_run"].get("fact_check_warnings") or [],
             merge_settings=merge_settings,
             build_workflow=config.get("publishing", {}).get("build_workflow"),
+            ci_provider=config.get("publishing", {}).get("ci_provider"),
             deadline=deadline,
             clock=clock,
         )
@@ -2786,6 +2788,7 @@ def _maybe_auto_merge(
     fact_warnings: list[str],
     merge_settings: dict,
     build_workflow: str | None,
+    ci_provider: str | None = None,
     deadline: float | None,
     clock: Callable[[], float],
     sleep: Callable[[float], None] = time.sleep,
@@ -2882,12 +2885,20 @@ def _maybe_auto_merge(
             [(f"auto_merge_failed: {merged.error}", True)],
         )
     reasons: list[tuple[str, bool]] = [(f"auto_merge_succeeded: pr={pr_number}", True)]
-    if build_workflow:
-        dispatch = gh.workflow_run(build_workflow)
-        if dispatch.ok:
-            reasons.append((f"pages_dispatch_succeeded: {build_workflow}", True))
-        else:
-            reasons.append((f"pages_dispatch_failed: {dispatch.error}", True))
+    provider = ci_provider or "github"
+    if provider == "github":
+        if build_workflow:
+            dispatch = gh.workflow_run(build_workflow)
+            if dispatch.ok:
+                reasons.append((f"pages_dispatch_succeeded: {build_workflow}", True))
+            else:
+                reasons.append((f"pages_dispatch_failed: {dispatch.error}", True))
+    else:
+        # CCE-123: non-github providers degrade honestly — no GH Actions dispatch,
+        # one info_only reason. Real trigger stubbed behind UNVALIDATED_AGAINST_LIVE_HOST.
+        _triggered, trigger_reasons = resolve_build_trigger(provider)
+        for r in trigger_reasons:
+            reasons.append((f"pages_dispatch_skipped: {r}", True))
     return {"merged": True, "reason": None}, reasons
 
 

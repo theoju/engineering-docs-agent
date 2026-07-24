@@ -89,6 +89,7 @@ def _run(
     build_workflow="docs-agent-pages.yml",
     deadline=None,
     clock=None,
+    ci_provider=None,
 ):
     clock = clock or FakeClock()
     return orun._maybe_auto_merge(
@@ -101,6 +102,7 @@ def _run(
         deadline=deadline,
         clock=clock,
         sleep=clock.sleep,
+        ci_provider=ci_provider,
     )
 
 
@@ -266,6 +268,28 @@ def test_no_build_workflow_skips_dispatch():
     outcome, _ = _run(gh, build_workflow=None)
     assert outcome["merged"] is True
     assert not [c for c in gh.calls if c[0] == "workflow_run"]
+
+
+def test_circleci_provider_skips_dispatch_with_info_reason():
+    """CCE-123: a circleci host merges but does NOT fire a GH Actions dispatch;
+    it records one info_only pages_dispatch_skipped reason instead."""
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
+    outcome, reasons = _run(gh, ci_provider="circleci")
+    assert outcome["merged"] is True
+    assert not [c for c in gh.calls if c[0] == "workflow_run"]
+    assert (
+        "pages_dispatch_skipped: circleci_trigger_modeled_but_unvalidated",
+        True,
+    ) in reasons
+
+
+def test_github_provider_still_dispatches():
+    """CCE-123 backward-compat: explicit ci_provider=github behaves identically
+    to the pre-CCE-123 unconditional dispatch."""
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
+    outcome, reasons = _run(gh, ci_provider="github")
+    assert ("workflow_run", ("docs-agent-pages.yml",)) in gh.calls
+    assert ("pages_dispatch_succeeded: docs-agent-pages.yml", True) in reasons
 
 
 def test_dispatch_failure_is_info_only_after_merge():

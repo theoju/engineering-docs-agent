@@ -142,3 +142,30 @@ def resolve_build_verdict(
         {"verified": [], "failed": [], "build_status": map_circleci_status(status)},
         [],
     )
+
+
+# --- trigger seam (CCE-123) -------------------------------------------------
+
+# Fixed-literal partial reason for the honest trigger degrade. Never interpolates
+# a token/response (same discipline as PROVIDER_UNVALIDATED_REASON).
+TRIGGER_UNVALIDATED_REASON = "circleci_trigger_modeled_but_unvalidated"
+
+
+def trigger_circleci(client: Any) -> bool:
+    """Real CircleCI v2 pipeline trigger. NOT IMPLEMENTED — no live CircleCI host
+    exists to validate the trigger API (CCE-123; mirrors CCE-63 §10). Reached only
+    once UNVALIDATED_AGAINST_LIVE_HOST is flipped."""
+    raise NotImplementedError("CircleCI trigger unvalidated — see CCE-123")
+
+
+def resolve_build_trigger(provider: str) -> tuple[bool, list[str]]:
+    """Return (triggered, reasons) for a non-github provider's post-merge build
+    trigger. While UNVALIDATED_AGAINST_LIVE_HOST is True, degrade honestly: no
+    dispatch, a fixed 'modeled but unvalidated' reason. Once flipped, route into
+    trigger_circleci (which raises until the real trigger ships). GitHub never
+    routes here — it keeps its native gh.workflow_run dispatch in _maybe_auto_merge."""
+    if UNVALIDATED_AGAINST_LIVE_HOST:
+        return (False, [TRIGGER_UNVALIDATED_REASON])
+    client = CircleCiClient()
+    trigger_circleci(client)  # raises until the real trigger ships
+    return (True, [])

@@ -80,3 +80,30 @@ def test_publish_trigger_is_provider_aware():
 
     trigger_src = inspect.getsource(orchestrator_runner._maybe_auto_merge)
     assert "ci_provider" in trigger_src
+
+
+# --- trigger seam (CCE-123) -------------------------------------------------
+
+
+def test_resolve_build_trigger_degrades_honestly_while_unvalidated():
+    triggered, reasons = build_poller.resolve_build_trigger("circleci")
+    assert triggered is False  # no dispatch performed
+    assert reasons == ["circleci_trigger_modeled_but_unvalidated"]
+
+
+def test_resolve_build_trigger_flag_flip_routes_into_trigger_circleci(monkeypatch):
+    # Once the honesty gate flips, the fork routes into the unimplemented trigger.
+    monkeypatch.setattr(build_poller, "UNVALIDATED_AGAINST_LIVE_HOST", False)
+    with pytest.raises(NotImplementedError):
+        build_poller.resolve_build_trigger("circleci")
+
+
+def test_trigger_circleci_is_a_stub():
+    with pytest.raises(NotImplementedError):
+        build_poller.trigger_circleci(build_poller.FakeCircleCiClient())
+
+
+def test_trigger_unvalidated_reason_is_fixed_literal():
+    _triggered, reasons = build_poller.resolve_build_trigger("circleci")
+    assert reasons == [build_poller.TRIGGER_UNVALIDATED_REASON]
+    assert "token" not in build_poller.TRIGGER_UNVALIDATED_REASON

@@ -78,7 +78,7 @@ The canonical schema is in §Output schema above. The shape described here is th
 
 1. Run `python <plugin_root>/scripts/lint/lint_runner.py --config <config_path> --paths <paths...> --json`.
    Substitute the literal value of `plugin_root` from the input — do not assume the runner is on `$PATH` or at a relative path. Quote the plugin_root path if it contains spaces.
-2. Parse aggregated output. For each per-rule result, extract pass/fail per path with severity.
+2. Parse aggregated output. For each per-rule result, extract pass/fail per path. Take each failing path's `severity` from that result's **per-result** `severity` field when present, else fall back to the rule's top-level `severity`. Per-result severity lets a normally-blocking rule downgrade specific pages to advisory — e.g. `citation_exists` emits `warn` (not `block`) for pages under an `archive-index`-generator section (CCE-124), since an archive page's citations are historical and may name removed code.
 3. If `voice_consistency` is enabled in config and not implemented as a script, perform LLM check: for each path, compare prose against voice_samples; flag mismatch as `severity: block`, message describing the mismatch.
 4. Build the structured response with two lists.
 

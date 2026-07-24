@@ -113,7 +113,22 @@ merge succeeds → provider fork → github dispatches / circleci records the sk
 - `_run` helper gains a `ci_provider=None` param threaded to `_maybe_auto_merge`.
 - circleci provider + eligible + green checks → `merged True`, **no** `workflow_run` in `gh.calls`, `("pages_dispatch_skipped: circleci_trigger_modeled_but_unvalidated", True) in reasons`.
 - github default (existing `test_successful_merge_dispatches_pages_workflow`, `test_no_build_workflow_skips_dispatch`, `test_dispatch_failure_is_info_only_after_merge`) — unchanged, still green.
-- `test_all_reasons_are_info_only` still holds on the circleci path.
+- `test_all_reasons_are_info_only` — unchanged and still green, but note it does
+  **not** reach the circleci path: it drives the github default with a red check,
+  which short-circuits at `checks_failed` before the dispatch fork. The circleci
+  reason's `info_only=True` is instead pinned by the `True` in the exact-tuple
+  assertion of the circleci test above.
+
+**Deliberate non-coverage (CCE-123 adversarial validation).** No test drives
+`_maybe_auto_merge` with `ci_provider="circleci"` _and_
+`UNVALIDATED_AGAINST_LIVE_HOST=False`. In that state `resolve_build_trigger` →
+`trigger_circleci` raises `NotImplementedError` _after_ the (irreversible) merge,
+and the dispatch fork is intentionally **not** wrapped in try/except: the raise is
+the honesty gate's "you flipped the flag without shipping the real trigger" signal,
+symmetric with the verify seam (`resolve_build_verdict`). Wrapping it would silence
+that signal. The flag is a hardcoded, always-`True` module constant in production,
+so this path is unreachable via any host config — the loud crash is a developer-time
+guardrail, not a runtime path.
 
 ## 7. Acceptance criteria
 

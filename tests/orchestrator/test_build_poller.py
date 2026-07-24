@@ -69,6 +69,13 @@ def test_publish_trigger_is_provider_aware():
 
     trigger_src = inspect.getsource(orchestrator_runner._maybe_auto_merge)
     assert "ci_provider" in trigger_src
+    # Guard the ROUTING, not just the signature token: a wrong impl that keeps
+    # the ci_provider param but drops the non-github fork must fail here. The
+    # bare `"ci_provider" in src` check was vacuous — reverting the whole fork
+    # left the param token in the signature and this test still passed
+    # (CCE-123 adversarial-validation finding).
+    assert "resolve_build_trigger" in trigger_src
+    assert "pages_dispatch_skipped" in trigger_src
 
 
 # --- trigger seam (CCE-123) -------------------------------------------------
@@ -94,5 +101,13 @@ def test_trigger_circleci_is_a_stub():
 
 def test_trigger_unvalidated_reason_is_fixed_literal():
     _triggered, reasons = build_poller.resolve_build_trigger("circleci")
-    assert reasons == [build_poller.TRIGGER_UNVALIDATED_REASON]
+    # Pin the concrete literal VALUE (not the constant against itself) so a
+    # rename of the string is caught here — asserting `reasons ==
+    # [TRIGGER_UNVALIDATED_REASON]` alone stayed green under a value mutation
+    # (CCE-123 adversarial-validation finding).
+    assert (
+        build_poller.TRIGGER_UNVALIDATED_REASON
+        == "circleci_trigger_modeled_but_unvalidated"
+    )
+    assert reasons == ["circleci_trigger_modeled_but_unvalidated"]
     assert "token" not in build_poller.TRIGGER_UNVALIDATED_REASON

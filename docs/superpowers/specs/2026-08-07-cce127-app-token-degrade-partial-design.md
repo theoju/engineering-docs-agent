@@ -167,47 +167,64 @@ integrity of the PR itself, not merely a note attached to it.
 
 ### Touch-points
 
-| #   | File                                                 | Change                                                                                                                                                                                                                                        |
-| --- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T1  | `templates/workflow-run.yml`                         | Add `continue-on-error: true` to the App-token step; export `DOCS_AGENT_APP_TOKEN_STATUS: ${{ steps.app-token.outcome }}` into the authoring step's env.                                                                                      |
-| T2  | `.github/workflows/docs-agent-nightly.yml`           | Same two changes, **plus** the missing `if: vars.DOCS_AGENT_APP_CLIENT_ID != ''` guard, the `\|\| secrets.GITHUB_TOKEN` fallbacks on both `checkout` and `GH_TOKEN`, and the absent `SLACK_WEBHOOK_URL` job-env line. Closes CCE-71 / CCE-80. |
-| T3  | `scripts/orchestrator_runner.py`                     | Read `DOCS_AGENT_APP_TOKEN_STATUS` at run start; on `failure`, record a blocking `app_token_unavailable` reason.                                                                                                                              |
-| T4  | `scripts/notify_run_death.py` (new) + both workflows | Stdlib-only death alarm, invoked from an `if: failure()` step.                                                                                                                                                                                |
+| #   | File                                       | Change                                                                                                                                                                                                                                        |
+| --- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1  | `templates/workflow-run.yml`               | Add `continue-on-error: true` to the App-token step; export `DOCS_AGENT_APP_TOKEN_STATUS: ${{ steps.app-token.outcome }}` into the authoring step's env.                                                                                      |
+| T2  | `.github/workflows/docs-agent-nightly.yml` | Same two changes, **plus** the missing `if: vars.DOCS_AGENT_APP_CLIENT_ID != ''` guard, the `\|\| secrets.GITHUB_TOKEN` fallbacks on both `checkout` and `GH_TOKEN`, and the absent `SLACK_WEBHOOK_URL` job-env line. Closes CCE-71 / CCE-80. |
+| T3  | `scripts/orchestrator_runner.py`           | Read `DOCS_AGENT_APP_TOKEN_STATUS` at run start; on `failure`, record a blocking `app_token_unavailable` reason.                                                                                                                              |
 
-### T4 — the death alarm
+### Residual case this design does NOT cover
 
-Once T1–T3 land, App-token failure no longer kills the job, so the notifier runs normally
-and the digest carries the reason. T4 exists only for deaths the orchestrator cannot report
-on itself: an expired `CLAUDE_CODE_OAUTH_TOKEN` failing the assertion step, an orchestrator
-crash on the `exiting 1` path, or a runner OOM. Those are precisely the modes that produced
-15 silent nights.
+`run()` returns 2 at three points **before** `state["current_run"]` is created: no config,
+invalid config, and invalid state. An App-token failure on a host whose config is also
+broken therefore records nothing and stays a red job. The read cannot be hoisted above those
+returns, because `add_partial` would then create a stub `current_run` that the dict literal
+initializing the real one immediately overwrites — silently swallowing the reason. The
+narrow valid window is _after_ `current_run` exists and _before_ the auto-merge decision.
+This residual is accepted: a host with an unparseable config has a louder problem than a
+missing App token.
 
-It is a **step, not a job**. The tree is already checked out by that point; a separate job
-would pay for a second checkout to solve nothing.
+### Split out — CCE-128 (death alarm)
 
-`scripts/notify_run_death.py` follows the `scripts/jira_transition_on_merge.py` precedent:
-stdlib-only (`urllib`), no new runtime dependency. It reads the host's existing
-`notifications:` block from `.engineering-docs-agent/config.yml` and posts a single line
-naming the repo, the run URL, and the failed step. It follows the
-`scripts/enable_pages.py` precedent of **always returning 0** — the job is already red, and
-an alarm that fails must never mask the original failure.
+An earlier draft of this spec included a T4: a stdlib `scripts/notify_run_death.py` invoked
+from an `if: failure()` step, to alarm on deaths the orchestrator cannot report itself
+(expired `CLAUDE_CODE_OAUTH_TOKEN`, orchestrator crash, runner OOM). Adversarial review of
+the implementation recon found six unresolved design questions and one factual error in the
+draft, so it is split to **CCE-128** rather than blocking this fix.
 
-**Prerequisite, and it is not optional.** This host currently has:
+The factual error is worth recording, because it is the same class of mistake as the one
+this ticket exists to fix. The draft asserted T4 should be "a step, not a job — the tree is
+already checked out by that point." That is false for pre-checkout failures:
+`scripts/notify_run_death.py` does not exist on the runner until the checkout step runs, and
+the checkout step is _after_ the App-token step. An alarm designed to cover early deaths
+could not execute during the earliest ones. Asserting a mechanism works without checking
+when its preconditions hold is exactly how the unreachable `||` fallback survived two
+months of review.
 
-```yaml
-notifications:
-  slack:
-    enabled: false
-  email:
-    enabled: false
-```
+CCE-128 must resolve, before implementation:
 
-and `.github/workflows/docs-agent-nightly.yml` never passes `SLACK_WEBHOOK_URL`. T4 is
-therefore **inert on this host** until Slack is enabled in config, the `SLACK_WEBHOOK_URL`
-secret is set, and T2 adds the job-env line. Shipping T4 without those three would deliver
-an anti-silence mechanism that is itself silent. The implementation plan must treat
-enabling them as part of T4's definition of done, and `notify_run_death.py` must emit a
-`::warning::` naming the missing setting when it finds every channel disabled.
+1. **Failed-step discovery.** GitHub exposes no built-in "which step failed" to a later
+   step. Options are per-step `steps.<id>.outcome` (most dogfood steps have no `id:`), an
+   API call to the jobs endpoint, or dropping the field from the message contract.
+2. **Pre-checkout availability.** Where the script lives when checkout has not run.
+3. **Config loading.** `state_io.load_config_validated` raises `ConfigError` on a missing or
+   malformed file — the exact conditions under which the alarm most needs to fire. A
+   tolerant reader is likely required, which is a second config-loading path to justify.
+4. **Bare-host nagging.** T4 ships in `templates/workflow-run.yml`, so every onboarded host
+   inherits it. `scripts/preflight_host.py` writes `notifications` disabled by default, so
+   every host would emit a `::warning::` on every failed run about a setting it may have
+   deliberately declined. The generic-first mandate forbids that.
+5. **Parity impact.** A new run-step changes `_step_signature` in
+   `tests/templates/test_workflow_run_parity.py`, whose signature for run-steps is the first
+   line of `run:`. The two files invoke Python by different paths, so the step lands as a
+   dogfood-only signature and fails `test_01` unless allowlisted.
+6. **The script's contract.** Flags, env vars read, exact message text, retry behavior, and
+   the precise `::warning::` string are all unspecified.
+
+Independently of CCE-128, this host has `notifications.slack.enabled: false` and
+`.github/workflows/docs-agent-nightly.yml` passes no `SLACK_WEBHOOK_URL`. T2 adds the
+job-env line; enabling the channel remains operator work, and no alarm of any design can
+help until it is done.
 
 ## Rejected alternatives
 
@@ -247,8 +264,11 @@ T1/T2 extend `tests/templates/test_workflow_run_parity.py` — the parity assert
 correct home, since T2's purpose is eliminating divergence.
 `.github/workflows/actionlint.yml` covers YAML validity.
 
-T4 gets a unit test for the all-channels-disabled warning path and for the always-exit-0
-contract.
+Two further suites glob both workflow files and must stay green:
+`tests/ci/test_workflow_auth_tier.py` (asserts no `app-id:` and no `secrets.JIRA_EMAIL`) and
+`tests/ci/test_workflow_node_runtime.py` (asserts no Node-20 action majors). Neither needs
+changing, but the verification step must run them — a plan that names only the parity file
+leaves an implementer unaware of where a bad action major surfaces.
 
 ## Blast radius
 
@@ -290,7 +310,14 @@ guard and the CCE-89 D2 auto-close sweep.
 
 - Full `python3 -m pytest` green on the branch merged with `main`, per the integrated-suite
   rule in `CLAUDE.md`.
-- `actionlint` green on both workflow files.
+- `actionlint` green on `.github/workflows/docs-agent-nightly.yml`. Note that CI does **not**
+  cover the template: `.github/workflows/actionlint.yml` runs bare `actionlint -color`, which
+  searches `.github/workflows/` only, and no `.github/actionlint.yml` extends that path. The
+  template must therefore be linted by explicit invocation
+  (`actionlint templates/workflow-run.yml`) as a plan step. Claiming CI coverage it does not
+  have would repeat the `test -f` versus real-consumer-tool failure mode named in `CLAUDE.md`.
+  Extending actionlint's search path to `templates/` is worth a follow-up ticket — that gap is
+  how the template drifted from the dogfood in the first place.
 - A `workflow_dispatch` fire on `theoju/engineering-docs-agent` with the App installed
   produces a non-partial run (proves no regression on the healthy path).
 - A `workflow_dispatch` fire with `DOCS_AGENT_APP_CLIENT_ID` temporarily pointed at a

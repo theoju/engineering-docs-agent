@@ -46,8 +46,10 @@ uv python install 3.11
 
 - [ ] **Step 2: Create the virtualenv**
 
+`--seed` is required: a bare `uv venv` creates a **pip-less** environment, and Step 3's `python -m pip install` then fails with "No module named pip". `--clear` is required because a stale Python 3.13 `.venv` from 2026-05-20 is already present — its `bin/python` is a dangling symlink to a Homebrew `python@3.13` that no longer exists, so it is listed by `find` but errors with ENOENT on execution.
+
 ```bash
-uv venv --python 3.11 .venv
+uv venv --python 3.11 --seed --clear .venv
 .venv/bin/python --version
 ```
 

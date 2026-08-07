@@ -1090,3 +1090,63 @@ def test_decision_target_routed_to_archive(tmp_path, monkeypatch):
     ]
     assert routed, "expected a page-author dispatch for the routed archive page"
     assert routed[0]["frontmatter_template"].get("doc_kind") == "decision"
+
+
+# ---------------------------------------------------------------------------
+# CCE-127: DOCS_AGENT_APP_TOKEN_STATUS degrades the run instead of killing it
+#
+# The workflow's App-token step now runs under continue-on-error and exports
+# steps.app-token.outcome. Only the literal "failure" is a degradation: the
+# run fell back to secrets.GITHUB_TOKEN, whose PRs never fire host CI, so the
+# run must go partial to stop _maybe_auto_merge from merging unvalidated docs.
+# "skipped" is the documented bare-host path (no DOCS_AGENT_APP_CLIENT_ID) and
+# must stay silent, as must "success" and unset.
+#
+# The partial -> no-auto-merge interlock this rests on is already locked by
+# tests/orchestrator/test_auto_merge.py::test_partial_run_skips_with_info_reason,
+# which asserts the same outcome plus the absence of any pr_merge call.
+# ---------------------------------------------------------------------------
+
+
+def _seeded():
+    return {"version": "1", "last_successful_run": {}}
+
+
+def test_app_token_failure_flips_partial(
+    tmp_path, monkeypatch, init_host, read_current_run
+):
+    """A failed App-token step degrades the run rather than killing the job."""
+    state_path = init_host(_seeded(), CONFIG_YAML)
+    monkeypatch.setenv("DOCS_AGENT_APP_TOKEN_STATUS", "failure")
+
+    _run_inproc(tmp_path, FAKES)
+
+    cr = read_current_run(state_path)
+    assert cr["partial"] is True
+    assert any(r.startswith("app_token_unavailable:") for r in cr["partial_reasons"])
+
+
+def test_app_token_skipped_is_silent(
+    tmp_path, monkeypatch, init_host, read_current_run
+):
+    """The bare-host path: no App configured is normal, not a degradation."""
+    state_path = init_host(_seeded(), CONFIG_YAML)
+    monkeypatch.setenv("DOCS_AGENT_APP_TOKEN_STATUS", "skipped")
+
+    _run_inproc(tmp_path, FAKES)
+
+    cr = read_current_run(state_path)
+    # Asserts absence of this reason, not `partial is False` — a dry run may be
+    # partial for unrelated causes, and asserting the flag would fail wrongly.
+    assert not any(r.startswith("app_token_unavailable") for r in cr["partial_reasons"])
+
+
+def test_app_token_unset_is_silent(tmp_path, monkeypatch, init_host, read_current_run):
+    """Unset behaves identically to skipped — local shell runs set nothing."""
+    state_path = init_host(_seeded(), CONFIG_YAML)
+    monkeypatch.delenv("DOCS_AGENT_APP_TOKEN_STATUS", raising=False)
+
+    _run_inproc(tmp_path, FAKES)
+
+    cr = read_current_run(state_path)
+    assert not any(r.startswith("app_token_unavailable") for r in cr["partial_reasons"])

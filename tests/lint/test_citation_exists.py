@@ -2,6 +2,9 @@ from __future__ import annotations
 import json, subprocess, sys
 from pathlib import Path
 
+import pytest
+import yaml
+
 from scripts.lint import citation_exists
 
 SCRIPT = Path(citation_exists.__file__)
@@ -527,6 +530,120 @@ def test_build_output_path_is_skipped(tmp_path):
     assert ok is True, msg
 
 
+# ---------- discriminating build-dir tests (CCE-131 final-review Finding 2) --
+#
+# test_build_output_path_is_skipped above uses site_dir: site — the same
+# value as the old hardcoded "site" fallback — so it passes against
+# `def _build_dir(...): return "site"` too. It cannot tell the real
+# implementation apart from a constant. These tests can.
+
+
+def test_build_output_honors_reconfigured_site_dir(tmp_path):
+    """site_dir: public must route public/, not the old hardcoded site/."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "mkdocs.yml").write_text("docs_dir: docs/site-src\nsite_dir: public\n")
+    page = repo / "page.md"
+    page.write_text("Published to `public/api/http/index.html`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is True, msg
+
+
+def test_old_default_prefix_blocks_once_site_dir_is_reconfigured(tmp_path):
+    """The flip side of the above: once site_dir is public, site/ is an
+    ordinary (nonexistent) path again, not a permanently exempt prefix."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "mkdocs.yml").write_text("docs_dir: docs/site-src\nsite_dir: public\n")
+    page = repo / "page.md"
+    page.write_text("See `site/api/http/index.html`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is False
+    assert "site/api/http/index.html" in msg
+
+
+def test_no_mkdocs_yml_at_all_blocks_invented_site_path(tmp_path):
+    """No parseable mkdocs config at all: skip nothing."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("See `site/invented.js`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is False
+    assert "site/invented.js" in msg
+
+
+def test_material_style_python_name_tag_parses_and_site_dir_is_honored(tmp_path):
+    """Regression for the dead-code half: plain yaml.safe_load raises on
+    mkdocs-material's `!!python/name:` tag (used by pymdownx.superfences for
+    custom fences), so a naive parse-or-fallback implementation never
+    actually runs the parse branch on a Material config. The lax loader must
+    degrade the unknown tag to None instead of aborting the whole parse."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "mkdocs.yml").write_text(
+        "docs_dir: docs/site-src\n"
+        "site_dir: public\n"
+        "markdown_extensions:\n"
+        "  - pymdownx.superfences:\n"
+        "      custom_fences:\n"
+        "        - name: mermaid\n"
+        "          class: mermaid\n"
+        "          format: !!python/name:pymdownx.superfences.fence_code_format\n"
+    )
+    page = repo / "page.md"
+    page.write_text("Published to `public/api/http/index.html`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is True, msg
+
+
+# ---------- _build_dir must not fail open (CCE-131 final-review Finding 1) --
+
+
+def test_build_dir_is_empty_with_no_mkdocs_config(tmp_path):
+    """No mkdocs.yml -> skip NOTHING. The previous unconditional "site"
+    fallback made site/ a permanently reserved prefix on every host, even one
+    that keeps real source there."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "README.md").write_text("host\n")
+    _commit_all(repo)
+    assert citation_exists._build_dir(repo) == ""
+
+
+def test_no_mkdocs_config_does_not_reserve_site_prefix(tmp_path):
+    """A host with no mkdocs.yml that happens to keep real source under
+    site/ must not get site/ treated as an always-exempt build-output
+    prefix: an invented sibling path must still block."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "site" / "src").mkdir(parents=True)
+    (repo / "site" / "src" / "real.js").write_text("// real\n")
+    page = repo / "page.md"
+    page.write_text("See `site/src/totally_invented.js` for the sentinel.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "site/src/totally_invented.js" in msg
+
+
+def test_this_repos_own_mkdocs_yml_parses_via_lax_loader():
+    """CCE-131 final-review Finding 1(b): plain yaml.safe_load cannot read
+    this repo's own mkdocs.yml — Material's `!!python/name:` tag raises
+    ConstructorError — so the mkdocs-parsing branch was dead code here; the
+    old code returned 'site' only because it coincides with the hardcoded
+    fallback. _build_dir must now return 'site' by actually parsing."""
+    repo_root = Path(__file__).resolve().parents[2]
+    mkdocs_yml = repo_root / "mkdocs.yml"
+    assert mkdocs_yml.exists()  # sanity: this is really the repo root
+    with pytest.raises(yaml.YAMLError):
+        yaml.safe_load(mkdocs_yml.read_text())
+    assert citation_exists._build_dir(repo_root) == "site"
+
+
 def test_no_docs_dir_configured_still_blocks(tmp_path):
     """Generic-first guard: a host with no site.docs_dir keeps today's
     repo-root-only behavior."""
@@ -658,3 +775,25 @@ def test_stale_exemption_is_noted_without_blocking(tmp_path):
     assert ok is True
     assert "stale exemption" in msg
     assert "scripts/real.py" in msg
+
+
+# ---------- symbol loop honors example_prefixes too (CCE-131 final-review Finding 6) --
+
+
+def test_symbol_citation_under_example_prefix_is_skipped(tmp_path):
+    """The symbol-existence loop in check_path checked `exempt` but not
+    example_prefixes. Harmless while the cited file genuinely does not exist
+    (the loop `continue`s on a missing target, already reported by the paths
+    loop) -- but a host with a real example/ tree that did not reconfigure
+    the prefix has a real file there, and the symbol-existence check must
+    still treat example/ as reserved rather than confirming/denying a
+    fictional symbol inside a real file."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "example").mkdir()
+    (repo / "example" / "auth.py").write_text("def real_but_irrelevant():\n    pass\n")
+    page = repo / "page.md"
+    page.write_text("See `example/auth.py:totally_fake_symbol`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg

@@ -25,6 +25,7 @@ import json
 import re
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -60,33 +61,33 @@ DEFAULT_EXEMPT_TOKENS = ("test_snake_case",)
 
 
 def strip_fenced_blocks(text: str) -> str:
-    """Drop fenced regions; return the remaining prose lines.
+    """Drop fenced regions; return the remaining prose lines, in document order.
 
     CCE-131: an UNTERMINATED fence fails closed. Previously an unclosed fence
     swallowed every line to EOF, silently disabling this Tier-1 block rule for
-    the rest of the file with no report. Buffered lines are now flushed back
-    into the prose so their citations are still checked.
+    the rest of the file with no report.
+
+    Lines are appended to ``out`` as they are read, fenced or not. On a
+    properly terminated fence, the buffered fenced lines are cut back out
+    (``del out[fence_start:]``) so a closed fence still strips cleanly. On an
+    unterminated fence, nothing is ever cut, so the trailing lines stay in
+    their original document position instead of being reordered to the end.
     """
     out: list[str] = []
-    pending: list[str] = []
     in_fence = False
     fence = ""
+    fence_start = 0
     for line in text.splitlines():
         stripped = line.lstrip()
         if not in_fence and (stripped.startswith("```") or stripped.startswith("~~~")):
             in_fence, fence = True, stripped[:3]
-            pending = []
+            fence_start = len(out)
             continue
         if in_fence and stripped.startswith(fence):
             in_fence = False
-            pending = []
-            continue
-        if in_fence:
-            pending.append(line)
+            del out[fence_start:]
             continue
         out.append(line)
-    if in_fence:
-        out.extend(pending)
     return "\n".join(out)
 
 
@@ -224,17 +225,32 @@ def _docs_dir(config: dict) -> str:
     return str((config.get("site") or {}).get("docs_dir") or "").strip("/")
 
 
+@lru_cache(maxsize=None)
 def _build_dir(repo_root: Path) -> str:
-    """mkdocs site_dir (generated build output), default 'site'.
+    """mkdocs site_dir (generated build output). Empty when there is no
+    parseable mkdocs config -- skip NOTHING rather than reserving a prefix.
 
-    Build artifacts are generated, never tracked, so a page naming one is
-    making a correct reference — not a confabulation. A host on a different
-    generator simply has no such directory and this skips nothing.
+    CCE-131 review: the previous unconditional "site" fallback made site/ a
+    permanently exempt prefix on every host, so an invented path under site/
+    passed on a host that keeps real source there. And plain yaml.safe_load
+    cannot read a mkdocs-material config -- Material standardly requires
+    !!python/name: and !ENV tags, and `theme: material` is this plugin's own
+    default -- so the parse branch never ran. A permissive multi-constructor
+    degrades unknown tags to None instead of aborting the whole parse.
+
+    Cached per repo_root: check_path calls this once per page and main()
+    loops over every page in a run (91 on this host), and mkdocs.yml does not
+    change mid-run.
     """
+
+    class _LaxLoader(yaml.SafeLoader):
+        pass
+
+    _LaxLoader.add_multi_constructor("", lambda loader, suffix, node: None)
     try:
-        mk = yaml.safe_load((repo_root / "mkdocs.yml").read_text()) or {}
+        mk = yaml.load((repo_root / "mkdocs.yml").read_text(), Loader=_LaxLoader) or {}
     except (OSError, yaml.YAMLError):
-        return "site"
+        return ""
     return str(mk.get("site_dir") or "site").strip("/")
 
 
@@ -331,6 +347,8 @@ def check_path(
         rel = _relativize(bare, repo_root)
         if rel is None:
             continue
+        if any(rel.startswith(p) for p in prefixes):
+            continue  # reserved illustrative namespace, never expected to resolve
         target = repo_root / rel
         if not target.exists():
             continue  # nonexistent path already reported by the paths loop

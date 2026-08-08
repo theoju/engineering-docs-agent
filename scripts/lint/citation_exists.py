@@ -48,20 +48,33 @@ _PLACEHOLDER_MARKERS = ("<", ">", "*", "{", "}", "YYYY", "...")
 
 
 def strip_fenced_blocks(text: str) -> str:
-    """Drop ``` / ~~~ fenced regions; return the remaining prose lines."""
+    """Drop fenced regions; return the remaining prose lines.
+
+    CCE-131: an UNTERMINATED fence fails closed. Previously an unclosed fence
+    swallowed every line to EOF, silently disabling this Tier-1 block rule for
+    the rest of the file with no report. Buffered lines are now flushed back
+    into the prose so their citations are still checked.
+    """
     out: list[str] = []
+    pending: list[str] = []
     in_fence = False
     fence = ""
     for line in text.splitlines():
         stripped = line.lstrip()
         if not in_fence and (stripped.startswith("```") or stripped.startswith("~~~")):
             in_fence, fence = True, stripped[:3]
+            pending = []
             continue
         if in_fence and stripped.startswith(fence):
             in_fence = False
+            pending = []
             continue
-        if not in_fence:
-            out.append(line)
+        if in_fence:
+            pending.append(line)
+            continue
+        out.append(line)
+    if in_fence:
+        out.extend(pending)
     return "\n".join(out)
 
 

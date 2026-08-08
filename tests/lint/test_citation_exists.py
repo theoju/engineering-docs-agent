@@ -2,11 +2,9 @@ from __future__ import annotations
 import json, subprocess, sys
 from pathlib import Path
 
-SCRIPTS_LINT = Path(__file__).parent.parent.parent / "scripts" / "lint"
-sys.path.insert(0, str(SCRIPTS_LINT))
-import citation_exists  # noqa: E402
+from scripts.lint import citation_exists
 
-SCRIPT = SCRIPTS_LINT / "citation_exists.py"
+SCRIPT = Path(citation_exists.__file__)
 
 
 # ---------- extraction (pure) ----------
@@ -60,6 +58,34 @@ def test_vocabulary_tokens_skipped():
     # No slash and not a test identifier -> not a citation.
     text = "`partial_reasons` `run.time_budget_seconds` `frontmatter_contract.py`"
     assert citation_exists.extract_citations(text) == {"paths": [], "tests": []}
+
+
+def test_unterminated_fence_still_checks_trailing_prose():
+    """CCE-131: an unclosed fence used to swallow the rest of the file,
+    silently disabling this block rule from that point on."""
+    text = (
+        "Intro citing `scripts/real.py`.\n"
+        "\n"
+        "```python\n"
+        "never_closed = True\n"
+        "\n"
+        "Trailing prose citing `scripts/after_fence.py`.\n"
+    )
+    paths = citation_exists.extract_citations(text)["paths"]
+    assert "scripts/after_fence.py" in paths
+
+
+def test_terminated_fence_content_is_still_stripped():
+    """The fix must not stop stripping properly closed fences."""
+    text = (
+        "Before `scripts/before.py`.\n"
+        "```python\n"
+        "x = `scripts/inside_fence.py`\n"
+        "```\n"
+        "After `scripts/after.py`.\n"
+    )
+    paths = citation_exists.extract_citations(text)["paths"]
+    assert paths == ["scripts/before.py", "scripts/after.py"]
 
 
 # ---------- verification + CLI (tmp git host) ----------

@@ -9,8 +9,8 @@ source_files:
   - docs/superpowers/**
   - scripts/audit_docs.py
   - scripts/verify_citations.py
-  - scripts/verify_docs_diagrams.py
-  - scripts/{verify_docs_diagrams,audit_docs,build_doc_source_map}.py
+  - scripts/source_map.py
+  - scripts/source_drift.py
   - site-src/core/**
   - tests/orchestrator/test_source_map_stage.py
   - scripts/lint/citation_exists.py
@@ -94,10 +94,10 @@ stale citation. Two Tier-1 lints run on every authored page automatically,
 independent of pins, wired into the default rule set
 (`scripts/lint/lint_runner.py:TIER1_DEFAULT`):
 
-| Rule                 | Severity | Enforces                                                          |
-| --------------------- | -------- | ------------------------------------------------------------------ |
-| `citation_exists`     | block    | every cited path, `:symbol`, and test identifier actually exists   |
-| `citation_line_free`  | warn     | no surviving `path:line` pin outside the C1 mechanism above        |
+| Rule                 | Severity | Enforces                                                         |
+| -------------------- | -------- | ---------------------------------------------------------------- |
+| `citation_exists`    | block    | every cited path, `:symbol`, and test identifier actually exists |
+| `citation_line_free` | warn     | no surviving `path:line` pin outside the C1 mechanism above      |
 
 The grammar — a bare repo path, or a path with a trailing `:symbol` naming a
 `def`/`class` (`Class.method` for a method):
@@ -111,7 +111,7 @@ Never `path:line` or `path:start-end`. Line numbers drift under
 routine code churn, and a drifting citation used to surface nightly as a
 `fact-checker` `contradiction` — a false alarm that tripped the CCE-101
 zero-warnings auto-merge gate on noise, not a real defect. `citation_exists`
-now owns citation *existence*; `agents/fact-checker.md` is scoped to
+now owns citation _existence_; `agents/fact-checker.md` is scoped to
 behavioral truth only and must not emit `contradiction` for citation
 location or line drift (CCE-122).
 
@@ -137,7 +137,7 @@ Two escape hatches exist, both deliberate rather than silent:
   (`scripts/lint/citation_exists.py:example_prefixes`). The `source_files`
   glob in the C2 example below uses this namespace.
 - **Exempt tokens.** `lint.citation_exempt_tokens` names tokens whose
-  *non-existence* is the point — a file that must stay absent, or a
+  _non-existence_ is the point — a file that must stay absent, or a
   metasyntactic placeholder shaped like a test identifier that appears in
   this rule's own docstring:
 
@@ -163,7 +163,7 @@ inside a `def`/`class` becomes `path:symbol`, a line on a module-level
 assignment becomes `path:NAME`, and anything else — imports, blank lines,
 unresolvable files — becomes a bare path. It kept `:symbol` only where the
 page's own prose corroborated it and downgraded everything else to bare
-`path`, because a migrated symbol that resolves to a real but *wrong*
+`path`, because a migrated symbol that resolves to a real but _wrong_
 function reads as more authoritative than the opaque line number it
 replaced.
 

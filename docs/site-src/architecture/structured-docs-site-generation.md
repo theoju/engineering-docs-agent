@@ -37,9 +37,13 @@ flowchart LR
 
 `scripts/source_map.py` resolves each site page's frontmatter `source_files:` globs against the repo's tracked files and emits a dual-view JSON artifact at `<docs_dir>/.doc-source-map.json`: a `map` view from source file path to the pages that cover it, and a `patterns` view from page to its declared globs.
 
-The orchestrator generates this map itself — it does not load a pre-existing one. `scripts/orchestrator_runner.py:compute_source_drift` calls `scripts/source_map.py:generate_source_map`, then hands the result to `scripts/source_drift.py:detect_drift` along with the union of every PR's changed files. Pages whose declared sources changed come back as drifted and are listed under "Pages to review (source drift)" in the docs PR body, so edits land on the pages that already cover a file instead of creating duplicate coverage.
+The orchestrator regenerates this map on every run rather than reading a stale one off disk. `scripts/orchestrator_runner.py:compute_source_drift` calls `scripts/source_map.py:generate_source_map` for its side effect — writing the artifact — and discards the ledger it returns. It then calls `scripts/source_drift.py:detect_drift` with the docs directory and the union of every PR's changed files. Nothing from the artifact reaches the drift detector: `detect_drift` re-derives each page's globs from frontmatter itself, using the `_collect_page_patterns` and `_glob_to_regex` helpers it imports from `scripts/source_map.py`. The two stages share those helpers, not the JSON.
 
-The map is rebuilt on every run. It reads `docs.source_dir` from config to locate the docs tree and scans frontmatter `source_files` lists across all pages. Pages that declare no `source_files` are indexed but resolve to no code path, so a change anywhere in the repo will never flag them as drifted.
+Pages whose declared sources changed come back as drifted and are written into the What's New page under a `### Pages to review (source drift)` heading (`scripts/orchestrator_runner.py:_drift_whats_new_lines`), so edits land on the pages that already cover a file instead of creating duplicate coverage. The docs PR body carries no source-drift section — look for drifted pages in What's New.
+
+The artifact is not write-only; a later stage reads it back. `scripts/orchestrator_runner.py:_changed_pages_from_map` loads `<docs_dir>/.doc-source-map.json` and uses its `map` view to scope citation-drift verification to the pages whose mapped sources changed, falling back to a full scan when the map is absent or unreadable.
+
+The source-map stage locates the docs tree from `site.docs_dir` and consults no `docs:` key — a host that configures only `docs.source_dir` gets an empty drift list and no error. It scans frontmatter `source_files` lists across all pages under that tree. Pages that declare no `source_files` are counted in the scan but contribute no patterns, so a change anywhere in the repo will never flag them as drifted.
 
 ## Archive indexes
 

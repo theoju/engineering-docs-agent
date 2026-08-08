@@ -34,17 +34,14 @@ Plain `yaml.safe_load` passes all of these silently; `actionlint` rejects them.
 
 ```yaml
 push:
+  # post-merge runs on main only when workflows actually change
   branches: [main]
   paths:
     - ".github/workflows/**"
-    # Dead glob: no actionlint config file exists in this repo.
-    # actionlint's own convention is .github/actionlint.yaml — the
-    # .yml spelling below would not match it. Fix both together if
-    # you ever add a config.
     - ".github/actionlint.yml"
 ```
 
-The second glob currently matches nothing — `.github/` holds only `workflows/`. Leaving it costs nothing, but do not read it as evidence that a config file exists.
+The second glob currently matches nothing — `.github/` holds only `workflows/`, so this repo has no actionlint config file at all. It is dead because the file is absent, not because the extension is wrong: actionlint looks for a repo config under `.github/` at both spellings, trying the `.yaml` name first and falling back to the `.yml` name (`loadRepoConfig` in rhysd/actionlint v1.7.7). If you add a config, the `.yml` spelling is already covered by the trigger above; choosing the `.yaml` spelling means adding a second `paths:` entry alongside it. Either way, do not read the existing glob as evidence that a config file exists.
 
 The job downloads `actionlint` at a pinned version (`1.7.7`) via the official download script, which verifies a checksum. The `Run actionlint` step (`.github/workflows/actionlint.yml`) runs with `-color` and exits non-zero on any finding, blocking merge.
 

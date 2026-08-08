@@ -90,7 +90,7 @@ frontmatter at the top of this file). The entries are glob patterns:
 ```yaml
 ---
 source_files:
-  - scripts/auth/**/*.py
+  - example/auth/**/*.py
   - backend/connectors/base.py
 ---
 ```
@@ -111,8 +111,8 @@ PR.
 
 `tests/orchestrator/test_source_map_stage.py` covers the key behaviors:
 
-- A page with `source_files: [scripts/auth/**/*.py]` is flagged when
-  `scripts/auth/session.py` appears in a PR's file list.
+- A page with `source_files: [example/auth/**/*.py]` is flagged when
+  `example/auth/session.py` appears in a PR's file list.
 - Mixed file-entry shapes (dict `{"path": "..."}` and plain strings) are
   both handled.
 - Malformed entries (integers, `None`, nested lists) are skipped without

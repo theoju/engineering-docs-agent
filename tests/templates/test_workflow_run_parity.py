@@ -44,10 +44,15 @@ _TEMPLATE_ONLY_DIVERGENCES: dict[str, str] = {
     "on.pull_request.types == [closed]": "Template-only trigger: real-time docs update on merge for hosts (D4)",
     "jobs.run.if contains `github.event_name == 'schedule'`": "Template-only job-level guard: paired with pull_request.closed trigger (D4 self-loop)",
     "with.path == .docs-agent-plugin": "Template-only: vendored-plugin checkout target (paired with checkout-plugin step)",
-    "env.SLACK_WEBHOOK_URL": "Template-only opt-in: consumed by agents/notifier.md when notifications.slack.enabled: true",
     "if: vars.DOCS_AGENT_SKIP_OAUTH_ASSERT != 'true' on Assert OAuth step": "Template-only: enterprise/Bedrock/Vertex hosts can opt out; dogfood owns its own auth",
-    "if: vars.DOCS_AGENT_APP_CLIENT_ID != '' on Generate GitHub App token step": "Template-only: hosts without an App fall back to GITHUB_TOKEN (with host-CI suppression caveat); dogfood requires the App",
-    "with.token uses ||-fallback": "Template-only: checkout-host and docs-agent step env use `steps.app-token.outputs.token || secrets.GITHUB_TOKEN`; dogfood uses only the App token",
+    # CCE-127 removed three entries that used to live here: env.SLACK_WEBHOOK_URL,
+    # the app-token `if:` guard, and "with.token uses ||-fallback". All three
+    # described the dogfood LACKING a template safety property, and the reasoning
+    # ("dogfood requires the App", "dogfood uses only the App token") is exactly
+    # what left this repo with no degradation path when its App installation was
+    # dropped by an org transfer on 2026-07-23 — 15 consecutive nightly failures
+    # across two repos. The dogfood now carries all three; test_05 and test_09
+    # enforce them in BOTH files. Do not re-add them as accepted divergences.
 }
 
 
@@ -178,7 +183,17 @@ def test_04_literal_equals_shape_contract(template_doc, dogfood_doc) -> None:
         for k in ("contents", "pull-requests", "issues"):
             assert k in perms, f"{label}: missing permissions.{k}"
         env = jobs[0]["env"]
-        for k in ("CLAUDE_CODE_OAUTH_TOKEN", "JIRA_API_TOKEN", "JIRA_EMAIL"):
+        # CCE-127: SLACK_WEBHOOK_URL joined this tuple when the dogfood absorbed
+        # it. The notifier reads it only when notifications.slack.enabled, so an
+        # unset secret is inert — but its absence from the dogfood meant the
+        # nightly could never alert anywhere, which is how 15 consecutive
+        # failures went unnoticed.
+        for k in (
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "JIRA_API_TOKEN",
+            "JIRA_EMAIL",
+            "SLACK_WEBHOOK_URL",
+        ):
             assert k in env, f"{label}: missing job-env {k}"
         triggers = doc["on"]
         # CCE-89: both template and dogfood require `schedule:` (the CCE-39
@@ -194,39 +209,47 @@ def test_04_literal_equals_shape_contract(template_doc, dogfood_doc) -> None:
 
 
 def test_05_app_token_conditional_shape(template_doc, dogfood_doc) -> None:
-    """Template-only property tests on the App-token wiring.
+    """App-token wiring, enforced in BOTH files.
 
-    The TEMPLATE has the `if:` opt-out gate (hosts may skip the App-token step);
-    the DOGFOOD does not (we own this repo's auth). The dogfood divergence is
-    intentional — documented in _TEMPLATE_ONLY_DIVERGENCES.
+    This was template-only until CCE-127. The dogfood was allowed to omit the
+    `if:` gate and both `|| secrets.GITHUB_TOKEN` fallbacks on the reasoning
+    that "we own this repo's auth" — which held right up until an org transfer
+    dropped the App installation on 2026-07-23 and the nightly died 15 nights
+    running with no degradation path. Ownership of the credentials is not the
+    same as their continued validity, so the divergence is now closed.
     """
-    template_jobs = list(template_doc["jobs"].values())
-    template_steps = template_jobs[0]["steps"]
-
-    app_token = next((s for s in template_steps if s.get("id") == "app-token"), None)
-    assert app_token is not None, "template missing app-token step"
-    assert "vars.DOCS_AGENT_APP_CLIENT_ID != ''" in str(app_token.get("if", "")), (
-        "template app-token step missing opt-out `if:`"
-    )
-    assert app_token.get("uses") == "actions/create-github-app-token@v3"
-    assert "client-id" in app_token["with"], (
-        "app-token must use `client-id` (not deprecated `app-id`)"
-    )
-
-    checkout = next((s for s in template_steps if s.get("id") == "checkout-host"), None)
-    assert checkout is not None, "template missing checkout-host step"
-    token_expr = "".join(str(checkout["with"]["token"]).split())
     expected = "${{steps.app-token.outputs.token||secrets.GITHUB_TOKEN}}"
-    assert token_expr == expected, (
-        f"checkout-host token wiring mismatch: got {token_expr}, expected {expected}"
-    )
 
-    authoring = next((s for s in template_steps if s.get("id") == "docs-agent"), None)
-    assert authoring is not None, "template missing docs-agent authoring step"
-    gh_token_expr = "".join(str(authoring["env"]["GH_TOKEN"]).split())
-    assert gh_token_expr == expected, (
-        f"authoring step GH_TOKEN mismatch: got {gh_token_expr}, expected {expected}"
-    )
+    for doc, label in [(template_doc, "template"), (dogfood_doc, "dogfood")]:
+        steps = list(doc["jobs"].values())[0]["steps"]
+
+        app_token = next((s for s in steps if s.get("id") == "app-token"), None)
+        assert app_token is not None, f"{label}: missing app-token step"
+        assert "vars.DOCS_AGENT_APP_CLIENT_ID != ''" in str(app_token.get("if", "")), (
+            f"{label}: app-token step missing opt-out `if:`"
+        )
+        assert app_token.get("uses") == "actions/create-github-app-token@v3", (
+            f"{label}: app-token step uses unexpected action"
+        )
+        assert "client-id" in app_token["with"], (
+            f"{label}: app-token must use `client-id` (not deprecated `app-id`)"
+        )
+
+        checkout = next((s for s in steps if s.get("id") == "checkout-host"), None)
+        assert checkout is not None, f"{label}: missing checkout-host step"
+        token_expr = "".join(str(checkout["with"]["token"]).split())
+        assert token_expr == expected, (
+            f"{label}: checkout-host token wiring mismatch: "
+            f"got {token_expr}, expected {expected}"
+        )
+
+        authoring = next((s for s in steps if s.get("id") == "docs-agent"), None)
+        assert authoring is not None, f"{label}: missing docs-agent authoring step"
+        gh_token_expr = "".join(str(authoring["env"]["GH_TOKEN"]).split())
+        assert gh_token_expr == expected, (
+            f"{label}: authoring step GH_TOKEN mismatch: "
+            f"got {gh_token_expr}, expected {expected}"
+        )
 
 
 def test_06_stale_allowlist_entries(template_doc, dogfood_doc) -> None:
@@ -276,4 +299,45 @@ def test_08_on_key_regression(template_doc, dogfood_doc) -> None:
         on_val = doc["on"]
         assert isinstance(on_val, dict), (
             f"{label}: top-level `on:` is {type(on_val).__name__}, expected dict"
+        )
+
+
+def test_09_app_token_failure_is_non_fatal_and_signalled(
+    template_doc, dogfood_doc
+) -> None:
+    """CCE-127: both files must degrade on a failed token mint, not abort.
+
+    Two mechanisms, and either alone is inert:
+
+    - `continue-on-error: true` lets the job proceed while keeping the true
+      `failure` in `outcome` (`conclusion` gets rewritten to success). Without
+      it a failed step aborts the job, so the `||` fallback on the following
+      steps is never evaluated — GitHub only resolves that expression for a
+      *skipped* step. This is why CCE-80's fallback was unreachable on the
+      failure path for two months.
+    - The env export carries that outcome to the orchestrator, which records a
+      blocking `app_token_unavailable` reason so auto-merge is skipped.
+
+    Assert `outcome`, never `conclusion`: continue-on-error rewrites
+    `conclusion` to `success`, so a test keyed on it would pass while the
+    orchestrator received "success" for a run that had no App token.
+    """
+    for doc, label in [(template_doc, "template"), (dogfood_doc, "dogfood")]:
+        steps = list(doc["jobs"].values())[0]["steps"]
+
+        app_token = next((s for s in steps if s.get("id") == "app-token"), None)
+        assert app_token is not None, f"{label}: missing app-token step"
+        assert app_token.get("continue-on-error") is True, (
+            f"{label}: app-token step must set continue-on-error: true, or a "
+            f"failed mint aborts the job before any fallback is evaluated"
+        )
+
+        authoring = next((s for s in steps if s.get("id") == "docs-agent"), None)
+        assert authoring is not None, f"{label}: missing docs-agent authoring step"
+        env = authoring.get("env") or {}
+        status_expr = "".join(str(env.get("DOCS_AGENT_APP_TOKEN_STATUS", "")).split())
+        assert status_expr == "${{steps.app-token.outcome}}", (
+            f"{label}: authoring step must export the app-token OUTCOME "
+            f"(not conclusion — continue-on-error rewrites conclusion to "
+            f"success); got {status_expr!r}"
         )

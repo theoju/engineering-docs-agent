@@ -51,14 +51,38 @@ jobs:
       # secrets.* is valid at job-env scope (resolved at job start).
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
       JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
+      # CCE-127: absorbed from templates/workflow-run.yml. Consumed by
+      # agents/notifier.md when notifications.slack.enabled: true. Inert while
+      # the secret is unset, but its absence meant this repo's nightly had no
+      # channel to alert on at all — which is how the 2026-07-24 App-token
+      # outage ran 15 nights unnoticed.
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
       - name: Generate GitHub App installation token
-        # CCE-45: see GH_TOKEN comment above. The App (docs-agent-bot,
-        # installed on this repo only) carries contents:write +
-        # pull-requests:write scopes matching the workflow's permissions
-        # block. Token expires after 1h; the job timeout is 60min so the
-        # token is always valid for the full run.
+        # CCE-45: see GH_TOKEN comment above. The App
+        # (engineering-docs-agent-bot, installed on this repo) carries
+        # contents:write + pull-requests:write scopes matching the workflow's
+        # permissions block. Token expires after 1h; the job timeout is 60min
+        # so the token is always valid for the full run.
+        #
+        # CCE-127: "installed on this repo" is a live precondition, not a
+        # setup-time fact. On 2026-07-23 this App was transferred from theoju
+        # to an org during an unrelated migration, which DELETED its
+        # installation here — credentials still perfect, scope gone. The mint
+        # then 404s on /repos/{owner}/{repo}/installation (a 401 would mean bad
+        # credentials; the 404 is what distinguishes them). This repo and
+        # claude-code-self-assessment both failed 15 consecutive nightlies.
         id: app-token
+        # Absorbed from templates/workflow-run.yml. Guards the same bare-host
+        # path the template documents; also lets a var-unset misconfiguration
+        # skip cleanly rather than fail.
+        if: vars.DOCS_AGENT_APP_CLIENT_ID != ''
+        # CCE-127: a failed token mint must not kill the job. continue-on-error
+        # makes `conclusion` report success so the job proceeds, while `outcome`
+        # retains the true `failure` — which is what we export below. Without
+        # this, the step aborts the job and the `||` fallback on the next step
+        # is never evaluated (GitHub only resolves it for a *skipped* step).
+        continue-on-error: true
         # CCE-54: bumped v1 -> v3 for Node-24 runtime. v1 and v2 both ship on
         # Node 20, which GitHub deprecates June 2026; v3 is the first major on
         # Node 24.
@@ -82,7 +106,13 @@ jobs:
           # CCE-45: checkout configures git's credential helper from this
           # token, so the subsequent `git push` from the runner uses the
           # App token rather than the default GITHUB_TOKEN.
-          token: ${{ steps.app-token.outputs.token }}
+          #
+          # CCE-127: the `||` resolves to GITHUB_TOKEN whenever the App-token
+          # step produced no output — skipped via its `if:` OR failed under
+          # continue-on-error. Without the fallback this line evaluated to an
+          # empty token and checkout failed outright, turning a recoverable
+          # degradation into a dead job.
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -131,6 +161,13 @@ jobs:
           git config user.email "engineering-docs-agent@users.noreply.github.com"
 
       - name: Run nightly authoring
+        # CCE-127: `id` absorbed from the template so the parity tests can
+        # locate the authoring step by one uniform predicate in both files.
+        # Adding an id cannot change this step's parity signature —
+        # _step_signature keys run-steps on the first line of `run:` and uses
+        # `id` only for `uses:`-steps. The step NAME deliberately stays
+        # host-specific.
+        id: docs-agent
         # The runner reads .engineering-docs-agent/{config.yml,state.json},
         # computes the window vs HEAD, dispatches the pipeline, prepends
         # What's New, opens or append-commits to docs-agent/YYYY-MM-DD, and
@@ -157,7 +194,16 @@ jobs:
           # that rule. Lives at step-env, not job-env, because GitHub's
           # runtime validator rejects `steps.*` references at job-env scope
           # (job-env is resolved before any step runs).
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          # CCE-127: "failure" here makes the orchestrator record a blocking
+          # app_token_unavailable reason, flipping the run to partial so
+          # auto-merge is skipped — a GITHUB_TOKEN-built PR never fires host
+          # CI, and zero registered checks would otherwise read as "nothing
+          # failed". "skipped" (no App configured) and "success" are silent.
+          # Must be `outcome`, not `conclusion`: continue-on-error rewrites
+          # conclusion to success, which would report a healthy token mint for
+          # a run that had none.
+          DOCS_AGENT_APP_TOKEN_STATUS: ${{ steps.app-token.outcome }}
         run: python3 scripts/orchestrator_runner.py --repo-root "$GITHUB_WORKSPACE"
 
       - name: Upload subagent forensics

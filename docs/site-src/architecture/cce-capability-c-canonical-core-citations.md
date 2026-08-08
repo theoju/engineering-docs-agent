@@ -138,12 +138,19 @@ Two escape hatches exist, both deliberate rather than silent:
   glob in the C2 example below uses this namespace.
 - **Exempt tokens.** `lint.citation_exempt_tokens` names tokens whose
   _non-existence_ is the point — a file that must stay absent, or a
-  metasyntactic placeholder shaped like a test identifier that appears in
-  this rule's own docstring:
+  metasyntactic placeholder that appears in this rule's own docstring or in
+  the citation grammar the plugin ships to every host:
 
   ```text
   test_snake_case
+  path/to/file.py
   ```
+
+  Both plugin defaults are exact tokens, never prefixes. Reserving the
+  placeholder's whole directory as an example namespace instead would also
+  swallow any confabulated sibling under it — and any invented `:symbol`
+  attributed to a real file under it — because the prefix branch is a silent
+  `continue` with no report, where the exempt branch reports drift (CCE-134).
 
   Plugin defaults union with host entries; a listed token that starts
   resolving emits a `warn` naming it a stale exemption, so the list can't

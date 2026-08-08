@@ -57,7 +57,17 @@ DEFAULT_EXAMPLE_PREFIXES = ("example/",)
 # ship here because every host that documents this lint hits them --
 # test_snake_case is this module's own docstring placeholder. Host-specific
 # invariants go in the host config and are unioned with these.
-DEFAULT_EXEMPT_TOKENS = ("test_snake_case",)
+#
+# CCE-134: path/to/file.py is the metasyntactic placeholder in the CCE-122
+# citation grammar, which the plugin itself ships (agents/page-author.md) and
+# which therefore propagates into authored pages on every host. An exact token,
+# deliberately NOT a `path/to/` example prefix: the exemption must cover this
+# one string and nothing else, so a confabulated `path/to/<invented>.py` -- or
+# an invented symbol inside a real file under path/to/ -- still blocks. The
+# exempt branch also reports drift ("stale exemption") once the token starts
+# resolving, and exempt_tokens() unions with host config where
+# example_prefixes() replaces it.
+DEFAULT_EXEMPT_TOKENS = ("test_snake_case", "path/to/file.py")
 
 
 def strip_fenced_blocks(text: str) -> str:

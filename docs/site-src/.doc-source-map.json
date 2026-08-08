@@ -5,17 +5,23 @@
     "CHANGELOG.md": [
       "architecture/orchestrator.md"
     ],
+    "CLAUDE.md": [
+      "architecture/publish-verifier.md"
+    ],
     "agents/content-validator.md": [
-      "architecture/cce4-schema-enforcement.md"
+      "architecture/cce4-schema-enforcement.md",
+      "architecture/lint-severity-model.md"
     ],
     "agents/fact-checker.md": [
       "architecture/cce4-schema-enforcement.md"
     ],
     "agents/gap-detector.md": [
-      "architecture/cce4-schema-enforcement.md"
+      "architecture/cce4-schema-enforcement.md",
+      "architecture/gap-detector.md"
     ],
     "agents/notifier.md": [
-      "architecture/cce4-schema-enforcement.md"
+      "architecture/cce4-schema-enforcement.md",
+      "architecture/publish-verifier-ci-provider-seam.md"
     ],
     "agents/page-author.md": [
       "architecture/cce4-schema-enforcement.md",
@@ -25,7 +31,8 @@
       "architecture/cce4-schema-enforcement.md"
     ],
     "agents/publish-verifier.md": [
-      "architecture/cce4-schema-enforcement.md"
+      "architecture/cce4-schema-enforcement.md",
+      "architecture/publish-verifier-ci-provider-seam.md"
     ],
     "agents/schemas/content_validator.schema.json": [
       "architecture/cce23-source-map-drift.md",
@@ -40,6 +47,7 @@
     "agents/schemas/gap_detector.schema.json": [
       "architecture/cce23-source-map-drift.md",
       "architecture/cce4-schema-enforcement.md",
+      "architecture/gap-detector.md",
       "architecture/structured-docs-site-generation.md"
     ],
     "agents/schemas/notifier.schema.json": [
@@ -76,11 +84,15 @@
     "docs/site-src/.doc-source-map.json": [
       "architecture/engineering-docs-agent.md"
     ],
+    "docs/site-src/api/contracts/gap_detector.schema.md": [
+      "architecture/gap-detector.md"
+    ],
     "docs/site-src/index.md": [
       "architecture/engineering-docs-agent.md"
     ],
     "docs/site-src/setup-guide.md": [
-      "architecture/engineering-docs-agent.md"
+      "architecture/engineering-docs-agent.md",
+      "architecture/publish-verifier-ci-provider-seam.md"
     ],
     "docs/site-src/whats-new.md": [
       "architecture/engineering-docs-agent.md"
@@ -1074,6 +1086,46 @@
       "architecture/cce32-github-pages-publish-target.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/plans/2026-07-19-cce122-stable-code-citations.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/plans/2026-07-22-cce63-circleci-publish-verifier.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/publish-verifier-ci-provider-seam.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/plans/2026-07-23-cce123-publish-trigger-provider-aware.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/publish-verifier.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/plans/2026-07-23-cce124-archive-lens-citation-advisory.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/lint-severity-model.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/plans/2026-07-23-cce125-gap-detector-unjudged-advisory.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/gap-detector.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/plans/2026-08-07-cce127-app-token-degrade-partial.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/specs/2026-05-19-engineering-docs-agent-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1379,6 +1431,40 @@
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/specs/2026-07-18-cce122-stable-code-citations-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/specs/2026-07-22-cce63-circleci-publish-verifier-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/publish-verifier-ci-provider-seam.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/specs/2026-07-23-cce123-publish-trigger-provider-aware-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/publish-verifier.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/specs/2026-07-23-cce124-archive-lens-citation-advisory-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/lint-severity-model.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/specs/2026-07-23-cce125-gap-detector-unjudged-advisory-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/gap-detector.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/specs/2026-08-07-cce127-app-token-degrade-partial-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/templates/sdd-fidelity-gate.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1398,8 +1484,13 @@
       "architecture/cce23-decision-archive.md",
       "archive/v0-1-1-hardening.md"
     ],
+    "scripts/build_poller.py": [
+      "architecture/publish-verifier-ci-provider-seam.md",
+      "architecture/publish-verifier.md"
+    ],
     "scripts/contracts.py": [
       "architecture/cce23-source-map-drift.md",
+      "architecture/gap-detector.md",
       "archive/v0-1-1-hardening.md"
     ],
     "scripts/contracts_doc.py": [
@@ -1410,6 +1501,9 @@
     ],
     "scripts/gh_client.py": [
       "archive/v0-1-1-hardening.md"
+    ],
+    "scripts/lint/citation_exists.py": [
+      "architecture/lint-severity-model.md"
     ],
     "scripts/lint/description_quality.py": [
       "architecture/orchestrator.md"
@@ -1431,6 +1525,7 @@
     "scripts/lint/lint_runner.py": [
       "architecture/engineering-docs-agent.md",
       "architecture/lint-rules.md",
+      "architecture/lint-severity-model.md",
       "archive/v0-1-1-hardening.md"
     ],
     "scripts/lint/reading_grade.py": [
@@ -1447,8 +1542,10 @@
       "architecture/cce23-source-map-drift.md",
       "architecture/cce4-schema-enforcement.md",
       "architecture/cce6-7-8-batch.md",
+      "architecture/gap-detector.md",
       "architecture/index.md",
       "architecture/orchestrator.md",
+      "architecture/publish-verifier.md",
       "archive/2026-07-13-cce120-gap-detector-prid-injection.md",
       "archive/cce14-source-collector-prompt-hardening.md",
       "archive/cce15-source-collector-root-cause-sweep.md",
@@ -1476,6 +1573,9 @@
       "archive/cce5-9-batch-prep-roadmap.md",
       "archive/v0-1-1-hardening.md"
     ],
+    "scripts/stderr_emit.py": [
+      "architecture/publish-verifier-ci-provider-seam.md"
+    ],
     "scripts/verify_citations.py": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c3-diagram-render-gate.md"
@@ -1485,9 +1585,12 @@
     ],
     "scripts/verify_runner.py": [
       "architecture/cce4-schema-enforcement.md",
+      "architecture/publish-verifier-ci-provider-seam.md",
       "archive/v0-1-1-hardening.md"
     ],
     "templates/config.schema.json": [
+      "architecture/publish-verifier-ci-provider-seam.md",
+      "architecture/publish-verifier.md",
       "archive/v0-1-1-hardening.md"
     ],
     "templates/plugin_manifest.schema.json": [
@@ -1500,7 +1603,8 @@
       "architecture/cce32-github-pages-publish-target.md"
     ],
     "templates/workflow-run.yml": [
-      "architecture/cce32-github-pages-publish-target.md"
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/orchestrator.md"
     ],
     "templates/workflow-verify.yml": [
       "architecture/cce32-github-pages-publish-target.md"
@@ -1513,6 +1617,7 @@
       "architecture/cce32-github-pages-publish-target.md"
     ],
     "tests/contracts/test_contracts.py": [
+      "architecture/gap-detector.md",
       "archive/v0-1-1-hardening.md"
     ],
     "tests/contracts/test_state_io.py": [
@@ -1535,6 +1640,12 @@
     ],
     "tests/gh/test_gh_client.py": [
       "archive/v0-1-1-hardening.md"
+    ],
+    "tests/lint/test_citation_exists.py": [
+      "architecture/lint-severity-model.md"
+    ],
+    "tests/lint/test_lint_runner.py": [
+      "architecture/lint-severity-model.md"
     ],
     "tests/orchestrator/fakes_schema_invalid/fake_content_validator.json": [
       "architecture/cce4-schema-enforcement.md"
@@ -1559,6 +1670,13 @@
     ],
     "tests/orchestrator/test_agent_authored_create_frontmatter.py": [
       "architecture/orchestrator.md"
+    ],
+    "tests/orchestrator/test_auto_merge.py": [
+      "architecture/publish-verifier.md"
+    ],
+    "tests/orchestrator/test_build_poller.py": [
+      "architecture/publish-verifier-ci-provider-seam.md",
+      "architecture/publish-verifier.md"
     ],
     "tests/orchestrator/test_dispatch_debug_capture.py": [
       "archive/cce14-source-collector-prompt-hardening.md"
@@ -1587,8 +1705,14 @@
     "tests/orchestrator/test_enforce_agent_frontmatter.py": [
       "architecture/orchestrator.md"
     ],
+    "tests/orchestrator/test_fact_checker.py": [
+      "architecture/gap-detector.md"
+    ],
     "tests/orchestrator/test_gap_detector_prid_injection.py": [
       "archive/2026-07-13-cce120-gap-detector-prid-injection.md"
+    ],
+    "tests/orchestrator/test_gap_detector_unjudged.py": [
+      "architecture/gap-detector.md"
     ],
     "tests/orchestrator/test_pipeline_integration.py": [
       "architecture/cce4-schema-enforcement.md",
@@ -1602,6 +1726,7 @@
     ],
     "tests/orchestrator/test_verify_runner.py": [
       "architecture/cce4-schema-enforcement.md",
+      "architecture/publish-verifier-ci-provider-seam.md",
       "archive/v0-1-1-hardening.md"
     ],
     "tests/schemas/test_source_collector_schema.py": [
@@ -1612,6 +1737,12 @@
     ],
     "tests/site/test_api_build_smoke.py": [
       "architecture/cce23-api-reference.md"
+    ],
+    "tests/stderr_emit/test_stderr_emit.py": [
+      "architecture/publish-verifier-ci-provider-seam.md"
+    ],
+    "tests/templates/test_workflow_run_parity.py": [
+      "architecture/orchestrator.md"
     ]
   },
   "patterns": {
@@ -1715,6 +1846,18 @@
       "scripts/lint/lint_runner.py",
       "scripts/lint/stub_redirect.py"
     ],
+    "architecture/gap-detector.md": [
+      "agents/gap-detector.md",
+      "agents/schemas/gap_detector.schema.json",
+      "docs/site-src/api/contracts/gap_detector.schema.md",
+      "docs/superpowers/plans/2026-07-23-cce125-gap-detector-unjudged-advisory.md",
+      "docs/superpowers/specs/2026-07-23-cce125-gap-detector-unjudged-advisory-design.md",
+      "scripts/contracts.py",
+      "scripts/orchestrator_runner.py",
+      "tests/contracts/test_contracts.py",
+      "tests/orchestrator/test_fact_checker.py",
+      "tests/orchestrator/test_gap_detector_unjudged.py"
+    ],
     "architecture/index.md": [
       "scripts/orchestrator_runner.py",
       "scripts/frontmatter_contract.py"
@@ -1722,13 +1865,48 @@
     "architecture/lint-rules.md": [
       "scripts/lint/lint_runner.py"
     ],
+    "architecture/lint-severity-model.md": [
+      "agents/content-validator.md",
+      "docs/superpowers/plans/2026-07-23-cce124-archive-lens-citation-advisory.md",
+      "docs/superpowers/specs/2026-07-23-cce124-archive-lens-citation-advisory-design.md",
+      "scripts/lint/citation_exists.py",
+      "scripts/lint/lint_runner.py",
+      "tests/lint/test_citation_exists.py",
+      "tests/lint/test_lint_runner.py"
+    ],
     "architecture/orchestrator.md": [
       "CHANGELOG.md",
       "scripts/orchestrator_runner.py",
       "agents/page-author.md",
       "scripts/lint/description_quality.py",
       "tests/orchestrator/test_enforce_agent_frontmatter.py",
-      "tests/orchestrator/test_agent_authored_create_frontmatter.py"
+      "tests/orchestrator/test_agent_authored_create_frontmatter.py",
+      "templates/workflow-run.yml",
+      "tests/templates/test_workflow_run_parity.py"
+    ],
+    "architecture/publish-verifier-ci-provider-seam.md": [
+      "agents/notifier.md",
+      "agents/publish-verifier.md",
+      "docs/site-src/setup-guide.md",
+      "docs/superpowers/plans/2026-07-22-cce63-circleci-publish-verifier.md",
+      "docs/superpowers/specs/2026-07-22-cce63-circleci-publish-verifier-design.md",
+      "scripts/build_poller.py",
+      "scripts/stderr_emit.py",
+      "scripts/verify_runner.py",
+      "templates/config.schema.json",
+      "tests/orchestrator/test_build_poller.py",
+      "tests/orchestrator/test_verify_runner.py",
+      "tests/stderr_emit/test_stderr_emit.py"
+    ],
+    "architecture/publish-verifier.md": [
+      "CLAUDE.md",
+      "docs/superpowers/plans/2026-07-23-cce123-publish-trigger-provider-aware.md",
+      "docs/superpowers/specs/2026-07-23-cce123-publish-trigger-provider-aware-design.md",
+      "scripts/build_poller.py",
+      "scripts/orchestrator_runner.py",
+      "templates/config.schema.json",
+      "tests/orchestrator/test_auto_merge.py",
+      "tests/orchestrator/test_build_poller.py"
     ],
     "architecture/structured-docs-site-generation.md": [
       "agents/schemas/*.json",

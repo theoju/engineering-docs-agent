@@ -13,10 +13,13 @@ last_reviewed: "2026-07-11"
 _Architecture: component design, agent contracts, data flows, and system internals._
 
 <!-- docs-agent:overview:start -->
-
 **In this section**
 
+- **Gap Detector** — `gap-detector` (`agents/gap-detector.md`) judges whether a merged PR is non-trivial enough that a senior engineer would expect a spec or plan to accompany it. The orchestrator dispatches it once per admitted PR, in the gap-detection loop near the end of `run()` (`scripts/orchestrator_runner.py:run`), after page authoring, content validation, and the fact-checker warn layer have already run for that batch.
+- **Lint severity model** — Every lint rule has a rule-global `severity` — `block` prevents the page from publishing, `warn` surfaces in the PR review only. Until CCE-124, that was the only granularity available: a rule was block for every page it ran against, or it wasn't. `citation_exists` now carries a **per-result** severity as well, and `lint_runner`'s block-gate honors it.
 - **Orchestrator** — `run()` in `scripts/orchestrator_runner.py:run` is the nightly pipeline entry point. It runs as a straight-line sequence of stages against one window of merged PRs (`last_successful_run.head_sha` to the current `HEAD`):
+- **Publish verifier & publish trigger** — A docs-agent PR merging isn't the end of the pipeline — the host still has to build the docs site and redeploy it. Two seams handle that, on opposite sides of the merge:
+- **Publish-verifier: the CircleCI provider seam** — Post-merge, the docs-agent verifies that a merged docs PR actually built and published before it marks the run successful. That verification path was GitHub-only. CCE-63 gives it a provider seam so a host configuring `publishing.ci_provider: circleci` gets an honest, non-crashing degrade instead of a verifier silently mis-checking a build system it doesn't understand.
 - **Bootstrap fail-fast mechanisms** — The C2 bootstrap pipeline (CCE-38) adds four structural safeguards that catch bad artifacts before they reach the published site. Before this work, the pipeline trusted `page-author`'s `ok: true` signal without independently verifying the written file — allowing bad YAML, missing frontmatter, and thin descriptions to slip through undetected.
 - **Lint Rules** — The lint runner (`scripts/lint/lint_runner.py`) validates agent-authored Markdown before it reaches the docs site. Rules are tiered: **block** rules prevent a page from being published; **warn** rules surface in the PR review but do not block it.
 - **Engineering Docs Agent** — A Claude Code plugin that turns merged PRs, Jira issues, and commits into a nightly docs-update PR — with voice-matched authoring, tiered linting, gap detection, and post-merge publish verification.
@@ -33,6 +36,5 @@ _Architecture: component design, agent contracts, data flows, and system interna
 - **Decision Archive Index Generator (CCE-23)** — The archive-index generator (`scripts/archive_indexes.py`) turns directories of date-prefixed Markdown files into navigable index pages. It is capability D of the docs-agent: a pure read-then-write step that runs on every nightly pass and always overwrites its output.
 - **Source Map and Drift Detection (CCE-23)** — The source map (`scripts/source_map.py`) and drift detector (`scripts/source_drift.py`) together answer: when source code changes, which docs pages need a human review?
 
-_16 pages · regenerated nightly_
-
+_20 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

@@ -10,6 +10,14 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **A failed GitHub App-token mint degrades the run to partial, it never kills the job** — The nightly workflow's App-token step now runs under `continue-on-error`, and a mint failure is treated as a blocking-but-survivable signal that skips auto-merge instead of aborting the job outright.
+- **CCE-127: App-token degradation — operational learnings** — This entry captures what shipping the CCE-127 fix actually took, beyond the mechanism itself. The mechanism (degrade to `partial` instead of failing the job) is documented in `CLAUDE.md` and in the spec at `docs/superpowers/specs/2026-08-07-cce127-app-token-degrade-partial-design.md`. What follows is the trap list every contributor should read before touching the GitHub App-token step or the workflow/orchestrator boundary again.
+- **Advisory Agent Dispatch Failures Are Info-Only, Not Partial (2026-07-24)** — `gap-detector` and `fact-checker` are the two advisory subagents in the eight-agent pipeline. Their output only ever feeds a note on the docs-agent PR — `fact-checker` populates `fact_check_warnings`, `gap-detector` populates the "Gaps flagged" section — and neither feeds the CCE-101 auto-merge gate. The blocking pipeline is the other five: source-collector, pr-summarizer, page-author, content-validator, notifier. That distinction is now a named convention in CLAUDE.md, but it was learned the hard way, twice.
+- **CCE-124 — archive-lens `citation_exists` advisory via per-result lint severity** — Ticket: CCE-124 · PR #191 · 2026-07-23
+- **CCE-125: gap-detector `needs_spec: null` becomes a first-class "unjudged" value** — PR #189's nightly run came out `partial` for three reasons. Two were already fixed
+- **Decision: Provider-Aware Publish Trigger (CCE-123)** — **Date:** 2026-07-24
+- **Code citations go line-free; citation-location precision moves to a lint** — Docs used to cite code as `` `path:line` `` — e.g. `` `scripts/orchestrator_runner.py:1240` ``. Line numbers are the single most churn-sensitive part of a citation: any edit above the cited line shifts it, so an unrelated change turns a correct citation "stale." PR #179 (2026-07-16) surfaced eight fact-checker `contradiction` warnings that were all really this — benign line drift, not a real factual problem — and the CCE-101 auto-merge gate requires zero fact-checker warnings, so those warnings blocked auto-merge on docs that were otherwise correct.
+- **Decision: CircleCI Provider Seam for the Publish-Verifier Is Modeled but Unvalidated (CCE-63)** — - **Ticket:** CCE-63 (parent CCE-58)
 - **CCE-119: Create-Path Frontmatter Fidelity (2026-07-15)** — CCE-117 made the incremental authoring **create** path generator-aware: for an `agent-authored` section, the orchestrator deterministically synthesizes the required frontmatter (`description`, `source_files`, `last_reviewed`, `status`) so a new page clears Tier-1 lint instead of being dropped. That fix closed a recurring failure mode — 20 blocked architecture pages in one nightly run — but left two residuals, tracked as CCE-119 and split out of CCE-118.
 - **CCE-120: Orchestrator-Injected `pr_id` for Gap-Detector Verdicts** — `agents/schemas/gap_detector.schema.json` marks `pr_id` as required. Nightly PR #173 (2026-07-12) went `partial` for exactly one reason: `schema_invalid: gap-detector: 'pr_id' is a required property`. That single reason was enough to block CCE-101 auto-merge, even though every other dispatch reason on that run was already `info_only`.
 - **A benign JSON rescue no longer flips a run to `partial`** — Every nightly run that triggered a JSON rescue on a blocking-pipeline subagent
@@ -38,9 +46,9 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **Auth-tier migration: drop explicit API key threading** — **PR #91 · merged 2026-06-09 · non-breaking**
 - **Measurements archive** — _Auto-generated; 7 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **Nightly partial-run banner now matches the actual `partial` flag** — PR #177 fixes a display bug: a clean, auto-merge-eligible nightly run could still
-- **Plans archive** — _Auto-generated; 64 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Plans archive** — _Auto-generated; 70 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
-- **Specs archive** — _Auto-generated; 61 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Specs archive** — _Auto-generated; 67 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_31 pages · regenerated nightly_
+_39 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

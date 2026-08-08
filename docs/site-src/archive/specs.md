@@ -1,11 +1,22 @@
 # Specs archive
 
-_Auto-generated; 61 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 67 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+
+## 2026-08
+
+| Title | Status | Summary |
+|---|---|---|
+| [CCE-127 — App-token failure degrades to a partial run instead of killing the nightly](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-08-07-cce127-app-token-degrade-partial-design.md) | approved | The dogfood nightly in `theoju/engineering-docs-agent` failed 15 nights running, from |
 
 ## 2026-07
 
 | Title | Status | Summary |
 |---|---|---|
+| [CCE-125 — gap-detector `needs_spec: null` becomes a first-class "unjudged" value](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-07-23-cce125-gap-detector-unjudged-advisory-design.md) | approved | PR #189's nightly docs-agent run came out **partial**. Its actual `partial_reasons`: |
+| [CCE-124 — archive-lens `citation_exists` advisory via per-result lint severity](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-07-23-cce124-archive-lens-citation-advisory-design.md) | approved | `citation_exists` (Tier-1 **block**) treats every inline-code span in a page's |
+| [CCE-123: Publish-Trigger Provider-Aware Dispatch — Design](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-07-23-cce123-publish-trigger-provider-aware-design.md) | — | **Status:** approved (brainstorming), 2026-07-23 |
+| [CCE-63: CircleCI provider seam for the publish-verifier (Option D′)](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-07-22-cce63-circleci-publish-verifier-design.md) | — | - **Ticket:** CCE-63 (priority Low) — parent CCE-58 (advanced-data-import-system onboarding) |
+| [CCE-122: stable code citations — design](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-07-18-cce122-stable-code-citations-design.md) | — | **Date:** 2026-07-18 |
 | [CCE-119: create-path frontmatter fidelity — design](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-07-14-cce119-create-path-frontmatter-fidelity-design.md) | — | **Date:** 2026-07-14 |
 | [CCE-120: orchestrator injects its own `pr_id` into the gap-detector verdict — design](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-07-12-cce120-gap-detector-prid-injection-design.md) | — | **Date:** 2026-07-12 |
 | [CCE-118 (item 1): a benign JSON rescue must not flip a run to `partial` — design](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-07-11-cce118-benign-rescue-partial-design.md) | — | **Date:** 2026-07-11 |

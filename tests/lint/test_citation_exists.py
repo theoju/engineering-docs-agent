@@ -553,3 +553,41 @@ def test_genuine_confabulation_still_blocks_with_docs_dir(tmp_path):
     ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
     assert ok is False
     assert "scripts/build_doc_source_map.py" in msg
+
+
+def test_example_namespace_path_passes(tmp_path):
+    """CCE-131: `example/` is a reserved illustrative namespace (RFC 2606
+    precedent) and never resolves by design."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("A page with `example/auth/session.py` in its file list.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg
+
+
+def test_non_example_fictional_path_still_blocks(tmp_path):
+    """The namespace is the affordance; inventing another root is still a defect."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("A page with `scripts/auth/session.py` in its file list.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "scripts/auth/session.py" in msg
+
+
+def test_host_configured_prefix_replaces_the_default(tmp_path):
+    """A host with a real top-level example/ dir picks a different word."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("Both `acme/auth/session.py` and `example/auth/session.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_example_prefixes": ["acme"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is False
+    assert "example/auth/session.py" in msg
+    assert "acme/auth/session.py" not in msg

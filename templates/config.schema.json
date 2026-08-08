@@ -76,7 +76,12 @@
         "tier1": {},
         "tier2": { "type": "object" },
         "tier3": { "type": "object" },
-        "stub_paths": { "type": "array", "items": { "type": "string" } }
+        "stub_paths": { "type": "array", "items": { "type": "string" } },
+        "citation_example_prefixes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Reserved illustrative path namespaces citation_exists never resolves (CCE-131). Replaces the built-in default of [\"example\"]."
+        }
       }
     },
     "publishing": {

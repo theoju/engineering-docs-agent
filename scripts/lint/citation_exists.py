@@ -46,6 +46,12 @@ _LINE_SUFFIX_RE = re.compile(r":\d+(?:-\d+)?$")
 _LINE_PIN_RE = re.compile(r"^[\w.\-/]+\.\w{1,8}:\d+(?:-\d+)?$")
 _PLACEHOLDER_MARKERS = ("<", ">", "*", "{", "}", "YYYY", "...")
 
+# CCE-131: reserved illustrative namespace, RFC 2606's example.com precedent.
+# The generic-first mandate requires fictional-host examples in docs; a token
+# under this namespace is guaranteed never to resolve, so it is documentation,
+# not a citation. Hosts with a real top-level example/ dir override the word.
+DEFAULT_EXAMPLE_PREFIXES = ("example/",)
+
 
 def strip_fenced_blocks(text: str) -> str:
     """Drop fenced regions; return the remaining prose lines.
@@ -226,6 +232,20 @@ def _build_dir(repo_root: Path) -> str:
     return str(mk.get("site_dir") or "site").strip("/")
 
 
+def example_prefixes(config: dict) -> tuple[str, ...]:
+    """Reserved illustrative-namespace prefixes, each with a trailing slash.
+
+    Host config REPLACES the default rather than extending it: this is a
+    namespace choice, and a host that picks `acme/` because it has a real
+    `example/` directory must not keep the shadowed default.
+    """
+    lint = config.get("lint") or {}
+    configured = lint.get("citation_example_prefixes")
+    if configured is None:
+        return DEFAULT_EXAMPLE_PREFIXES
+    return tuple(f"{str(p).strip('/')}/" for p in configured if str(p).strip("/"))
+
+
 def _resolves(
     rel: str, repo_root: Path, files: set[str], docs_dir: str, build_dir: str
 ) -> bool:
@@ -263,11 +283,14 @@ def check_path(
     cites = extract_citations(text)
     docs_dir = _docs_dir(config)
     build_dir = _build_dir(repo_root)
+    prefixes = example_prefixes(config)
     problems: list[str] = []
     for cited in cites["paths"]:
         rel = _relativize(cited, repo_root)
         if rel is None:
             continue
+        if any(rel.startswith(p) for p in prefixes):
+            continue  # reserved illustrative namespace, never expected to resolve
         if not _resolves(rel, repo_root, files, docs_dir, build_dir):
             problems.append(f"cites nonexistent path '{cited}'")
     for name in cites["tests"]:

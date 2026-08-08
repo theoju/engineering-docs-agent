@@ -26,6 +26,10 @@ voice:
 
 lint:
   tier1: default
+  # CCE-131: tests/scripts must NOT be a package (CLAUDE.md invariant), so a
+  # page documenting that rule necessarily names a file that cannot exist.
+  citation_exempt_tokens:
+    - tests/scripts/__init__.py
 
 publishing:
   base_url: https://theoju.github.io/engineering-docs-agent/

@@ -591,3 +591,70 @@ def test_host_configured_prefix_replaces_the_default(tmp_path):
     assert ok is False
     assert "example/auth/session.py" in msg
     assert "acme/auth/session.py" not in msg
+
+
+def test_exempt_token_passes(tmp_path):
+    """CCE-131: a file whose non-existence IS the claim."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text(
+        "tests/scripts must not be a package: no `tests/scripts/__init__.py`.\n"
+    )
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_exempt_tokens": ["tests/scripts/__init__.py"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is True, msg
+
+
+def test_unlisted_sibling_still_blocks(tmp_path):
+    """The list exempts exact tokens, not a directory."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("See `tests/scripts/conftest.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_exempt_tokens": ["tests/scripts/__init__.py"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is False
+    assert "tests/scripts/conftest.py" in msg
+
+
+def test_plugin_default_exempts_the_rules_own_placeholder(tmp_path):
+    """test_snake_case is plugin-intrinsic: it lives in this module's docstring,
+    so every host documenting this lint hits it. No host config needed."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("Test identifiers look like `test_snake_case`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg
+
+
+def test_host_entries_extend_rather_than_replace_defaults(tmp_path):
+    """A host that lists its own token keeps the plugin defaults."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("Both `test_snake_case` and `tests/scripts/__init__.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_exempt_tokens": ["tests/scripts/__init__.py"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is True, msg
+
+
+def test_stale_exemption_is_noted_without_blocking(tmp_path):
+    """A listed token that now resolves must surface, or the list rots silently."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "real.py").write_text("x = 1\n")
+    page = repo / "page.md"
+    page.write_text("See `scripts/real.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_exempt_tokens": ["scripts/real.py"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is True
+    assert "stale exemption" in msg
+    assert "scripts/real.py" in msg

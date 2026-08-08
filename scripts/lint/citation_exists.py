@@ -52,6 +52,12 @@ _PLACEHOLDER_MARKERS = ("<", ">", "*", "{", "}", "YYYY", "...")
 # not a citation. Hosts with a real top-level example/ dir override the word.
 DEFAULT_EXAMPLE_PREFIXES = ("example/",)
 
+# CCE-131: tokens whose NON-EXISTENCE is the claim. Plugin-intrinsic entries
+# ship here because every host that documents this lint hits them --
+# test_snake_case is this module's own docstring placeholder. Host-specific
+# invariants go in the host config and are unioned with these.
+DEFAULT_EXEMPT_TOKENS = ("test_snake_case",)
+
 
 def strip_fenced_blocks(text: str) -> str:
     """Drop fenced regions; return the remaining prose lines.
@@ -246,6 +252,18 @@ def example_prefixes(config: dict) -> tuple[str, ...]:
     return tuple(f"{str(p).strip('/')}/" for p in configured if str(p).strip("/"))
 
 
+def exempt_tokens(config: dict) -> set[str]:
+    """Exact tokens citation_exists must not require to exist.
+
+    Plugin defaults UNIONED with the host's lint.citation_exempt_tokens: host
+    config extends, never replaces, so a host cannot silently lose a
+    plugin-intrinsic entry by declaring one of its own.
+    """
+    lint = config.get("lint") or {}
+    host = lint.get("citation_exempt_tokens") or []
+    return set(DEFAULT_EXEMPT_TOKENS) | {str(t) for t in host}
+
+
 def _resolves(
     rel: str, repo_root: Path, files: set[str], docs_dir: str, build_dir: str
 ) -> bool:
@@ -284,19 +302,32 @@ def check_path(
     docs_dir = _docs_dir(config)
     build_dir = _build_dir(repo_root)
     prefixes = example_prefixes(config)
+    exempt = exempt_tokens(config)
     problems: list[str] = []
+    notes: list[str] = []
     for cited in cites["paths"]:
         rel = _relativize(cited, repo_root)
         if rel is None:
+            continue
+        if cited in exempt:
+            if _resolves(rel, repo_root, files, docs_dir, build_dir):
+                notes.append(f"stale exemption: '{cited}' now resolves")
             continue
         if any(rel.startswith(p) for p in prefixes):
             continue  # reserved illustrative namespace, never expected to resolve
         if not _resolves(rel, repo_root, files, docs_dir, build_dir):
             problems.append(f"cites nonexistent path '{cited}'")
     for name in cites["tests"]:
-        if not cited_test_exists(repo_root, name):
+        exists = cited_test_exists(repo_root, name)
+        if name in exempt:
+            if exists:
+                notes.append(f"stale exemption: '{name}' now resolves")
+            continue
+        if not exists:
             problems.append(f"cites nonexistent test '{name}'")
     for bare, leaf in extract_symbol_citations(text):
+        if bare in exempt:
+            continue
         rel = _relativize(bare, repo_root)
         if rel is None:
             continue
@@ -310,8 +341,8 @@ def check_path(
         if not _symbol_defined(source, leaf):
             problems.append(f"cites nonexistent symbol '{leaf}' in '{bare}'")
     if problems:
-        return False, "; ".join(problems)
-    return True, "ok"
+        return False, "; ".join(problems + notes)
+    return True, "; ".join(["ok"] + notes)
 
 
 def resolve_cited_sources(text: str, repo_root: Path) -> list[str]:

@@ -167,8 +167,15 @@ def tracked_files(repo_root: Path) -> set[str]:
 
 
 def cited_test_exists(repo_root: Path, name: str) -> bool:
-    """True if any tracked file defines or calls the named test."""
-    for needle in (f"def {name}(", f"{name}("):
+    """True if any tracked file defines or calls the named test.
+
+    CCE-131: `def {name}_` also counts, so a test-FAMILY shorthand resolves —
+    `test_lint_runner` is satisfied by test_lint_runner_missing_script_reports_block.
+    The trailing underscore is the boundary: a confabulated `test_foo` passes
+    only when a real `test_foo_*` exists, so the CCE-111 guard against wholly
+    invented names is preserved.
+    """
+    for needle in (f"def {name}(", f"{name}(", f"def {name}_"):
         r = subprocess.run(
             ["git", "-C", str(repo_root), "grep", "-l", "-F", needle],
             capture_output=True,

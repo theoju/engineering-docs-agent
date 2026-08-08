@@ -7,6 +7,33 @@ from scripts.lint import citation_exists
 SCRIPT = Path(citation_exists.__file__)
 
 
+def _tmp_git_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "host"
+    (repo / "tests").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    return repo
+
+
+def _commit_all(repo: Path) -> None:
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.email=t@e.st",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "-m",
+            "seed",
+        ],
+        check=True,
+    )
+
+
 # ---------- extraction (pure) ----------
 
 
@@ -432,3 +459,38 @@ def test_archive_dirs_resolves_only_archive_index_sections(tmp_path):
     config = _yaml.safe_load(cfg.read_text())
     dirs = citation_exists.archive_dirs(config, repo)
     assert dirs == [(repo / "docs" / "site-src" / "archive").resolve()]
+
+
+# ---------- test-family prefix matching (CCE-131) ----------
+
+
+def test_test_family_shorthand_resolves_via_prefix(tmp_path):
+    """CCE-131: `test_lint_runner` names a family; the real symbols are
+    test_lint_runner_missing_script_reports_block etc."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "tests" / "test_x.py").write_text(
+        "def test_lint_runner_missing_script_reports_block():\n    pass\n"
+    )
+    _commit_all(repo)
+    assert citation_exists.cited_test_exists(repo, "test_lint_runner") is True
+
+
+def test_confabulated_test_with_no_family_still_blocks(tmp_path):
+    """The guard CCE-111 needed: a wholly invented name matches no prefix."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "tests" / "test_x.py").write_text(
+        "def test_lint_runner_missing_script_reports_block():\n    pass\n"
+    )
+    _commit_all(repo)
+    assert (
+        citation_exists.cited_test_exists(repo, "test_no_advance_on_partial") is False
+    )
+
+
+def test_prefix_match_respects_the_underscore_boundary(tmp_path):
+    """`test_lintrunner` must NOT match `test_lint_runner_x` — the boundary is
+    what keeps the prefix match from degenerating into substring matching."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "tests" / "test_x.py").write_text("def test_lint_runner_x():\n    pass\n")
+    _commit_all(repo)
+    assert citation_exists.cited_test_exists(repo, "test_lintrunner") is False

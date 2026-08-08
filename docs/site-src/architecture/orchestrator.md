@@ -1,13 +1,18 @@
 ---
-description: "Documents architecture orchestrator: the CCE-109/CCE-114 soft time-budget check bounds every expensive loop in the nightly run, and CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages."
+description: "Documents architecture orchestrator: the CCE-109/CCE-114 soft time-budget check bounds every expensive loop in the nightly run, CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages, CCE-125 makes a gap-detector 'couldn't judge' verdict an info-only advisory outcome, and CCE-127 degrades a failed GitHub App token mint to a blocking partial reason instead of killing the job."
 source_files:
   - CHANGELOG.md
   - scripts/orchestrator_runner.py
   - agents/page-author.md
+  - agents/gap-detector.md
+  - agents/schemas/gap_detector.schema.json
   - scripts/lint/description_quality.py
+  - templates/workflow-run.yml
   - tests/orchestrator/test_enforce_agent_frontmatter.py
   - tests/orchestrator/test_agent_authored_create_frontmatter.py
-last_reviewed: "2026-07-16"
+  - tests/orchestrator/test_gap_detector_unjudged.py
+  - tests/templates/test_workflow_run_parity.py
+last_reviewed: "2026-08-08"
 status: draft
 doc_kind: architecture
 ---
@@ -86,6 +91,48 @@ Both loops are otherwise advisory — a fact-checker `contradiction` verdict add
 ## Net effect
 
 A time-budget cut anywhere in the run — admission, authoring, fact-checking, or gap-detection — sets `state["current_run"]["partial"] = True` with a `time_budget_exceeded: ...` reason describing exactly how much of that stage completed (`authored 1/3 page batches`, `fact-checked 0/3 pages`, `gap-checked 0/3 PRs`). Because authoring and the two advisory loops run in that fixed order, an authoring-loop cut also means the fact-checker and gap-detector loops never start — the pages that _were_ authored still exist and are still committed, but the run stays partial and open for manual review rather than auto-merging. Setting `time_budget_seconds: 0` (or passing `--time-budget 0` at the CLI) disables all four checkpoints and lets a run author, fact-check, and gap-check every admitted PR regardless of wall-clock time — useful for a manual `--no-pr` bootstrap run where you're willing to wait, dangerous to leave on for the scheduled nightly.
+
+## Advisory agents: a "couldn't judge" verdict must not degrade the run
+
+`gap-detector` and `fact-checker` sit downstream of the blocking pipeline (source-collector, pr-summarizer, page-author, content-validator, notifier) as advisory layers — their output feeds a PR note, not a merge gate. A dispatch failure on either one is recorded `info_only=True` and never flips `partial` (fact-checker since CCE-118; gap-detector since CCE-125). The distinction that matters is between an agent that _failed_ and an agent that _ran and said "I can't tell"_ — the latter is a legitimate outcome, not a malfunction, and treating it as one was the last recurring driver of unnecessary `partial` nightlies (`schema_invalid: gap-detector: None is not of type 'boolean'`, observed on PR #189's run).
+
+The gap-detector loop (`scripts/orchestrator_runner.py:run`) calls `dispatch_validated` per admitted PR and branches on the validated verdict's `needs_spec` field:
+
+```python
+if verdict.get("needs_spec") is None:
+    add_partial(
+        state,
+        f"gap_detector_unjudged: pr_id={pr_id}",
+        info_only=True,
+    )
+    continue
+gap_verdicts.append(verdict)
+```
+
+`needs_spec: null` is the agent's documented fallback for malformed input — the gap-detector schema (`agents/schemas/gap_detector.schema.json`) types the field `["boolean", "null"]` and still marks it `required`, so a validated `null` is a legitimate, schema-conformant "unjudged" verdict rather than a parse failure. `_record_dispatch_reasons` (`scripts/orchestrator_runner.py:_record_dispatch_reasons`) already logged the dispatch as clean before this check runs; the `needs_spec is None` branch then records its own `gap_detector_unjudged` reason and `continue`s — the verdict is never appended to `gap_verdicts`, so it's excluded from both the "Gaps flagged" What's-New block and the CCE-89 PR digest.
+
+Only a genuinely broken agent output still flips `partial`: an **absent** `needs_spec` key, a wrong non-null type, or unparseable JSON all fail `validate_and_parse` before reaching this branch, so `dispatch_validated` returns `None` and the loop's ordinary `_record_dispatch_reasons(state, reasons, ok=False)` path records a blocking reason. Only a *present*, schema-valid `null` is downgraded — the malfunction signal survives everywhere else.
+
+## GitHub App-token mint failures degrade to `partial`, never kill the job
+
+The nightly workflow mints a short-lived GitHub App installation token so the docs-agent's writes and its PR trigger host CI. `actions/create-github-app-token` runs under `continue-on-error: true` (`templates/workflow-run.yml`, kept in lockstep with the dogfood `.github/workflows/docs-agent-nightly.yml`) so a failed mint doesn't abort the job outright — the workflow falls back to `secrets.GITHUB_TOKEN` via `steps.app-token.outputs.token || secrets.GITHUB_TOKEN`. That fallback expression only evaluates for a *skipped* step; without `continue-on-error`, a *failed* step aborts the job before the `||` is ever reached, which is why this fallback was unreachable on the failure path for two months before CCE-127.
+
+A `GITHUB_TOKEN`-backed run is silently weaker: it can commit and open the docs PR, but a `GITHUB_TOKEN` merge cannot fire `on: push` host CI, so the PR would register zero checks. Left unhandled, that reads to the CCE-101 auto-merge gate as "nothing failed" — exactly the failure mode CCE-127 closes. The step's outcome is exported at **step** scope (job-level `env:` cannot reference `steps.*`) as `DOCS_AGENT_APP_TOKEN_STATUS`, and `run()` checks it right after `current_run` is initialized and before the auto-merge decision:
+
+```python
+if os.environ.get("DOCS_AGENT_APP_TOKEN_STATUS", "") == "failure":
+    _record_dispatch_reasons(
+        state,
+        [
+            "app_token_unavailable: GitHub App installation token could not "
+            "be minted; run degraded to GITHUB_TOKEN, so host CI will not "
+            "fire on this PR. Verify the App is installed on this repo."
+        ],
+        ok=False,
+    )
+```
+
+Only the literal `"failure"` degrades the run — `"skipped"` is the documented bare-host path (no `DOCS_AGENT_APP_CLIENT_ID` configured), and `"success"` or an unset variable both stay silent. `ok=False` routes the reason through the ordinary blocking `_record_dispatch_reasons` path, so it sets `partial: true` the same way a failed source-collector or page-author dispatch would. No new gate code is needed: `_maybe_auto_merge` (`scripts/orchestrator_runner.py:_maybe_auto_merge`) already skips with `partial_run` whenever `partial` is true, so a `GITHUB_TOKEN`-backed run reuses the existing interlock instead of auto-merging on an unvalidated PR. Placement of the check is deliberate — after the `current_run` dict literal is assigned (an earlier `add_partial` call would create a stub the literal would then silently overwrite) and before the merge decision reads `state["current_run"]["partial"]`.
 
 ## Agent-authored create-page frontmatter fidelity
 

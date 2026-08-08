@@ -40,6 +40,7 @@ _Operations: deployment workflows, configuration guides, and runbooks._
 - **Setup and Onboarding** — This is the single canonical setup guide for the engineering-docs-agent plugin. A duplicate root-level draft (`docs/setup-guide.md`) was removed in PR #79 (CCE-60); this page is authoritative.
 - **Setup Framework Detection** — The setup skill probes the host repo root for a supported docs framework before writing any config. Detection is intentionally minimal: two files decide the outcome, and when neither is found, `framework: none` is recorded explicitly rather than left absent.
 - **Step summary observability** — When a nightly run encounters a partial or hard-failed subagent, the runner writes a formatted digest to GitHub Actions' built-in step summary. You can read this digest directly in the workflow run UI without downloading any forensics artifact.
+- **The nightly workflow** — Every onboarded host runs `docs-agent-nightly` — rendered from `templates/workflow-run.yml` at scaffold time into `.github/workflows/docs-agent-nightly.yml` — on a schedule, plus two extra triggers. `scripts/scaffold_workflow.py` rewrites the cron minute per host so 100 onboarded repos don't all fire at the same instant; the template default is a `7 7 * * *` off-minute cron, and setup picks a deterministic minute in `[5, 55]` for each new host.
 
-_30 pages · regenerated nightly_
+_31 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

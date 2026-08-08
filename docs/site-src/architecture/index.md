@@ -13,10 +13,11 @@ last_reviewed: "2026-07-11"
 _Architecture: component design, agent contracts, data flows, and system internals._
 
 <!-- docs-agent:overview:start -->
-
 **In this section**
 
+- **Capability C — Canonical Core Citations** — Capability C keeps documentation honest about the code it describes. **C1**
 - **Orchestrator** — `run()` in `scripts/orchestrator_runner.py:run` is the nightly pipeline entry point. It runs as a straight-line sequence of stages against one window of merged PRs (`last_successful_run.head_sha` to the current `HEAD`):
+- **Publish verifier** — `run()` in `scripts/verify_runner.py:run` fires after a docs-agent PR merges. It loads config/state, resolves the changed paths for the merged PR via `GhClient.pr_view_files`, then decides how to verify the downstream publish. That decision now forks on `publishing.ci_provider`.
 - **Bootstrap fail-fast mechanisms** — The C2 bootstrap pipeline (CCE-38) adds four structural safeguards that catch bad artifacts before they reach the published site. Before this work, the pipeline trusted `page-author`'s `ok: true` signal without independently verifying the written file — allowing bad YAML, missing frontmatter, and thin descriptions to slip through undetected.
 - **Lint Rules** — The lint runner (`scripts/lint/lint_runner.py`) validates agent-authored Markdown before it reaches the docs site. Rules are tiered: **block** rules prevent a page from being published; **warn** rules surface in the PR review but do not block it.
 - **Engineering Docs Agent** — A Claude Code plugin that turns merged PRs, Jira issues, and commits into a nightly docs-update PR — with voice-matched authoring, tiered linting, gap detection, and post-merge publish verification.
@@ -28,11 +29,9 @@ _Architecture: component design, agent contracts, data flows, and system interna
 - **GitHub Pages Publish Target (CCE-32)** — The engineering-docs-agent publishes docs sites to GitHub Pages using the Actions-source deploy mode. This page covers the workflow architecture, the Node 24 constraint, the `.nojekyll` invariant, and how the publish-verifier integrates with the deployed URL.
 - **Schema Enforcement (CCE-4)** — Every subagent call is validated against a JSON schema before the orchestrator acts on its output. An invalid response records a specific reason in `partial_reasons` and lets the pipeline continue — it never crashes the run.
 - **Structured Docs Site Generation** — The engineering-docs-agent produces a structured, navigable docs site by combining three layers: a per-run source map that links code to docs, archive indexes that make ADRs/specs/plans discoverable, and a diagram-verification pass that catches broken visuals before the PR lands.
-- **Capability C — Canonical Core Citations** — Capability C keeps documentation honest about the code it describes. It has two
 - **CCE-23: API Reference Generation** — CCE-23 adds a self-updating API reference section to any host repo's docs site. The setup skill scaffolds the section once; from then on, the three extractors regenerate their pages automatically at every `mkdocs build`.
 - **Decision Archive Index Generator (CCE-23)** — The archive-index generator (`scripts/archive_indexes.py`) turns directories of date-prefixed Markdown files into navigable index pages. It is capability D of the docs-agent: a pure read-then-write step that runs on every nightly pass and always overwrites its output.
 - **Source Map and Drift Detection (CCE-23)** — The source map (`scripts/source_map.py`) and drift detector (`scripts/source_drift.py`) together answer: when source code changes, which docs pages need a human review?
 
-_16 pages · regenerated nightly_
-
+_17 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

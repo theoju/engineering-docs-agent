@@ -82,7 +82,7 @@ Six changes. Every one of them acts before severity is computed, so none depends
 
 Add `<docs_dir>/<token>` as a second resolution candidate, reading `docs_dir` from the `site:` config block, and skip tokens whose first path segment is the build-output directory — mkdocs `site_dir`, which the host's mkdocs config may set and which defaults to `site`. Resolve it from that config when present; fall back to the `site` default otherwise. A host on a different generator with no such directory skips nothing, which is the correct no-op.
 
-This requires threading config into `check_path`, whose signature is a declared shared-helper contract. Per the repo invariant, `grep -rn` its callers and update them in the same change: `resolve_cited_sources` in the same module, `scripts/orchestrator_runner.py`, and `scripts/lint/citation_line_free.py`. Hosts with no `docs_dir` configured degrade to today's repo-root-only behavior.
+This requires threading config into `check_path`, whose signature is a declared shared-helper contract, making it `check_path(path, repo_root, files, config)` — which also aligns it with every other lint rule in `scripts/lint/`, all of which already take `(path, config)`. Its external call sites are exactly two, both tests: `tests/lint/test_site_citations_line_free.py` and `tests/scripts/test_migrate_line_citations.py`. `scripts/orchestrator_runner.py` and `scripts/lint/citation_line_free.py` import from this module but call `resolve_cited_sources` and `line_pinned_citations` respectively, neither of which changes signature. Hosts with no `docs_dir` configured degrade to today's repo-root-only behavior.
 
 ### A2 — Prefix-match test identifiers at a `_` boundary
 

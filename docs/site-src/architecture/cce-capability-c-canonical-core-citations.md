@@ -9,8 +9,8 @@ source_files:
   - docs/superpowers/**
   - scripts/audit_docs.py
   - scripts/verify_citations.py
-  - scripts/verify_docs_diagrams.py
-  - scripts/{verify_docs_diagrams,audit_docs,build_doc_source_map}.py
+  - scripts/source_map.py
+  - scripts/source_drift.py
   - site-src/core/**
   - tests/orchestrator/test_source_map_stage.py
   - scripts/lint/citation_exists.py

@@ -10,7 +10,8 @@
     ],
     "agents/fact-checker.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
-      "architecture/cce4-schema-enforcement.md"
+      "architecture/cce4-schema-enforcement.md",
+      "architecture/engineering-docs-agent.md"
     ],
     "agents/gap-detector.md": [
       "architecture/cce4-schema-enforcement.md",
@@ -1482,6 +1483,7 @@
     ],
     "scripts/archive_indexes.py": [
       "architecture/cce23-decision-archive.md",
+      "architecture/structured-docs-site-generation.md",
       "archive/v0-1-1-hardening.md"
     ],
     "scripts/build_poller.py": [
@@ -1563,11 +1565,14 @@
       "architecture/cce23-decision-archive.md"
     ],
     "scripts/source_drift.py": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce23-source-map-drift.md"
     ],
     "scripts/source_map.py": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
-      "architecture/cce23-source-map-drift.md"
+      "architecture/cce23-source-map-drift.md",
+      "architecture/structured-docs-site-generation.md"
     ],
     "scripts/state_io.py": [
       "architecture/cce23-api-reference.md",
@@ -1583,7 +1588,8 @@
       "architecture/cce-capability-c3-diagram-render-gate.md"
     ],
     "scripts/verify_diagrams.py": [
-      "architecture/cce-capability-c3-diagram-render-gate.md"
+      "architecture/cce-capability-c3-diagram-render-gate.md",
+      "architecture/structured-docs-site-generation.md"
     ],
     "scripts/verify_runner.py": [
       "architecture/cce4-schema-enforcement.md",
@@ -1744,8 +1750,8 @@
       "docs/superpowers/**",
       "scripts/audit_docs.py",
       "scripts/verify_citations.py",
-      "scripts/verify_docs_diagrams.py",
-      "scripts/{verify_docs_diagrams,audit_docs,build_doc_source_map}.py",
+      "scripts/source_map.py",
+      "scripts/source_drift.py",
       "site-src/core/**",
       "tests/orchestrator/test_source_map_stage.py",
       "scripts/lint/citation_exists.py",
@@ -1760,15 +1766,13 @@
       "docs/site-src/core/**",
       "docs/superpowers/**",
       "scripts/audit_docs.py",
-      "scripts/build_doc_source_map.py",
       "scripts/lint/frontmatter_schema.py",
       "scripts/source_map.py"
     ],
     "architecture/cce-capability-c3-diagram-render-gate.md": [
       "scripts/lint/diagrams.py",
       "scripts/verify_citations.py",
-      "scripts/verify_diagrams.py",
-      "scripts/verify_docs_diagrams.py"
+      "scripts/verify_diagrams.py"
     ],
     "architecture/cce10-source-collector-canonical-shape.md": [
       "scripts/orchestrator_runner.py",
@@ -1831,11 +1835,10 @@
     ],
     "architecture/engineering-docs-agent.md": [
       ".claude/hooks/doc_drift.py",
-      "agents/fact_checker.md",
+      "agents/fact-checker.md",
       "docs-agent/*",
       "docs/site-src/*",
       "docs/site-src/archive/adrs/*.md",
-      "scripts/build_doc_source_map.py",
       "scripts/lint/<rule>.py",
       "scripts/lint/frontmatter_schema.py",
       "scripts/lint/lint_runner.py",
@@ -1878,9 +1881,9 @@
     "architecture/structured-docs-site-generation.md": [
       "agents/schemas/*.json",
       "docs/superpowers/**",
-      "scripts/build_doc_source_map.py",
-      "scripts/generate_archive_indexes.py",
-      "scripts/verify_docs_diagrams.py"
+      "scripts/source_map.py",
+      "scripts/archive_indexes.py",
+      "scripts/verify_diagrams.py"
     ],
     "archive/2026-07-13-cce120-gap-detector-prid-injection.md": [
       "scripts/orchestrator_runner.py",

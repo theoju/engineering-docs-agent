@@ -6,11 +6,10 @@ description:
   \ publish verification, running against any host repo."
 source_files:
   - .claude/hooks/doc_drift.py
-  - agents/fact_checker.md
+  - agents/fact-checker.md
   - docs-agent/*
   - docs/site-src/*
   - docs/site-src/archive/adrs/*.md
-  - scripts/build_doc_source_map.py
   - scripts/lint/<rule>.py
   - scripts/lint/frontmatter_schema.py
   - scripts/lint/lint_runner.py

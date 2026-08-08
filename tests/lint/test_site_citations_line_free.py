@@ -34,9 +34,12 @@ def test_migration_introduces_no_symbol_failures():
     # retroactively; auditing that legacy debt is separate work).
     repo_root = citation_exists.repo_root_for(SITE / "x")
     files = citation_exists.tracked_files(repo_root) if repo_root else set()
+    cfg = citation_exists._load_config(
+        repo_root / ".engineering-docs-agent" / "config.yml"
+    )
     symbol_failures = {}
     for page in _pages():
-        ok, msg = citation_exists.check_path(page, repo_root, files)
+        ok, msg = citation_exists.check_path(page, repo_root, files, cfg)
         if not ok and "nonexistent symbol" in msg:
             symbol_failures[str(page.relative_to(ROOT))] = msg
     assert not symbol_failures, (

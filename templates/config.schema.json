@@ -76,7 +76,17 @@
         "tier1": {},
         "tier2": { "type": "object" },
         "tier3": { "type": "object" },
-        "stub_paths": { "type": "array", "items": { "type": "string" } }
+        "stub_paths": { "type": "array", "items": { "type": "string" } },
+        "citation_example_prefixes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Reserved illustrative path namespaces citation_exists never resolves (CCE-131). Replaces the built-in default of [\"example\"]."
+        },
+        "citation_exempt_tokens": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Exact citation tokens whose non-existence is intentional (CCE-131). Unioned with the plugin defaults, never replacing them."
+        }
       }
     },
     "publishing": {

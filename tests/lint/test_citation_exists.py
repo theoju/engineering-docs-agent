@@ -2,11 +2,39 @@ from __future__ import annotations
 import json, subprocess, sys
 from pathlib import Path
 
-SCRIPTS_LINT = Path(__file__).parent.parent.parent / "scripts" / "lint"
-sys.path.insert(0, str(SCRIPTS_LINT))
-import citation_exists  # noqa: E402
+import pytest
+import yaml
 
-SCRIPT = SCRIPTS_LINT / "citation_exists.py"
+from scripts.lint import citation_exists
+
+SCRIPT = Path(citation_exists.__file__)
+
+
+def _tmp_git_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "host"
+    (repo / "tests").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    return repo
+
+
+def _commit_all(repo: Path) -> None:
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.email=t@e.st",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "-m",
+            "seed",
+        ],
+        check=True,
+    )
 
 
 # ---------- extraction (pure) ----------
@@ -60,6 +88,34 @@ def test_vocabulary_tokens_skipped():
     # No slash and not a test identifier -> not a citation.
     text = "`partial_reasons` `run.time_budget_seconds` `frontmatter_contract.py`"
     assert citation_exists.extract_citations(text) == {"paths": [], "tests": []}
+
+
+def test_unterminated_fence_still_checks_trailing_prose():
+    """CCE-131: an unclosed fence used to swallow the rest of the file,
+    silently disabling this block rule from that point on."""
+    text = (
+        "Intro citing `scripts/real.py`.\n"
+        "\n"
+        "```python\n"
+        "never_closed = True\n"
+        "\n"
+        "Trailing prose citing `scripts/after_fence.py`.\n"
+    )
+    paths = citation_exists.extract_citations(text)["paths"]
+    assert "scripts/after_fence.py" in paths
+
+
+def test_terminated_fence_content_is_still_stripped():
+    """The fix must not stop stripping properly closed fences."""
+    text = (
+        "Before `scripts/before.py`.\n"
+        "```python\n"
+        "x = `scripts/inside_fence.py`\n"
+        "```\n"
+        "After `scripts/after.py`.\n"
+    )
+    paths = citation_exists.extract_citations(text)["paths"]
+    assert paths == ["scripts/before.py", "scripts/after.py"]
 
 
 # ---------- verification + CLI (tmp git host) ----------
@@ -406,3 +462,338 @@ def test_archive_dirs_resolves_only_archive_index_sections(tmp_path):
     config = _yaml.safe_load(cfg.read_text())
     dirs = citation_exists.archive_dirs(config, repo)
     assert dirs == [(repo / "docs" / "site-src" / "archive").resolve()]
+
+
+# ---------- test-family prefix matching (CCE-131) ----------
+
+
+def test_test_family_shorthand_resolves_via_prefix(tmp_path):
+    """CCE-131: `test_lint_runner` names a family; the real symbols are
+    test_lint_runner_missing_script_reports_block etc."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "tests" / "test_x.py").write_text(
+        "def test_lint_runner_missing_script_reports_block():\n    pass\n"
+    )
+    _commit_all(repo)
+    assert citation_exists.cited_test_exists(repo, "test_lint_runner") is True
+
+
+def test_confabulated_test_with_no_family_still_blocks(tmp_path):
+    """The guard CCE-111 needed: a wholly invented name matches no prefix."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "tests" / "test_x.py").write_text(
+        "def test_lint_runner_missing_script_reports_block():\n    pass\n"
+    )
+    _commit_all(repo)
+    assert (
+        citation_exists.cited_test_exists(repo, "test_no_advance_on_partial") is False
+    )
+
+
+def test_prefix_match_respects_the_underscore_boundary(tmp_path):
+    """`test_lintrunner` must NOT match `test_lint_runner_x` — the boundary is
+    what keeps the prefix match from degenerating into substring matching."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "tests" / "test_x.py").write_text("def test_lint_runner_x():\n    pass\n")
+    _commit_all(repo)
+    assert citation_exists.cited_test_exists(repo, "test_lintrunner") is False
+
+
+# ---------- docs-relative and build-output path resolution (CCE-131) ----------
+
+_SITE_CFG = {"site": {"docs_dir": "docs/site-src"}}
+
+
+def test_docs_relative_sibling_citation_resolves(tmp_path):
+    """CCE-131: a docs page citing a sibling page names it relative to
+    docs_dir, not to the repo root."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "docs" / "site-src" / "api").mkdir(parents=True)
+    (repo / "docs" / "site-src" / "api" / "index.md").write_text("# API\n")
+    page = repo / "docs" / "site-src" / "guide.md"
+    page.write_text("See `api/index.md` for the reference.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is True, msg
+
+
+def test_build_output_path_is_skipped(tmp_path):
+    """mkdocs site_dir output is generated, never tracked — not a confabulation."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "mkdocs.yml").write_text("docs_dir: docs/site-src\nsite_dir: site\n")
+    page = repo / "page.md"
+    page.write_text("Published to `site/api/http/index.html`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is True, msg
+
+
+# ---------- discriminating build-dir tests (CCE-131 final-review Finding 2) --
+#
+# test_build_output_path_is_skipped above uses site_dir: site — the same
+# value as the old hardcoded "site" fallback — so it passes against
+# `def _build_dir(...): return "site"` too. It cannot tell the real
+# implementation apart from a constant. These tests can.
+
+
+def test_build_output_honors_reconfigured_site_dir(tmp_path):
+    """site_dir: public must route public/, not the old hardcoded site/."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "mkdocs.yml").write_text("docs_dir: docs/site-src\nsite_dir: public\n")
+    page = repo / "page.md"
+    page.write_text("Published to `public/api/http/index.html`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is True, msg
+
+
+def test_old_default_prefix_blocks_once_site_dir_is_reconfigured(tmp_path):
+    """The flip side of the above: once site_dir is public, site/ is an
+    ordinary (nonexistent) path again, not a permanently exempt prefix."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "mkdocs.yml").write_text("docs_dir: docs/site-src\nsite_dir: public\n")
+    page = repo / "page.md"
+    page.write_text("See `site/api/http/index.html`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is False
+    assert "site/api/http/index.html" in msg
+
+
+def test_no_mkdocs_yml_at_all_blocks_invented_site_path(tmp_path):
+    """No parseable mkdocs config at all: skip nothing."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("See `site/invented.js`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is False
+    assert "site/invented.js" in msg
+
+
+def test_material_style_python_name_tag_parses_and_site_dir_is_honored(tmp_path):
+    """Regression for the dead-code half: plain yaml.safe_load raises on
+    mkdocs-material's `!!python/name:` tag (used by pymdownx.superfences for
+    custom fences), so a naive parse-or-fallback implementation never
+    actually runs the parse branch on a Material config. The lax loader must
+    degrade the unknown tag to None instead of aborting the whole parse."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "mkdocs.yml").write_text(
+        "docs_dir: docs/site-src\n"
+        "site_dir: public\n"
+        "markdown_extensions:\n"
+        "  - pymdownx.superfences:\n"
+        "      custom_fences:\n"
+        "        - name: mermaid\n"
+        "          class: mermaid\n"
+        "          format: !!python/name:pymdownx.superfences.fence_code_format\n"
+    )
+    page = repo / "page.md"
+    page.write_text("Published to `public/api/http/index.html`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is True, msg
+
+
+# ---------- _build_dir must not fail open (CCE-131 final-review Finding 1) --
+
+
+def test_build_dir_is_empty_with_no_mkdocs_config(tmp_path):
+    """No mkdocs.yml -> skip NOTHING. The previous unconditional "site"
+    fallback made site/ a permanently reserved prefix on every host, even one
+    that keeps real source there."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "README.md").write_text("host\n")
+    _commit_all(repo)
+    assert citation_exists._build_dir(repo) == ""
+
+
+def test_no_mkdocs_config_does_not_reserve_site_prefix(tmp_path):
+    """A host with no mkdocs.yml that happens to keep real source under
+    site/ must not get site/ treated as an always-exempt build-output
+    prefix: an invented sibling path must still block."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "site" / "src").mkdir(parents=True)
+    (repo / "site" / "src" / "real.js").write_text("// real\n")
+    page = repo / "page.md"
+    page.write_text("See `site/src/totally_invented.js` for the sentinel.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "site/src/totally_invented.js" in msg
+
+
+def test_this_repos_own_mkdocs_yml_parses_via_lax_loader():
+    """CCE-131 final-review Finding 1(b): plain yaml.safe_load cannot read
+    this repo's own mkdocs.yml — Material's `!!python/name:` tag raises
+    ConstructorError — so the mkdocs-parsing branch was dead code here; the
+    old code returned 'site' only because it coincides with the hardcoded
+    fallback. _build_dir must now return 'site' by actually parsing."""
+    repo_root = Path(__file__).resolve().parents[2]
+    mkdocs_yml = repo_root / "mkdocs.yml"
+    assert mkdocs_yml.exists()  # sanity: this is really the repo root
+    with pytest.raises(yaml.YAMLError):
+        yaml.safe_load(mkdocs_yml.read_text())
+    assert citation_exists._build_dir(repo_root) == "site"
+
+
+def test_no_docs_dir_configured_still_blocks(tmp_path):
+    """Generic-first guard: a host with no site.docs_dir keeps today's
+    repo-root-only behavior."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "docs" / "site-src" / "api").mkdir(parents=True)
+    (repo / "docs" / "site-src" / "api" / "index.md").write_text("# API\n")
+    page = repo / "page.md"
+    page.write_text("See `api/index.md`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "api/index.md" in msg
+
+
+def test_genuine_confabulation_still_blocks_with_docs_dir(tmp_path):
+    """The docs_dir fallback must not become a blanket pass."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "docs" / "site-src").mkdir(parents=True)
+    page = repo / "docs" / "site-src" / "page.md"
+    page.write_text("See `scripts/build_doc_source_map.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is False
+    assert "scripts/build_doc_source_map.py" in msg
+
+
+def test_example_namespace_path_passes(tmp_path):
+    """CCE-131: `example/` is a reserved illustrative namespace (RFC 2606
+    precedent) and never resolves by design."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("A page with `example/auth/session.py` in its file list.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg
+
+
+def test_non_example_fictional_path_still_blocks(tmp_path):
+    """The namespace is the affordance; inventing another root is still a defect."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("A page with `scripts/auth/session.py` in its file list.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "scripts/auth/session.py" in msg
+
+
+def test_host_configured_prefix_replaces_the_default(tmp_path):
+    """A host with a real top-level example/ dir picks a different word."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("Both `acme/auth/session.py` and `example/auth/session.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_example_prefixes": ["acme"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is False
+    assert "example/auth/session.py" in msg
+    assert "acme/auth/session.py" not in msg
+
+
+def test_exempt_token_passes(tmp_path):
+    """CCE-131: a file whose non-existence IS the claim."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text(
+        "tests/scripts must not be a package: no `tests/scripts/__init__.py`.\n"
+    )
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_exempt_tokens": ["tests/scripts/__init__.py"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is True, msg
+
+
+def test_unlisted_sibling_still_blocks(tmp_path):
+    """The list exempts exact tokens, not a directory."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("See `tests/scripts/conftest.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_exempt_tokens": ["tests/scripts/__init__.py"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is False
+    assert "tests/scripts/conftest.py" in msg
+
+
+def test_plugin_default_exempts_the_rules_own_placeholder(tmp_path):
+    """test_snake_case is plugin-intrinsic: it lives in this module's docstring,
+    so every host documenting this lint hits it. No host config needed."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("Test identifiers look like `test_snake_case`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg
+
+
+def test_host_entries_extend_rather_than_replace_defaults(tmp_path):
+    """A host that lists its own token keeps the plugin defaults."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("Both `test_snake_case` and `tests/scripts/__init__.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_exempt_tokens": ["tests/scripts/__init__.py"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is True, msg
+
+
+def test_stale_exemption_is_noted_without_blocking(tmp_path):
+    """A listed token that now resolves must surface, or the list rots silently."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "real.py").write_text("x = 1\n")
+    page = repo / "page.md"
+    page.write_text("See `scripts/real.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_exempt_tokens": ["scripts/real.py"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is True
+    assert "stale exemption" in msg
+    assert "scripts/real.py" in msg
+
+
+# ---------- symbol loop honors example_prefixes too (CCE-131 final-review Finding 6) --
+
+
+def test_symbol_citation_under_example_prefix_is_skipped(tmp_path):
+    """The symbol-existence loop in check_path checked `exempt` but not
+    example_prefixes. Harmless while the cited file genuinely does not exist
+    (the loop `continue`s on a missing target, already reported by the paths
+    loop) -- but a host with a real example/ tree that did not reconfigure
+    the prefix has a real file there, and the symbol-existence check must
+    still treat example/ as reserved rather than confirming/denying a
+    fictional symbol inside a real file."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "example").mkdir()
+    (repo / "example" / "auth.py").write_text("def real_but_irrelevant():\n    pass\n")
+    page = repo / "page.md"
+    page.write_text("See `example/auth.py:totally_fake_symbol`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg

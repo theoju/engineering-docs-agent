@@ -109,6 +109,6 @@ def test_migrated_page_passes_citation_exists(tmp_path):
     new, _ = mlc.migrate_text(page.read_text(), repo)
     page.write_text(new)
     files = citation_exists.tracked_files(repo)
-    ok, msg = citation_exists.check_path(page, repo, files)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
     assert ok, msg
     assert citation_exists.line_pinned_citations(new) == []

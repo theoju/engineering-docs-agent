@@ -30,7 +30,21 @@ Plain `yaml.safe_load` passes all of these silently; `actionlint` rejects them.
 `.github/workflows/actionlint.yml` triggers on:
 
 - **Every PR** targeting `main` (no `paths:` filter — actionlint is a required status check; omitting the filter ensures GitHub never sees the check as absent and blocks merge).
-- **Push to `main`** only when `.github/workflows/**` or `.github/actionlint.yml` changes (post-merge runs are scoped to avoid noise).
+- **Push to `main`**, scoped by a `paths:` list so post-merge runs stay quiet:
+
+```yaml
+push:
+  branches: [main]
+  paths:
+    - ".github/workflows/**"
+    # Dead glob: no actionlint config file exists in this repo.
+    # actionlint's own convention is .github/actionlint.yaml — the
+    # .yml spelling below would not match it. Fix both together if
+    # you ever add a config.
+    - ".github/actionlint.yml"
+```
+
+The second glob currently matches nothing — `.github/` holds only `workflows/`. Leaving it costs nothing, but do not read it as evidence that a config file exists.
 
 The job downloads `actionlint` at a pinned version (`1.7.7`) via the official download script, which verifies a checksum. The `Run actionlint` step (`.github/workflows/actionlint.yml`) runs with `-color` and exits non-zero on any finding, blocking merge.
 

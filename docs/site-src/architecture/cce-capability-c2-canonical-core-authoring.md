@@ -1,14 +1,14 @@
 ---
-description: How Capability C2 authors and maintains canonical core documentation
+description:
+  How Capability C2 authors and maintains canonical core documentation
   pages using voice-matched synthesis and the source map.
 source_files:
-- docs/site-src/core/**
-- docs/superpowers/**
-- scripts/audit_docs.py
-- scripts/build_doc_source_map.py
-- scripts/lint/frontmatter_schema.py
-- scripts/source_map.py
-last_reviewed: '2026-05-28'
+  - docs/site-src/core/**
+  - docs/superpowers/**
+  - scripts/audit_docs.py
+  - scripts/lint/frontmatter_schema.py
+  - scripts/source_map.py
+last_reviewed: "2026-05-28"
 status: draft
 doc_kind: architecture
 ---
@@ -50,7 +50,7 @@ The `page-author` subagent (`agents/page-author.md`) is the runtime executor of 
 
 The agent reads voice samples first to match tone, then drafts or patches the page. On `create` it writes a complete file with frontmatter. On `edit` it integrates new content into the existing heading structure rather than appending.
 
-The agent returns a JSON object conforming to `agents/schemas/page-author-output.json`. The `ok` field is the only required key; a `false` value with `error: "path_not_agent_editable"` means the orchestrator's editable-path filter blocked the write before any file was touched.
+The agent returns a JSON object conforming to `agents/schemas/page_author.schema.json`. The `ok` field is the only required key; a `false` value with `error: "path_not_agent_editable"` means the orchestrator's editable-path filter blocked the write before any file was touched.
 
 ## Source map integration
 

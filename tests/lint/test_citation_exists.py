@@ -797,3 +797,113 @@ def test_symbol_citation_under_example_prefix_is_skipped(tmp_path):
     files = citation_exists.tracked_files(repo)
     ok, msg = citation_exists.check_path(page, repo, files, {})
     assert ok is True, msg
+
+
+# ---------- the citation grammar's own metasyntactic placeholder (CCE-134) ----------
+#
+# `path/to/file.py` is the placeholder in the CCE-122 citation grammar that the
+# plugin itself ships (agents/page-author.md, CLAUDE.md) and that therefore
+# propagates into authored pages on EVERY host. It is an exact EXEMPT TOKEN, not
+# a reserved prefix: the corpus contains exactly one such token, exempt_tokens()
+# UNIONS with host config (a prefix REPLACES, so a host that renames its example
+# namespace would silently lose the plugin-intrinsic entry), and the exempt
+# branch reports drift when the token starts resolving. A prefix would reserve an
+# unbounded subtree with a silent bare `continue`.
+
+
+def test_plugin_default_exempts_the_citation_grammar_placeholder(tmp_path):
+    """CCE-134: the grammar placeholder is documentation, not a citation."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("Cite code as `path/to/file.py`, never with a line number.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg
+
+
+def test_grammar_placeholder_suffix_variants_are_exempt(tmp_path):
+    """`:symbol` and `:line` both strip to the same bare exempt token, and the
+    symbol-existence loop must skip it too (the file does not exist to parse)."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text(
+        "Grammar: `path/to/file.py`, `path/to/file.py:symbol`, "
+        "never `path/to/file.py:line`.\n"
+    )
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg
+
+
+def test_grammar_placeholder_survives_a_host_example_prefix_override(tmp_path):
+    """Durability across hosts: example_prefixes() REPLACES on host override, so
+    a prefix-based fix would break every host that renamed its example
+    namespace. exempt_tokens() unions, so the plugin-intrinsic entry survives."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("Cite code as `path/to/file.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    cfg = {
+        "lint": {
+            "citation_example_prefixes": ["acme"],
+            "citation_exempt_tokens": ["tests/scripts/__init__.py"],
+        }
+    }
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is True, msg
+
+
+def test_confabulated_sibling_under_path_to_still_blocks(tmp_path):
+    """The exemption is one exact token, not the `path/to/` subtree. A prefix
+    would swallow this invented file with a silent bare `continue`."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text(
+        "Grammar is `path/to/file.py`; the runner lives in "
+        "`path/to/genuinely_missing.py`.\n"
+    )
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False, msg
+    assert "path/to/genuinely_missing.py" in msg
+    assert "cites nonexistent path 'path/to/file.py'" not in msg
+
+
+def test_confabulated_symbol_in_a_real_path_to_file_still_blocks(tmp_path):
+    """Worst case a prefix would hide: an invented symbol attributed to a REAL
+    file, which reads as authoritative (the CCE-122 `:symbol` hazard)."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "path" / "to").mkdir(parents=True)
+    (repo / "path" / "to" / "real_module.py").write_text(
+        "def real_symbol():\n    x=1\n"
+    )
+    page = repo / "page.md"
+    page.write_text(
+        "Grammar is `path/to/file.py:symbol`; see "
+        "`path/to/real_module.py:totally_invented_symbol`.\n"
+    )
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False, msg
+    assert "cites nonexistent symbol 'totally_invented_symbol'" in msg
+    assert "path/to/file.py'" not in msg
+
+
+def test_grammar_placeholder_reports_drift_once_it_resolves(tmp_path):
+    """Self-healing: a host that grows a real path/to/file.py gets an actionable
+    `stale exemption` note. The prefix branch is a silent `continue` forever."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "path" / "to").mkdir(parents=True)
+    (repo / "path" / "to" / "file.py").write_text("x = 1\n")
+    page = repo / "page.md"
+    page.write_text("Cite code as `path/to/file.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg
+    assert "stale exemption: 'path/to/file.py' now resolves" in msg

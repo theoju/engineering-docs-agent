@@ -44,6 +44,8 @@ For per-subagent raw-stdout diagnostics, set `DOCS_AGENT_DEBUG_DIR=/tmp/cce-debu
 
 The main authoring pipeline (`scripts/orchestrator_runner.py` with no subcommand) runs automatically once daily at 07:00 UTC via `.github/workflows/docs-agent-nightly.yml`. The workflow opens or append-commits to a `docs-agent/YYYY-MM-DD` PR; per spec §8, a partial run still opens the PR with `partial: true` in the body so an operational gap is visible, not silent.
 
+The workflow runs its GitHub App-token step under `continue-on-error` and exports the step's outcome as `DOCS_AGENT_APP_TOKEN_STATUS`. When that value is exactly `failure` — an App is configured but its installation token could not be minted, typically because the App was uninstalled or transferred to another account — the orchestrator records a blocking `app_token_unavailable` reason and marks the run partial, which disables auto-merge: a PR built on the fallback `GITHUB_TOKEN` never triggers host CI, so its check list would be empty rather than green. The values `skipped` (no App configured), `success`, and unset are all silent. Set nothing when running locally.
+
 To fire it manually:
 
 ```bash

@@ -1362,6 +1362,29 @@ def run(
             except ValueError:
                 pass
 
+    # CCE-127: the workflow's App-token step runs under continue-on-error, so a
+    # failure to mint the installation token no longer kills the job — the run
+    # degrades to secrets.GITHUB_TOKEN. Record that as a BLOCKING reason so
+    # _maybe_auto_merge skips with "partial_run": a PR built on GITHUB_TOKEN
+    # never fires host CI, and zero registered checks would otherwise read as
+    # "nothing failed" and auto-merge unvalidated docs.
+    #
+    # Only the literal "failure" degrades the run. "skipped" is the documented
+    # bare-host path (no DOCS_AGENT_APP_CLIENT_ID configured) and must stay
+    # silent, as must "success" and unset. Placement is deliberate: after
+    # current_run exists (add_partial would otherwise create a stub that the
+    # dict literal above overwrites) and before the auto-merge decision.
+    if os.environ.get("DOCS_AGENT_APP_TOKEN_STATUS", "") == "failure":
+        _record_dispatch_reasons(
+            state,
+            [
+                "app_token_unavailable: GitHub App installation token could not "
+                "be minted; run degraded to GITHUB_TOKEN, so host CI will not "
+                "fire on this PR. Verify the App is installed on this repo."
+            ],
+            ok=False,
+        )
+
     try:
         # CCE-43: same-hour rerun guard. If origin/<docs-agent-branch>'s
         # committed state.json already advanced last_successful_run.head_sha

@@ -50,14 +50,33 @@ jobs:
       # TEMPLATE-ONLY: consumed by agents/notifier.md when notifications.slack.enabled: true.
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
-      # Without DOCS_AGENT_APP_CLIENT_ID set, this step is skipped and the workflow
-      # falls back to secrets.GITHUB_TOKEN. CONSEQUENCE: docs-agent PRs will NOT
-      # trigger your host CI (push/pull_request workflows). To enable host CI on
-      # docs-agent PRs, register a GitHub App named engineering-docs-agent and set
-      # vars.DOCS_AGENT_APP_CLIENT_ID + secrets.DOCS_AGENT_APP_PRIVATE_KEY.
+      # This step has TWO non-success paths, and they mean different things:
+      #
+      #   skipped  — DOCS_AGENT_APP_CLIENT_ID is unset. The host never
+      #              configured an App. Normal, silent, falls back to
+      #              secrets.GITHUB_TOKEN.
+      #   failure  — an App IS configured but the token could not be minted
+      #              (App uninstalled, transferred to another account, key
+      #              revoked). Also falls back to GITHUB_TOKEN, but this is a
+      #              broken host, not a bare one: CCE-127 records a blocking
+      #              app_token_unavailable reason so the run goes partial and
+      #              auto-merge is skipped.
+      #
+      # CONSEQUENCE either way: docs-agent PRs will NOT trigger your host CI
+      # (push/pull_request workflows), because GITHUB_TOKEN suppresses those
+      # events. To enable host CI on docs-agent PRs, register a GitHub App
+      # named engineering-docs-agent, set vars.DOCS_AGENT_APP_CLIENT_ID +
+      # secrets.DOCS_AGENT_APP_PRIVATE_KEY, and install it ON THIS REPO —
+      # configuring the credentials is not enough without the installation.
       - name: Generate GitHub App installation token
         id: app-token
         if: vars.DOCS_AGENT_APP_CLIENT_ID != ''
+        # CCE-127: a failed token mint must not kill the job. continue-on-error
+        # makes `conclusion` report success so the job proceeds, while `outcome`
+        # retains the true `failure` — which is what we export below. Without
+        # this, the step aborts the job and the `||` fallback on the next step
+        # is never evaluated (GitHub only resolves it for a *skipped* step).
+        continue-on-error: true
         # CCE-54: v3 is the first major on Node 24.
         # CCE-66: v3 deprecates `app-id` in favor of `client-id` (the OAuth Client
         # ID, format Iv1.xxx or Iv23li…, NOT the numeric App ID). Stored as a repo
@@ -74,8 +93,15 @@ jobs:
           fetch-depth: 0 # full history so state.json window math sees all merges
           # CCE-45: checkout configures git's credential helper from this
           # token, so the subsequent `git push` from the runner uses the
-          # App token rather than the default GITHUB_TOKEN. The `||` resolves
-          # to GITHUB_TOKEN when the App-token step is skipped via its `if:`.
+          # App token rather than the default GITHUB_TOKEN.
+          #
+          # CCE-127: the `||` resolves to GITHUB_TOKEN whenever the App-token
+          # step produced no output — both when it was skipped via its `if:`
+          # AND when it failed. The failure path only became reachable once
+          # that step gained continue-on-error: a failing step without it
+          # aborts the job, so this expression was never evaluated. The
+          # original comment claimed skip-only coverage, and that wording is
+          # what made an unreachable fallback read as correct for two months.
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - name: Check out engineering-docs-agent plugin
@@ -148,6 +174,13 @@ jobs:
           # (or GITHUB_TOKEN fallback). Lives at step-env (not job-env) because
           # GitHub's runtime validator rejects `steps.*` references at job-env scope.
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          # CCE-127: "failure" here makes the orchestrator record a blocking
+          # app_token_unavailable reason, flipping the run to partial so
+          # auto-merge is skipped — a GITHUB_TOKEN-built PR never fires host
+          # CI, and zero registered checks would otherwise read as "nothing
+          # failed". "skipped" (no App configured) and "success" are silent.
+          # Step-env for the same reason as GH_TOKEN above.
+          DOCS_AGENT_APP_TOKEN_STATUS: ${{ steps.app-token.outcome }}
         run: |
           python .docs-agent-plugin/scripts/orchestrator_runner.py --repo-root .
 

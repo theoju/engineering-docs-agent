@@ -1,11 +1,22 @@
 # Plans archive
 
-_Auto-generated; 64 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 70 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+
+## 2026-08
+
+| Title | Status | Summary |
+|---|---|---|
+| [CCE-127 — App-Token Degrade-to-Partial Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-08-07-cce127-app-token-degrade-partial.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 
 ## 2026-07
 
 | Title | Status | Summary |
 |---|---|---|
+| [CCE-125 — gap-detector unjudged advisory-skip Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-23-cce125-gap-detector-unjudged-advisory.md) | — | > **For agentic workers:** TDD, one failing test → implementation → green → commit per task. Steps use `- [ ]`. |
+| [CCE-124 Implementation Plan — archive-lens `citation_exists` advisory](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-23-cce124-archive-lens-citation-advisory.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or executing-plans. Steps use `- … |
+| [CCE-123 Publish-Trigger Provider-Aware Dispatch — Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-23-cce123-publish-trigger-provider-aware.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-b… |
+| [CCE-63 CircleCI publish-verifier provider seam Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-22-cce63-circleci-publish-verifier.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
+| [CCE-122 Stable Code Citations Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-19-cce122-stable-code-citations.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-119 Create-Path Frontmatter Fidelity Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-14-cce119-create-path-frontmatter-fidelity.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-120: Orchestrator-injected gap-detector `pr_id` Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-12-cce120-gap-detector-prid-injection.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-118 (item 1): benign rescue must not flip partial — implementation plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-07-11-cce118-benign-rescue-partial.md) | — | > **For agentic workers:** TDD. Failing test → minimal implementation → green → commit. Steps use checkbox (`- [ ]`) syn… |

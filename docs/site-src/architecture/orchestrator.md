@@ -1,13 +1,15 @@
 ---
-description: "Documents architecture orchestrator: the CCE-109/CCE-114 soft time-budget check bounds every expensive loop in the nightly run, and CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages."
+description: "Documents architecture orchestrator: the CCE-109/CCE-114 soft time-budget check bounds every expensive loop in the nightly run, CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages, and CCE-127 degrades a failed GitHub App-token mint to a blocking partial reason instead of a dead job."
 source_files:
   - CHANGELOG.md
   - scripts/orchestrator_runner.py
   - agents/page-author.md
   - scripts/lint/description_quality.py
+  - templates/workflow-run.yml
   - tests/orchestrator/test_enforce_agent_frontmatter.py
   - tests/orchestrator/test_agent_authored_create_frontmatter.py
-last_reviewed: "2026-07-16"
+  - tests/templates/test_workflow_run_parity.py
+last_reviewed: "2026-08-08"
 status: draft
 doc_kind: architecture
 ---
@@ -102,3 +104,40 @@ The reconciliation is scoped narrowly and deliberately:
 A second, related CCE-119 fix removed a duplicated constant. `_synthesize_agent_description` (the deterministic description used when the orchestrator itself has to author placeholder content, e.g. in dry-run) used to pad to a hardcoded minimum word count; it now calls `description_quality.resolve_min_words(config)` (`scripts/lint/description_quality.py:resolve_min_words`, resolved once at `scripts/orchestrator_runner.py` before the batch loop starts) so a host that raises `lint.tier1.description_quality.min_words` above the library default of 6 gets a synthesized description that still clears Tier-1 lint, instead of one silently pinned to the old constant.
 
 Neither gap was a live failure before this fix — the content-validator's Tier-1 lint-drop path caught a bad frontmatter write and reverted it, same as any other `block`-severity failure — but both were CCE-117 residuals that left the production dispatch path relying on an LLM cooperating with an instruction rather than on a value the orchestrator itself controls. Tracker: CCE-119 (closes the two residual gaps identified after CCE-117 fixed the recurring "partial" nightly run caused by 20 blocked architecture pages).
+
+## App-token degrade-to-partial (CCE-127)
+
+A run's `run()` needs a GitHub token before it does anything else: pushing the `docs-agent/YYYY-MM-DD` branch, opening or appending to the PR, and — if a GitHub App is configured — letting that PR fire the host's own CI. `templates/workflow-run.yml`'s "Generate GitHub App installation token" step mints that token via `actions/create-github-app-token@v3`, and it can fail independently of whether an App is configured at all: `if: vars.DOCS_AGENT_APP_CLIENT_ID != ''` makes the step **skip** on a bare host with no App, but on a host that _has_ configured one, the mint call itself can still fail — the App was uninstalled, transferred to another account, or the repository was dropped from its installation's selection.
+
+Before CCE-127, that failure killed the job outright, and it killed it silently. The step had no `continue-on-error`, so a failed mint aborted the workflow before the checkout step's `token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}` fallback was ever evaluated — GitHub only resolves that expression for a step that reports `skipped`, not `failure`. The fallback line had existed since CCE-80, but on the failure path it was dead code: no run, no partial PR, no notification. The originating incident was an org transfer that deleted the App's installation on 2026-07-23; because neither host repo had `SLACK_WEBHOOK_URL` wired at the time, the silence went unnoticed for 15 consecutive nightlies (~30 runs across two repos) until 2026-08-07.
+
+The fix has two parts, and both are required — either alone is inert:
+
+1. **`continue-on-error: true`** on the App-token step (`templates/workflow-run.yml`) makes the step's `conclusion` report `success` regardless of what actually happened, so the job proceeds past it. This is what makes the checkout step's `||` fallback reachable on the failure path for the first time.
+2. **Export `outcome`, never `conclusion`.** Because `continue-on-error` rewrites `conclusion` to `success`, only `steps.app-token.outcome` still carries the true `failure` value. The "Run docs-agent" step exports it at **step** env scope as `DOCS_AGENT_APP_TOKEN_STATUS: ${{ steps.app-token.outcome }}` — job-env can't reference `steps.*` at all, so this has to live on the step that consumes it.
+
+`run()` reads that variable early, immediately after the fresh `current_run` dict is built and before any dispatch:
+
+```python
+if os.environ.get("DOCS_AGENT_APP_TOKEN_STATUS", "") == "failure":
+    _record_dispatch_reasons(
+        state,
+        ["app_token_unavailable: GitHub App installation token could not "
+         "be minted; run degraded to GITHUB_TOKEN, so host CI will not "
+         "fire on this PR. Verify the App is installed on this repo."],
+        ok=False,
+    )
+```
+
+That placement is load-bearing, not incidental: `add_partial` (called by `_record_dispatch_reasons`, `ok=False`) would silently create a stub `current_run` if it ran before the dict literal above it — the literal would then overwrite the stub and swallow the reason. Only the literal string `"failure"` trips this. `"skipped"` (the documented bare-host path — no `DOCS_AGENT_APP_CLIENT_ID` configured) and `"success"` and an unset variable all stay silent; only a **configured-but-broken** App degrades the run.
+
+Flipping `partial` here reuses the existing CCE-101 auto-merge interlock in `_maybe_auto_merge` (`if partial: return skip("partial_run")`) — CCE-127 adds no new gate code. That reuse is the actual point: a PR built on the `GITHUB_TOKEN` fallback never fires the host's `on: push`/`on: pull_request` CI, so if nothing else in the run failed, zero registered checks would otherwise look indistinguishable from "everything passed" and the PR would auto-merge undocumented, unvalidated changes.
+
+Two more distinctions worth carrying into any future App-token debugging:
+
+- **A 404 on the installation lookup is not the same failure as a 401.** A 404 on `/repos/{owner}/{repo}/installation` means the JWT itself authenticated fine but no installation currently covers the repo — the App was uninstalled, the org transferred (the actual 2026-07-23 cause), or repo-selection narrowed. The fix is **re-install**; the App ID and private key need no change. A 401 means the App or its key is actually bad, and the fix is to rotate the key.
+- **CI does not lint `templates/` by default.** `.github/workflows/actionlint.yml` runs bare `actionlint -color`, which only searches `.github/workflows/`, so a template-only change needs an explicit `actionlint templates/workflow-run.yml` pass. This gap is plausibly how the plugin's own template first drifted from its dogfood workflow.
+
+CCE-127 also closed that drift directly: the dogfood `.github/workflows/docs-agent-nightly.yml` now carries the same `if:` guard on the App-token step, both `||` fallbacks, and the `SLACK_WEBHOOK_URL` job-env the template has — removing three `_TEMPLATE_ONLY_DIVERGENCES` entries in `tests/templates/test_workflow_run_parity.py` that had justified the dogfood's narrower behavior as "the dogfood requires the App" / "the dogfood uses only the App token." Both justifications were true and both were irrelevant: the step fails on runtime *state* (an App losing its installation), not on the operator's *intent* to always use the App. Recording a divergence as accepted risk is not the same as the risk staying acceptable, and nothing re-examines that list automatically — audit it whenever a safety property lands on only one side of the template/dogfood boundary.
+
+A death alarm for failures that happen *before* `actions/checkout` runs — where the tree isn't checked out yet and `if: failure()` steps can't assume it is — is tracked separately as CCE-128 and is explicitly out of scope here.

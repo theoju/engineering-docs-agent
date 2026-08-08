@@ -13,10 +13,11 @@ last_reviewed: "2026-07-11"
 _Architecture: component design, agent contracts, data flows, and system internals._
 
 <!-- docs-agent:overview:start -->
-
 **In this section**
 
 - **Orchestrator** — `run()` in `scripts/orchestrator_runner.py:run` is the nightly pipeline entry point. It runs as a straight-line sequence of stages against one window of merged PRs (`last_successful_run.head_sha` to the current `HEAD`):
+- **Publish verifier** — After a docs-agent PR merges, `scripts/verify_runner.py` runs the post-merge check that confirms the publish rebuilt and the changed pages are actually live. `run()` (`scripts/verify_runner.py:run`) loads the host config and state, resolves the merged PR's changed paths via `GhClient.pr_view_files` (`scripts/verify_runner.py`), and then forks on `publishing.ci_provider` before deciding how verification happens.
+- **Publishing** — After a docs-agent PR merges, the site still has to actually rebuild and deploy. This page documents that post-merge pipeline: the auto-merge gate, the publish-trigger seam that fires after merge, and the provider fork that keeps both honest when the host isn't GitHub Actions.
 - **Bootstrap fail-fast mechanisms** — The C2 bootstrap pipeline (CCE-38) adds four structural safeguards that catch bad artifacts before they reach the published site. Before this work, the pipeline trusted `page-author`'s `ok: true` signal without independently verifying the written file — allowing bad YAML, missing frontmatter, and thin descriptions to slip through undetected.
 - **Lint Rules** — The lint runner (`scripts/lint/lint_runner.py`) validates agent-authored Markdown before it reaches the docs site. Rules are tiered: **block** rules prevent a page from being published; **warn** rules surface in the PR review but do not block it.
 - **Engineering Docs Agent** — A Claude Code plugin that turns merged PRs, Jira issues, and commits into a nightly docs-update PR — with voice-matched authoring, tiered linting, gap detection, and post-merge publish verification.
@@ -33,6 +34,5 @@ _Architecture: component design, agent contracts, data flows, and system interna
 - **Decision Archive Index Generator (CCE-23)** — The archive-index generator (`scripts/archive_indexes.py`) turns directories of date-prefixed Markdown files into navigable index pages. It is capability D of the docs-agent: a pure read-then-write step that runs on every nightly pass and always overwrites its output.
 - **Source Map and Drift Detection (CCE-23)** — The source map (`scripts/source_map.py`) and drift detector (`scripts/source_drift.py`) together answer: when source code changes, which docs pages need a human review?
 
-_16 pages · regenerated nightly_
-
+_18 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

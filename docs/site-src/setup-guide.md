@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/77
+  - https://github.com/theoju/engineering-docs-agent/pull/188
 synthesized_into: []
 ---
 
@@ -174,6 +175,8 @@ Open the host repo's **Settings → Secrets and variables → Actions**. You'll 
 
 Without `JIRA_API_TOKEN` + `JIRA_EMAIL`, the source-collector skips Jira enrichment cleanly and the run is marked partial with `source_collector_error: jira_auth_missing`. The PR still opens — partial-mode is the operational-visibility surface, not a hard failure.
 
+> **`CIRCLECI_TOKEN` handling.** Even though the CircleCI poll itself isn't live yet (see Part 4), the token-handling seam already exists and is worth setting correctly if you're pre-provisioning: `CircleCiClient` (`scripts/build_poller.py`) reads `CIRCLECI_TOKEN` from the environment and sends it only as a `Circle-Token` request header — never as a URL userinfo segment or query param — so it can't leak into a logged URL. `scripts/stderr_emit.py`'s credential redaction was hardened to mask header-form secrets too, including the dict-repr shape produced by `str(auth_headers())`, so a token embedded in an unexpected error string still gets scrubbed before it hits workflow logs.
+
 ### 2.5 Branch protection (recommended)
 
 Branch protection is per-host, not per-plugin. The recommended baseline matches what `theoju/engineering-docs-agent` uses on its own `main` branch.
@@ -259,7 +262,7 @@ For branch-protection purposes:
 
 This is the path used by `theoju/advanced-data-import-system` (tracked in CCE-58).
 
-**Docs-publish verification on CircleCI** (`publishing.ci_provider: circleci`) is modeled but not yet end-to-end wired. `verify_runner` forks on the field and degrades honestly to a non-promoting "modeled but unvalidated" result rather than polling CircleCI (CCE-63); set `CIRCLECI_TOKEN` only once that lands. `advanced-data-import-system` publishes its docs via GitHub Actions and stays `ci_provider: github`.
+**Docs-publish verification on CircleCI** (`publishing.ci_provider: circleci`) is modeled but not yet end-to-end wired. `scripts/verify_runner.py:run` forks on the field: the `github` branch is byte-for-byte unchanged (dispatches the `publish-verifier` subagent, which does the real `gh`-based poll); a non-github provider instead calls `resolve_build_verdict` in `scripts/build_poller.py` and skips the LLM publish-verifier dispatch entirely. While `build_poller.UNVALIDATED_AGAINST_LIVE_HOST` is `True` — which it is until a live CircleCI-publishing host exists to validate the v2 API shape against — `resolve_build_verdict` returns a fixed non-promoting verdict (`build_status: circleci_unvalidated`, nothing in `verified`/`failed`) plus the reason `circleci_provider_modeled_but_unvalidated`, which the notifier surfaces as an info-only partial-run line rather than a scary failure. The real polling logic (`poll_circleci`, `map_circleci_status`) and the companion post-merge trigger (`trigger_circleci`, CCE-123) exist only as documented `NotImplementedError` stubs — set `CIRCLECI_TOKEN` now if you want the seam ready, but don't expect it to actually poll CircleCI until that flag flips. `advanced-data-import-system` publishes its docs via GitHub Actions and stays `ci_provider: github`.
 
 ## Part 5 — Optional add-ons
 
@@ -404,6 +407,7 @@ Key tickets that shaped this guide:
 - **CCE-56**: This guide.
 - **CCE-57, CCE-58**: Onboarding the next two hosts (exercises this guide; surfaces gaps).
 - **CCE-59**: Remove `pull_request paths:` filter on the actionlint workflow so it runs on every PR (unblocks the required-check + path-filter footgun).
+- **CCE-63**: `scripts/build_poller.py` provider seam for docs-publish verification — honest "modeled but unvalidated" degrade for `publishing.ci_provider: circleci` instead of guessing at an unvalidated API shape; `scripts/verify_runner.py` forks on `ci_provider` to route into it. Hardened `scripts/stderr_emit.py` credential redaction to cover header-form secrets as part of the same change.
 - **CCE-77**: Replaced the placeholder setup-guide stub with this comprehensive guide; added Jira naming conventions (branch/commit/PR-title format) to CLAUDE.md so `extract-jira-key.sh` picks up keys automatically.
 
 ## Provisioning matrix (CCE-80)

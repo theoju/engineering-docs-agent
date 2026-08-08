@@ -12,11 +12,11 @@ _This section is scaffolded. Content will be added here._
 
 - **Orchestrator** — 4 modules
 - **Generators** — 7 modules
-- **Lint** — 18 modules
+- **Lint** — 19 modules
 - **Setup** — 5 modules
 - **Verification** — 3 modules
 - **Integrations** — 3 modules
-- **Other** — 3 modules
+- **Other** — 5 modules
 
 **Contracts**
 

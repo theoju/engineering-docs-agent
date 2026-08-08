@@ -207,7 +207,49 @@ def _symbol_defined(source: str, leaf: str) -> bool:
     return bool(pattern.search(source))
 
 
-def check_path(path: Path, repo_root: Path | None, files: set[str]) -> tuple[bool, str]:
+def _docs_dir(config: dict) -> str:
+    """site.docs_dir, slash-stripped. Empty when the host declares none."""
+    return str((config.get("site") or {}).get("docs_dir") or "").strip("/")
+
+
+def _build_dir(repo_root: Path) -> str:
+    """mkdocs site_dir (generated build output), default 'site'.
+
+    Build artifacts are generated, never tracked, so a page naming one is
+    making a correct reference — not a confabulation. A host on a different
+    generator simply has no such directory and this skips nothing.
+    """
+    try:
+        mk = yaml.safe_load((repo_root / "mkdocs.yml").read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return "site"
+    return str(mk.get("site_dir") or "site").strip("/")
+
+
+def _resolves(
+    rel: str, repo_root: Path, files: set[str], docs_dir: str, build_dir: str
+) -> bool:
+    """True when a cited repo-relative path names something real.
+
+    Three ways to resolve, in order: it is generated build output; it is
+    tracked or present on disk (the disk fallback covers same-run siblings not
+    yet added to git); or it resolves under docs_dir, which is how a docs page
+    naturally cites a sibling page.
+    """
+    if build_dir and (rel == build_dir or rel.startswith(build_dir + "/")):
+        return True
+    if rel in files or (repo_root / rel).exists():
+        return True
+    if docs_dir:
+        alt = f"{docs_dir}/{rel}"
+        if alt in files or (repo_root / alt).exists():
+            return True
+    return False
+
+
+def check_path(
+    path: Path, repo_root: Path | None, files: set[str], config: dict
+) -> tuple[bool, str]:
     if repo_root is None:
         return True, "no git repo detected; citation check skipped"
     if not path.exists():
@@ -219,13 +261,14 @@ def check_path(path: Path, repo_root: Path | None, files: set[str]) -> tuple[boo
     except OSError as e:
         return False, f"file unreadable: {e}"
     cites = extract_citations(text)
+    docs_dir = _docs_dir(config)
+    build_dir = _build_dir(repo_root)
     problems: list[str] = []
     for cited in cites["paths"]:
         rel = _relativize(cited, repo_root)
         if rel is None:
             continue
-        # Disk-existence fallback: same-run siblings are not yet tracked.
-        if rel not in files and not (repo_root / rel).exists():
+        if not _resolves(rel, repo_root, files, docs_dir, build_dir):
             problems.append(f"cites nonexistent path '{cited}'")
     for name in cites["tests"]:
         if not cited_test_exists(repo_root, name):
@@ -308,11 +351,12 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     repo_root = repo_root_for(args.config)
+    config = _load_config(args.config)
     files = tracked_files(repo_root) if repo_root else set()
-    arch = archive_dirs(_load_config(args.config), repo_root) if repo_root else []
+    arch = archive_dirs(config, repo_root) if repo_root else []
     results, any_block_failed = [], False
     for p in args.paths:
-        ok, message = check_path(p, repo_root, files)
+        ok, message = check_path(p, repo_root, files, config)
         # Archive pages are historical records; citation existence there is
         # advisory (warn), not a build block (CCE-124). Live lenses keep block.
         severity = "warn" if _under(p, arch) else SEVERITY

@@ -494,3 +494,62 @@ def test_prefix_match_respects_the_underscore_boundary(tmp_path):
     (repo / "tests" / "test_x.py").write_text("def test_lint_runner_x():\n    pass\n")
     _commit_all(repo)
     assert citation_exists.cited_test_exists(repo, "test_lintrunner") is False
+
+
+# ---------- docs-relative and build-output path resolution (CCE-131) ----------
+
+_SITE_CFG = {"site": {"docs_dir": "docs/site-src"}}
+
+
+def test_docs_relative_sibling_citation_resolves(tmp_path):
+    """CCE-131: a docs page citing a sibling page names it relative to
+    docs_dir, not to the repo root."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "docs" / "site-src" / "api").mkdir(parents=True)
+    (repo / "docs" / "site-src" / "api" / "index.md").write_text("# API\n")
+    page = repo / "docs" / "site-src" / "guide.md"
+    page.write_text("See `api/index.md` for the reference.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is True, msg
+
+
+def test_build_output_path_is_skipped(tmp_path):
+    """mkdocs site_dir output is generated, never tracked — not a confabulation."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "mkdocs.yml").write_text("docs_dir: docs/site-src\nsite_dir: site\n")
+    page = repo / "page.md"
+    page.write_text("Published to `site/api/http/index.html`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is True, msg
+
+
+def test_no_docs_dir_configured_still_blocks(tmp_path):
+    """Generic-first guard: a host with no site.docs_dir keeps today's
+    repo-root-only behavior."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "docs" / "site-src" / "api").mkdir(parents=True)
+    (repo / "docs" / "site-src" / "api" / "index.md").write_text("# API\n")
+    page = repo / "page.md"
+    page.write_text("See `api/index.md`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "api/index.md" in msg
+
+
+def test_genuine_confabulation_still_blocks_with_docs_dir(tmp_path):
+    """The docs_dir fallback must not become a blanket pass."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "docs" / "site-src").mkdir(parents=True)
+    page = repo / "docs" / "site-src" / "page.md"
+    page.write_text("See `scripts/build_doc_source_map.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, _SITE_CFG)
+    assert ok is False
+    assert "scripts/build_doc_source_map.py" in msg

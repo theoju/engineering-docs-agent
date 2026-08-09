@@ -8,6 +8,24 @@ synthesized_into: []
 
 # What's New
 
+## 2026-08-09T16:21:13.111090+00:00
+- PR #202: Fixed a Tier-1 citation lint false positive: the deterministic `citation_exists` rule was blocking the literal placeholder path `path/to/file.py` — the metasyntactic example the plugin itself ships in `agents/page-author.md` and `CLAUDE.md` — because it matched neither the placeholder-marker heuristic nor an example-prefix reservation. The fix adds `path/to/file.py` to `DEFAULT_EXEMPT_TOKENS` as an exact-match token rather than reserving `path/to/` as a whole example prefix, deliberately avoiding a fail-open subtree exemption. Includes 6 new discriminating tests and an unrelated prettier reflow on the touched architecture page.
+- PR #203: Fixes six confabulated code citations across five architecture/operations docs pages so `citation_exists` no longer blocks them. Each fix verifies the surrounding prose against the real file rather than just swapping in an existing-but-wrong path: two doc↔source-map generator scripts, the diagram-render-gate script, the page-author output schema filename, the actionlint config path/claim, and a full structural rewrite of the diagram-gate page (which cited a workflow file that doesn't exist and had inverted its own CCE-91 incident history). Also swept stale filenames out of frontmatter `source_files:` and Mermaid diagram labels on two of the pages.
+- PR #205: The page-author subagent contract (agents/page-author.md, step 3) now instructs the authoring agent to put dead/removed file names in a fenced code block and backtick only the surviving name in prose whenever it documents a rename or a corrected citation. This closes a gap where documenting the CCE-132 citation fix required naming the exact confabulated paths that were removed, which caused the deterministic citation_exists Tier-1 lint to block the very page reporting the fix.
+### Pages to review (source drift)
+- architecture/cce-capability-c-canonical-core-citations.md — changed: agents/page-author.md, scripts/lint/citation_exists.py, tests/lint/test_citation_exists.py
+- architecture/cce-capability-c2-canonical-core-authoring.md — changed: agents/page-author.md
+- architecture/cce4-schema-enforcement.md — changed: agents/page-author.md
+- architecture/engineering-docs-agent.md — changed: docs/site-src/.doc-source-map.json, scripts/lint/citation_exists.py
+- architecture/orchestrator.md — changed: CHANGELOG.md, agents/page-author.md
+### Pages to review (citation drift)
+- architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+### Core pages to review (drift)
+- architecture/cce-capability-c-canonical-core-citations.md (source, citation)
+- architecture/cce-capability-c2-canonical-core-authoring.md (source)
+- architecture/cce4-schema-enforcement.md (source)
+- architecture/engineering-docs-agent.md (source)
+
 ## 2026-08-08T20:02:20.668771+00:00
 - PR #187: Docs now cite code line-free (`path/to/file.py` or `path/to/file.py:symbol`, never `path:line`). A new deterministic Tier-1 block lint (`citation_exists`) verifies cited `:symbol` references actually exist in the file, and a new Tier-1 warn lint (`citation_line_free`) flags any surviving `:line` pin as advisory. The `fact-checker` agent contract is scoped to behavioral truth only and no longer emits `contradiction` for citation location/line drift, and the `page-author` agent contract now requires line-free citations. A one-time AST-based migration script converted 99 `path:line` citations across 21 published pages to `path:symbol` or bare `path`.
 - PR #188: Introduces a provider seam in the docs publish-verify path (new scripts/build_poller.py plus a fork in scripts/verify_runner.py) so hosts can declare publishing.ci_provider: circleci. On the CircleCI branch, verification now degrades honestly by returning a non-promoting verdict tagged UNVALIDATED_AGAINST_LIVE_HOST instead of attempting to poll a CircleCI API that has never been validated against a live host. The GitHub Actions path (gh run list polling) is untouched byte-for-byte. The actual CircleCI poller (poll_circleci/map_circleci_status) ships only as documented NotImplementedError stubs plus a FakeCircleCiClient for tests — no real polling logic is shipped or claimed as tested. agents/publish-verifier.md and agents/notifier.md were updated to describe the new provider fork, docs/site-src/setup-guide.md documents the new config option, and templates/config.schema.json gained the ci_provider field.

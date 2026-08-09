@@ -10,7 +10,7 @@ source_files:
   - scripts/source_map.py
   - scripts/archive_indexes.py
   - scripts/verify_diagrams.py
-last_reviewed: "2026-05-28"
+last_reviewed: "2026-08-09"
 status: draft
 doc_kind: architecture
 ---

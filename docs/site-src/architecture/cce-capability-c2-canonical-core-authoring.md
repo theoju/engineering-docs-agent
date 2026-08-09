@@ -8,7 +8,8 @@ source_files:
   - scripts/audit_docs.py
   - scripts/lint/frontmatter_schema.py
   - scripts/source_map.py
-last_reviewed: "2026-05-28"
+  - agents/page-author.md
+last_reviewed: "2026-08-09"
 status: draft
 doc_kind: architecture
 ---
@@ -51,6 +52,43 @@ The `page-author` subagent (`agents/page-author.md`) is the runtime executor of 
 The agent reads voice samples first to match tone, then drafts or patches the page. On `create` it writes a complete file with frontmatter. On `edit` it integrates new content into the existing heading structure rather than appending.
 
 The agent returns a JSON object conforming to `agents/schemas/page_author.schema.json`. The `ok` field is the only required key; a `false` value with `error: "path_not_agent_editable"` means the orchestrator's editable-path filter blocked the write before any file was touched.
+
+## Citation grounding and the dead-name rule
+
+Step 3 of the `page-author` procedure grounds every claim in code the agent
+actually read: `source_paths` names the files the summarized PRs touched, and
+the agent may cite only files, symbols, and tests it confirmed exist. The
+Tier-1 rule `scripts/lint/citation_exists.py` enforces this deterministically
+— a backticked path or `path:symbol` token that doesn't resolve is a `block`
+severity lint failure, not a suggestion.
+
+That enforcement has a sharp edge on a C2 page: `citation_exists` lints the
+whole page's prose, not the diff. A single stale citation left over from an
+earlier pass blocks every future edit to that page, not only the one that
+introduced it — the agent re-authors the page, the lint re-fails, the edit is
+dropped, and the run flips `partial`. Six confabulated citations across five
+architecture and operations pages did exactly this (CCE-132), silently
+dropping edits on two separate nightly PRs before the corpus was swept clean.
+
+Documenting that fix created its own trap. Explaining what a corrected
+citation used to point at means naming the exact confabulated path in prose —
+and `citation_exists` cannot distinguish "I claim this file exists" from "I
+am naming a file that used to exist and no longer does." Step 3 now closes
+that gap explicitly: when you document a rename or a corrected citation, put
+the dead name inside a fenced code block and backtick only the surviving
+name in prose. The three existing escape hatches — the `example/` namespace,
+fenced metasyntactic placeholders, and `lint.citation_exempt_tokens` — each
+cover a different case, but none covers "a real path quoted as history";
+exempting the specific dead tokens would permanently blind the rule to a
+genuine future confabulation of the same names (CCE-134).
+
+This is LLM-mediated guidance, not a deterministic gate — a model that
+ignores the fenced-block instruction still gets blocked by `citation_exists`,
+the same as any other confabulation. If recurrence continues, CCE-135 is the
+tracked escalation for a per-token `<!--lint-ignore-next-->` marker,
+previously deferred as YAGNI. See
+[Capability C — Canonical Core Citations](cce-capability-c-canonical-core-citations.md)
+for the full `citation_exists`/`citation_line_free` lint mechanism.
 
 ## Source map integration
 

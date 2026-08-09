@@ -14,7 +14,7 @@ source_files:
   - scripts/lint/frontmatter_schema.py
   - scripts/lint/lint_runner.py
   - scripts/lint/stub_redirect.py
-last_reviewed: 2026-06-10
+last_reviewed: "2026-08-09"
 status: draft
 doc_kind: architecture
 ---
@@ -158,6 +158,18 @@ python scripts/lint/lint_runner.py \
   --paths docs/**/*.md \
   --json
 ```
+
+`citation_exists` (Tier 1, block) deserves a specific callout: it lints the
+whole edited page on every run, not just the diff a PR introduces. A single
+pre-existing confabulated citation permanently blocks every future
+docs-agent edit to that page — the page is re-authored, re-blocked on the
+same stale token, the edit is dropped from the PR, and the run flips
+`partial` (which under CCE-101 also suppresses auto-merge). That hazard
+caused two real outages, PRs #197 and #201, before CCE-132 swept the corpus
+and repaired six confabulated citations across seven pages, this one
+included. See [Capability C — Canonical Core
+Citations](cce-capability-c-canonical-core-citations.md) for the citation
+grammar, escape hatches, and the full incident writeup.
 
 ## Generic-first design
 

@@ -8,7 +8,7 @@ source_files:
   - scripts/audit_docs.py
   - scripts/lint/frontmatter_schema.py
   - scripts/source_map.py
-last_reviewed: "2026-05-28"
+last_reviewed: "2026-08-09"
 status: draft
 doc_kind: architecture
 ---

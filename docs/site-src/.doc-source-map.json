@@ -23,6 +23,7 @@
     ],
     "agents/page-author.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/cce4-schema-enforcement.md",
       "architecture/orchestrator.md"
     ],
@@ -1503,7 +1504,8 @@
       "archive/v0-1-1-hardening.md"
     ],
     "scripts/lint/citation_exists.py": [
-      "architecture/cce-capability-c-canonical-core-citations.md"
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/engineering-docs-agent.md"
     ],
     "scripts/lint/citation_line_free.py": [
       "architecture/cce-capability-c-canonical-core-citations.md"
@@ -1648,6 +1650,9 @@
     "tests/gh/test_gh_client.py": [
       "archive/v0-1-1-hardening.md"
     ],
+    "tests/lint/test_citation_exists.py": [
+      "architecture/cce-capability-c-canonical-core-citations.md"
+    ],
     "tests/orchestrator/fakes_schema_invalid/fake_content_validator.json": [
       "architecture/cce4-schema-enforcement.md"
     ],
@@ -1758,6 +1763,7 @@
       "scripts/lint/citation_line_free.py",
       "scripts/lint/lint_runner.py",
       "scripts/migrate_line_citations.py",
+      "tests/lint/test_citation_exists.py",
       "agents/fact-checker.md",
       "agents/page-author.md",
       "templates/config.schema.json"
@@ -1767,7 +1773,8 @@
       "docs/superpowers/**",
       "scripts/audit_docs.py",
       "scripts/lint/frontmatter_schema.py",
-      "scripts/source_map.py"
+      "scripts/source_map.py",
+      "agents/page-author.md"
     ],
     "architecture/cce-capability-c3-diagram-render-gate.md": [
       "scripts/lint/diagrams.py",
@@ -1840,6 +1847,7 @@
       "docs/site-src/*",
       "docs/site-src/archive/adrs/*.md",
       "scripts/lint/<rule>.py",
+      "scripts/lint/citation_exists.py",
       "scripts/lint/frontmatter_schema.py",
       "scripts/lint/lint_runner.py",
       "scripts/lint/stub_redirect.py"

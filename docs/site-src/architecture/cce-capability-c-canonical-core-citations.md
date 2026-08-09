@@ -17,10 +17,11 @@ source_files:
   - scripts/lint/citation_line_free.py
   - scripts/lint/lint_runner.py
   - scripts/migrate_line_citations.py
+  - tests/lint/test_citation_exists.py
   - agents/fact-checker.md
   - agents/page-author.md
   - templates/config.schema.json
-last_reviewed: "2026-08-08"
+last_reviewed: "2026-08-09"
 status: draft
 doc_kind: architecture
 ---
@@ -156,6 +157,24 @@ Two escape hatches exist, both deliberate rather than silent:
   resolving emits a `warn` naming it a stale exemption, so the list can't
   silently accumulate dead entries
   (`scripts/lint/citation_exists.py:exempt_tokens`, CCE-131).
+
+  `path/to/file.py` — the metasyntactic placeholder in the grammar shown
+  above — is itself one of the two plugin-default exempt tokens, alongside
+  `test_snake_case`. It ships in `agents/page-author.md`, so it propagates
+  into authored prose on every host; before CCE-134 it tripped the same
+  block it documents. Six discriminating tests in
+  `tests/lint/test_citation_exists.py` pin the token-vs-prefix choice: a
+  confabulated sibling under `path/to/` and an invented `:symbol` on a real
+  file under that subtree both still block, the exemption survives a host
+  overriding `citation_example_prefixes`, and a `path/to/file.py` that
+  someday resolves for real still reports as a stale exemption rather than
+  passing silently. A corpus scan across the published site (106 pages)
+  confirmed the fix closed exactly the placeholder false-positive without
+  opening anything else: block-failure count held at 12 and one archive-lens
+  `warn` page cleared, with all pre-existing CCE-132 confabulation
+  regression guards still failing as expected. See the archive decision
+  record on the exempt-token-vs-prefix choice for the full trade-off
+  writeup.
 
 Archive pages get one more accommodation: a page under a `site.sections`
 entry with `generator: archive-index` is a historical record, so

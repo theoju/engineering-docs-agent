@@ -10,6 +10,7 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **CCE-134: Citation Exempt Token, Not Example Prefix** — Nightly run 31275900434 went `partial`. `citation_exists` (Tier-1, block)
 - **CCE-127: A Failed App-Token Mint Degrades the Nightly to `partial`, It No Longer Kills the Job** — The dogfood nightly in `theoju/engineering-docs-agent` failed 15 nights running, from
 - **CCE-130: Stale Branch Archive and Prune (2026-08-08)** — **PR:** #199
 - **CCE-131 — `citation_exists` false-positive closure** — `citation_exists` is a Tier-1 **block** rule: when it fails a page, the
@@ -52,5 +53,5 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
 - **Specs archive** — _Auto-generated; 68 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_41 pages · regenerated nightly_
+_42 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

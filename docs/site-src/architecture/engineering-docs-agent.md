@@ -11,10 +11,11 @@ source_files:
   - docs/site-src/*
   - docs/site-src/archive/adrs/*.md
   - scripts/lint/<rule>.py
+  - scripts/lint/citation_exists.py
   - scripts/lint/frontmatter_schema.py
   - scripts/lint/lint_runner.py
   - scripts/lint/stub_redirect.py
-last_reviewed: 2026-06-10
+last_reviewed: "2026-08-09"
 status: draft
 doc_kind: architecture
 ---
@@ -158,6 +159,12 @@ python scripts/lint/lint_runner.py \
   --paths docs/**/*.md \
   --json
 ```
+
+### `citation_exists` blocks the whole page, not the diff
+
+`citation_exists` (`scripts/lint/citation_exists.py:check_path`) is one of the default Tier-1 block rules. It checks every backticked repo path, `path:symbol`, and test identifier in a page's prose against the actual repo tree, so a page that cites code the agent invented never merges.
+
+The rule re-lints a page's **entire** prose on every run, not just the lines the current edit touched. That has a sharp edge: one stale or confabulated citation anywhere on the page latches it shut against every future docs-agent edit. `content-validator` re-fails the page, the edit is dropped from the PR, and the run is marked `partial` — which also disqualifies the run from the CCE-101 auto-merge gate. Two nightly runs (PRs #197 and #201) lost real edits this way before the pattern was diagnosed; CCE-132 cleared six confabulated citations from the published corpus as a docs-only fix, deliberately separate from CCE-134's fix to the lint rule's own metasyntactic-placeholder exemption. See [Capability C — Canonical Core Citations](cce-capability-c-canonical-core-citations.md) for the citation grammar, the `example/` illustrative namespace, and the `lint.citation_exempt_tokens` escape hatch.
 
 ## Generic-first design
 

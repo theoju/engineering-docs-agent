@@ -74,7 +74,7 @@ flowchart TD
 
 `pr-summarizer` and `gap-detector` fan out in parallel. `page-author` parallelizes across lenses but serializes within a single lens — two authors must not edit the same page concurrently. The PR open, state write, and notifier steps run serially after fan-in.
 
-After content validation, the `fact-checker` runs once per surviving page that cites at least one resolvable repo source file. It is a warn layer: contradictions render as a "Factual-accuracy warnings" section in the docs PR body and the notifier digest, but never drop a page and never mark the run partial. Pages citing nothing skip the dispatch entirely.
+After content validation, the `fact-checker` runs once per surviving page that cites at least one resolvable repo source file. It is a warn layer: contradictions render as a "Factual-accuracy warnings" section in the docs PR body and the notifier digest, but never drop a page and never mark the run partial. The one exception is a time-budget cut: when the fact-checker loop passes its deadline, the cut itself records a partial reason (`scripts/orchestrator_runner.py`) — the findings stay advisory, the truncation does not. Pages citing nothing skip the dispatch entirely.
 
 The Actions concurrency group `docs-agent-${branch}` cancels any in-progress run when a newer event fires, acting as a debounce.
 

@@ -54,3 +54,34 @@ def _page(repo: Path, body: str) -> Path:
 
 
 CFG = {"lint": {"citation_source_roots": ["backend", "frontend"]}}
+
+
+# ---------- source_roots(): the config accessor ----------
+
+
+def test_source_roots_defaults_to_empty():
+    """Generic-first: a host that declares nothing keeps today's behavior."""
+    assert citation_exists.source_roots({}) == ()
+    assert citation_exists.source_roots({"lint": {}}) == ()
+    assert citation_exists.source_roots({"lint": {"citation_source_roots": []}}) == ()
+
+
+def test_source_roots_reads_declared_roots_in_order():
+    cfg = {"lint": {"citation_source_roots": ["backend", "frontend"]}}
+    assert citation_exists.source_roots(cfg) == ("backend", "frontend")
+
+
+def test_source_roots_strips_surrounding_slashes():
+    cfg = {"lint": {"citation_source_roots": ["/backend/", "frontend/"]}}
+    assert citation_exists.source_roots(cfg) == ("backend", "frontend")
+
+
+def test_source_roots_drops_nested_tails_and_dot_entries():
+    """Spec: roots must be PACKAGE roots, never a tail like `backend/storage`.
+    A root list deep enough to catch tails is suffix-matching in disguise, and
+    suffix-matching admits confabulated paths. Dropping fails CLOSED (no
+    widening), which is the correct degradation for a block rule."""
+    cfg = {
+        "lint": {"citation_source_roots": ["backend", "backend/storage", "..", ".", ""]}
+    }
+    assert citation_exists.source_roots(cfg) == ("backend",)

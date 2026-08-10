@@ -290,6 +290,31 @@ def exempt_tokens(config: dict) -> set[str]:
     return set(DEFAULT_EXEMPT_TOKENS) | {str(t) for t in host}
 
 
+def source_roots(config: dict) -> tuple[str, ...]:
+    """Extra package roots citation_exists tries when resolving a cited path.
+
+    A nested monorepo's prose cites the import-path form the code uses for
+    itself (`app/core/destination_engine.py`), which is repo-relative only
+    from inside the package root (`backend/`). Declared roots are tried AFTER
+    the repo root and docs_dir, never before, so a root can only widen
+    resolution — it can never redirect a path that already resolves.
+
+    PACKAGE ROOTS ONLY. A multi-segment entry (`backend/storage`) is
+    suffix-matching in disguise, and suffix-matching admits confabulated
+    paths, so such entries are dropped here and rejected outright by
+    templates/config.schema.json. Dropping fails closed: no widening, which is
+    the safe direction for a block rule. Empty by default — a host that
+    declares nothing keeps today's exact behavior.
+    """
+    lint = config.get("lint") or {}
+    out: list[str] = []
+    for raw in lint.get("citation_source_roots") or []:
+        root = str(raw).strip("/")
+        if root and "/" not in root and not root.startswith("."):
+            out.append(root)
+    return tuple(out)
+
+
 def _resolves(
     rel: str, repo_root: Path, files: set[str], docs_dir: str, build_dir: str
 ) -> bool:

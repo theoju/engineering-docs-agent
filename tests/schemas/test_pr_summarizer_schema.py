@@ -231,3 +231,54 @@ def test_doc_kind_omitted_accepted(validator: Draft7Validator) -> None:
         ],
     }
     validator.validate(doc)  # must NOT raise
+
+
+# ---------- CCE-139: notes on a doc_targets item ----------
+
+
+def test_doc_target_item_accepts_notes(validator: Draft7Validator) -> None:
+    """Run #699 was rejected for emitting `notes` inside a doc_targets item. The
+    root object already permitted notes; the item object did not."""
+    doc = {
+        "pr_number": 1,
+        "doc_targets": [
+            {
+                "lens": "core",
+                "action": "edit",
+                "page_hint": "backend/api.md",
+                "notes": "the endpoint moved; keep the old anchor",
+            }
+        ],
+    }
+    validator.validate(doc)
+
+
+def test_doc_target_item_accepts_null_notes(validator: Draft7Validator) -> None:
+    """Symmetric with the root-level notes, which is ["string", "null"]."""
+    doc = {
+        "pr_number": 1,
+        "doc_targets": [
+            {"lens": "core", "action": "edit", "page_hint": "a.md", "notes": None}
+        ],
+    }
+    validator.validate(doc)
+
+
+def test_doc_target_item_still_rejects_an_unknown_key(
+    validator: Draft7Validator,
+) -> None:
+    """CONTROL: naming `notes` must not open the item shape. additionalProperties
+    stays false, so a genuinely unknown key is still a contract violation."""
+    doc = {
+        "pr_number": 1,
+        "doc_targets": [
+            {
+                "lens": "core",
+                "action": "edit",
+                "page_hint": "a.md",
+                "confidence": 0.9,
+            }
+        ],
+    }
+    with pytest.raises(ValidationError):
+        validator.validate(doc)

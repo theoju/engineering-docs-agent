@@ -58,7 +58,11 @@ docs lenses + actions should reflect it.
               }
             ]
           },
-          "doc_kind": { "type": "string", "enum": ["architecture", "decision"] }
+          "doc_kind": {
+            "type": "string",
+            "enum": ["architecture", "decision"]
+          },
+          "notes": { "type": ["string", "null"] }
         }
       }
     },
@@ -85,7 +89,8 @@ The canonical schema is in §Output schema above. The shape described here is th
     {
       "lens": "core",
       "action": "edit",
-      "page_hint": "architecture/orchestrator.md"
+      "page_hint": "architecture/orchestrator.md",
+      "notes": "per-target caveat; optional"
     },
     {
       "lens": "core",

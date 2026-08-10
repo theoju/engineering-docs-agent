@@ -1569,6 +1569,11 @@ def run(
                     f"time_budget_exceeded: authored {i}/{len(per_target)} "
                     f"page batches (budget {budget}s); deferring the rest",
                 )
+                # Track A: an authoring truncation is a truncation. Without
+                # this the advance block below falls through to
+                # current_run.head_sha and the run persists a baseline
+                # covering PRs whose pages it never wrote.
+                time_truncated = True
                 break
             try:
                 lens_path, _opts = resolve_lens(config, lens)

@@ -127,3 +127,147 @@ def test_authoring_truncation_advances_to_cursor_not_head(tmp_path, init_host):
     assert written["last_successful_run"].get("window_head_sha") == c4, written[
         "last_successful_run"
     ]
+
+
+def test_authoring_truncation_without_cursor_holds_baseline(
+    tmp_path, init_host, read_current_run
+):
+    # CCE-109 refusal branch 1 (no_cursor), now reachable from the authoring
+    # loop: no admitted PR carries a merge_sha, so there is nothing to anchor
+    # the advance to and the baseline must not move.
+    repo = tmp_path
+    state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
+    base, (_c1, _c2, _c3, c4) = _seed_window(repo, state_path, 4)
+    fakes = _fakes(
+        tmp_path.parent / f"trackA_nocursor_{tmp_path.name}",
+        [_pr(1), _pr(2), _pr(3)],
+        THREE_HINTS,
+    )
+    rc = runner.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=_fake_clock(AUTHORING_TRUNCATION_CLOCK),
+    )
+    assert rc == 0
+    written = json.loads(state_path.read_text())
+    advance = written["last_successful_run"]["head_sha"]
+    assert advance != c4, written["last_successful_run"]
+    assert advance == base, written["last_successful_run"]
+    cr = read_current_run(state_path)
+    assert any(
+        "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+
+
+def test_authoring_truncation_with_unresolvable_cursor_holds_baseline(
+    tmp_path, init_host, read_current_run
+):
+    # CCE-109 refusal branch 3 (out_of_window), now reachable from the authoring
+    # loop: fakes_multi's merge_shas are the literals "a"/"b"/"c", which no
+    # rev-parse can resolve, so the advance is refused and the baseline holds.
+    repo = tmp_path
+    state_path = init_host(
+        {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
+    )
+    fakes = _fakes(
+        tmp_path.parent / f"trackA_unresolvable_{tmp_path.name}", None, THREE_HINTS
+    )
+    rc = runner.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=_fake_clock(AUTHORING_TRUNCATION_CLOCK),
+    )
+    assert rc == 0
+    written = json.loads(state_path.read_text())
+    head = _git(repo, "rev-parse", "HEAD")
+    advance = written["last_successful_run"]["head_sha"]
+    assert advance != head, written["last_successful_run"]
+    assert advance == "old_sha_000", written["last_successful_run"]
+    cr = read_current_run(state_path)
+    assert any(
+        "time_budget_advance_out_of_window" in r and "unresolvable" in r
+        for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+
+
+def test_authoring_truncation_never_reports_unanchored_deferred(
+    tmp_path, init_host, read_current_run
+):
+    # CCE-109 refusal branch 2 (unanchored_deferred) stays unreachable from a
+    # pure authoring truncation, and must: `deferred_unanchored` is computed
+    # only in the admission break, and an authoring-truncated run deferred no
+    # PR at all. PR #2 has no merge_sha, so ordering sinks it last → the cursor
+    # is PR #3's c3, and no unanchored-deferred refusal fires.
+    repo = tmp_path
+    state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
+    base, (c1, _c2, c3, c4) = _seed_window(repo, state_path, 4)
+    fakes = _fakes(
+        tmp_path.parent / f"trackA_unanchored_{tmp_path.name}",
+        [_pr(1, c1), _pr(2), _pr(3, c3)],
+        THREE_HINTS,
+    )
+    rc = runner.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=_fake_clock(AUTHORING_TRUNCATION_CLOCK),
+    )
+    assert rc == 0
+    written = json.loads(state_path.read_text())
+    advance = written["last_successful_run"]["head_sha"]
+    assert advance != c4, written["last_successful_run"]
+    assert advance == c3, written["last_successful_run"]
+    cr = read_current_run(state_path)
+    assert not any(
+        "time_budget_no_advance_unanchored_deferred" in r for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+
+
+def test_admission_truncation_advance_unchanged_by_track_a(
+    tmp_path, init_host, read_current_run
+):
+    # Regression guard: Track A must not touch the admission path. One
+    # doc_target keeps len(per_target) == 1, so the authoring loop's `i > 0`
+    # gate never fires and admission truncation is the only truncation in play.
+    # This test passes identically with and without the Track A line.
+    repo = tmp_path
+    state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
+    base, (c1, c2, c3, c4) = _seed_window(repo, state_path, 4)
+    fakes = _fakes(
+        tmp_path.parent / f"trackA_admission_{tmp_path.name}",
+        [_pr(1, c1), _pr(2, c2), _pr(3, c3)],
+        None,
+    )
+    # deadline=100; admission gate at i=1 sees 50 (admit PR #2), at i=2 sees
+    # 150 → truncate after 2 of 3 PRs. Cursor = c2.
+    rc = runner.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=_fake_clock([0, 50, 150]),
+    )
+    assert rc == 0
+    written = json.loads(state_path.read_text())
+    advance = written["last_successful_run"]["head_sha"]
+    assert advance != c4, written["last_successful_run"]
+    assert advance == c2, written["last_successful_run"]
+    assert written["last_successful_run"].get("window_head_sha") == c4, written[
+        "last_successful_run"
+    ]
+    cr = read_current_run(state_path)
+    assert (
+        "time_budget_exceeded: admitted 2/3 PRs (budget 100s); "
+        "deferring PR #3 to next run" in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+    # The authoring loop never truncated, so no authoring reason is present.
+    assert not any("page batches" in r for r in cr["partial_reasons"]), cr[
+        "partial_reasons"
+    ]
+    core = repo / "docs" / "site-src" / "core" / "connectors"
+    assert (core / "multi.md").exists()

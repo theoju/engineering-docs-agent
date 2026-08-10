@@ -1797,7 +1797,7 @@ def run(
                     # not an OSError).
                     continue
                 cited_sources = _citation_exists.resolve_cited_sources(
-                    page_text, repo_root
+                    page_text, repo_root, _citation_exists.source_roots(config)
                 )
                 if not cited_sources:
                     continue

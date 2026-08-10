@@ -29,7 +29,11 @@
               }
             ]
           },
-          "doc_kind": { "type": "string", "enum": ["architecture", "decision"] }
+          "doc_kind": {
+            "type": "string",
+            "enum": ["architecture", "decision"]
+          },
+          "notes": { "type": ["string", "null"] }
         }
       }
     },

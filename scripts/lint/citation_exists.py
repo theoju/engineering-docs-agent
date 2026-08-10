@@ -290,15 +290,53 @@ def exempt_tokens(config: dict) -> set[str]:
     return set(DEFAULT_EXEMPT_TOKENS) | {str(t) for t in host}
 
 
+def source_roots(config: dict) -> tuple[str, ...]:
+    """Extra package roots citation_exists tries when resolving a cited path.
+
+    A nested monorepo's prose cites the import-path form the code uses for
+    itself (`app/core/destination_engine.py`), which is repo-relative only
+    from inside the package root (`backend/`). Declared roots are tried AFTER
+    the repo root and docs_dir, never before, so a root can only widen
+    resolution — it can never redirect a path that already resolves.
+
+    PACKAGE ROOTS ONLY. A multi-segment entry (`backend/storage`) is
+    suffix-matching in disguise, and suffix-matching admits confabulated
+    paths, so such entries are dropped here and rejected outright by
+    templates/config.schema.json. Dropping fails closed: no widening, which is
+    the safe direction for a block rule. Empty by default — a host that
+    declares nothing keeps today's exact behavior.
+    """
+    lint = config.get("lint") or {}
+    out: list[str] = []
+    for raw in lint.get("citation_source_roots") or []:
+        root = str(raw).strip("/")
+        if root and "/" not in root and not root.startswith("."):
+            out.append(root)
+    return tuple(out)
+
+
 def _resolves(
-    rel: str, repo_root: Path, files: set[str], docs_dir: str, build_dir: str
+    rel: str,
+    repo_root: Path,
+    files: set[str],
+    docs_dir: str,
+    build_dir: str,
+    roots: tuple[str, ...],
 ) -> bool:
     """True when a cited repo-relative path names something real.
 
-    Three ways to resolve, in order: it is generated build output; it is
-    tracked or present on disk (the disk fallback covers same-run siblings not
-    yet added to git); or it resolves under docs_dir, which is how a docs page
-    naturally cites a sibling page.
+    Four ways to resolve, in order: it is generated build output; it is tracked
+    or present on disk (the disk fallback covers same-run siblings not yet added
+    to git); it resolves under docs_dir, which is how a docs page naturally
+    cites a sibling page; or it resolves under one of the host's declared
+    package roots (CCE-139, `lint.citation_source_roots`). Roots come last, so
+    declaring one can only widen resolution — it can never redirect a path that
+    already resolves.
+
+    `roots` is REQUIRED, not defaulted. This is a private helper with exactly
+    two call sites; a default would let one of them silently keep the narrow
+    behavior, and a block rule that has stopped blocking reports nothing. With
+    no default an un-threaded call site is a TypeError, not a silent hole.
     """
     if build_dir and (rel == build_dir or rel.startswith(build_dir + "/")):
         return True
@@ -308,7 +346,30 @@ def _resolves(
         alt = f"{docs_dir}/{rel}"
         if alt in files or (repo_root / alt).exists():
             return True
+    for root in roots:
+        alt = f"{root}/{rel}"
+        if alt in files or (repo_root / alt).exists():
+            return True
     return False
+
+
+def _resolve_target(rel: str, repo_root: Path, roots: tuple[str, ...]) -> Path | None:
+    """First on-disk file a cited repo-relative path names: the repo root first,
+    then each declared package root in declaration order. None when nothing
+    exists on disk.
+
+    The symbol loop's resolver, and it must widen in lockstep with _resolves()
+    (CCE-139). The loop reads `if target is None: continue`, so a narrow target
+    under a widened paths loop produces a SILENT SKIP, not a phantom report: the
+    path resolves, the symbol is never checked, and a confabulated symbol
+    attributed to a real file ships unreported. Repo root is tried first so a
+    declared root can never shadow a real top-level file.
+    """
+    for cand in (rel, *(f"{root}/{rel}" for root in roots)):
+        target = repo_root / cand
+        if target.exists():
+            return target
+    return None
 
 
 def check_path(
@@ -329,6 +390,7 @@ def check_path(
     build_dir = _build_dir(repo_root)
     prefixes = example_prefixes(config)
     exempt = exempt_tokens(config)
+    roots = source_roots(config)
     problems: list[str] = []
     notes: list[str] = []
     for cited in cites["paths"]:
@@ -336,12 +398,12 @@ def check_path(
         if rel is None:
             continue
         if cited in exempt:
-            if _resolves(rel, repo_root, files, docs_dir, build_dir):
+            if _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
                 notes.append(f"stale exemption: '{cited}' now resolves")
             continue
         if any(rel.startswith(p) for p in prefixes):
             continue  # reserved illustrative namespace, never expected to resolve
-        if not _resolves(rel, repo_root, files, docs_dir, build_dir):
+        if not _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
             problems.append(f"cites nonexistent path '{cited}'")
     for name in cites["tests"]:
         exists = cited_test_exists(repo_root, name)
@@ -359,8 +421,8 @@ def check_path(
             continue
         if any(rel.startswith(p) for p in prefixes):
             continue  # reserved illustrative namespace, never expected to resolve
-        target = repo_root / rel
-        if not target.exists():
+        target = _resolve_target(rel, repo_root, roots)
+        if target is None:
             continue  # nonexistent path already reported by the paths loop
         try:
             source = target.read_text()
@@ -373,14 +435,35 @@ def check_path(
     return True, "; ".join(["ok"] + notes)
 
 
-def resolve_cited_sources(text: str, repo_root: Path) -> list[str]:
-    """Repo-relative cited paths that exist on disk — the fact-checker's
-    cited_sources input. Ordered, deduped."""
+def resolve_cited_sources(
+    text: str, repo_root: Path, roots: tuple[str, ...] = ()
+) -> list[str]:
+    """Cited paths that exist on disk — the fact-checker's cited_sources input.
+
+    Ordered, deduped, and returned in RESOLVED form: a citation that only
+    resolves under a declared package root (CCE-139) comes back as
+    `backend/app/core/x.py`, not as the `app/core/x.py` the prose wrote, so the
+    fact-checker can open it relative to repo_root. The repo root is tried
+    first, so a declared root never shadows a real top-level file.
+
+    This is a SECOND, independent resolver from _resolves(): it feeds the
+    fact-checker's admission gate (`if not cited_sources: continue`), so
+    widening only the lint would let the linter accept citations the
+    fact-checker cannot see.
+
+    `roots` defaults to () to keep the two-argument shared-helper contract in
+    this module's docstring intact for existing callers.
+    """
     out: list[str] = []
     for cited in extract_citations(text)["paths"]:
         rel = _relativize(cited, repo_root)
-        if rel and (repo_root / rel).exists() and rel not in out:
-            out.append(rel)
+        if rel is None:
+            continue
+        for cand in (rel, *(f"{root}/{rel}" for root in roots)):
+            if (repo_root / cand).exists():
+                if cand not in out:
+                    out.append(cand)
+                break
     return out
 
 

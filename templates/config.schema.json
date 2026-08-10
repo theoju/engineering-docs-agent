@@ -86,6 +86,14 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Exact citation tokens whose non-existence is intentional (CCE-131). Unioned with the plugin defaults, never replacing them."
+        },
+        "citation_source_roots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]*$"
+          },
+          "description": "Extra package roots citation_exists tries when resolving a cited repo path, after the repo root and docs_dir (CCE-139). Additive; empty by default, so a host that declares nothing is unaffected. Single-segment package roots only (\"backend\", \"frontend\") — a nested tail like \"backend/storage\" is suffix-matching in disguise and admits confabulated paths, which is why the pattern rejects any entry containing a slash."
         }
       }
     },

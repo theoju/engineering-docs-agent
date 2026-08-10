@@ -353,6 +353,25 @@ def _resolves(
     return False
 
 
+def _resolve_target(rel: str, repo_root: Path, roots: tuple[str, ...]) -> Path | None:
+    """First on-disk file a cited repo-relative path names: the repo root first,
+    then each declared package root in declaration order. None when nothing
+    exists on disk.
+
+    The symbol loop's resolver, and it must widen in lockstep with _resolves()
+    (CCE-139). The loop reads `if target is None: continue`, so a narrow target
+    under a widened paths loop produces a SILENT SKIP, not a phantom report: the
+    path resolves, the symbol is never checked, and a confabulated symbol
+    attributed to a real file ships unreported. Repo root is tried first so a
+    declared root can never shadow a real top-level file.
+    """
+    for cand in (rel, *(f"{root}/{rel}" for root in roots)):
+        target = repo_root / cand
+        if target.exists():
+            return target
+    return None
+
+
 def check_path(
     path: Path, repo_root: Path | None, files: set[str], config: dict
 ) -> tuple[bool, str]:
@@ -402,8 +421,8 @@ def check_path(
             continue
         if any(rel.startswith(p) for p in prefixes):
             continue  # reserved illustrative namespace, never expected to resolve
-        target = repo_root / rel
-        if not target.exists():
+        target = _resolve_target(rel, repo_root, roots)
+        if target is None:
             continue  # nonexistent path already reported by the paths loop
         try:
             source = target.read_text()

@@ -192,3 +192,63 @@ def test_exempt_token_that_resolves_nowhere_reports_no_drift(tmp_path):
     ok, msg = citation_exists.check_path(page, repo, files, cfg)
     assert ok is True, msg
     assert "stale exemption" not in msg
+
+
+# ---------- site 3: the symbol loop (the silent-skip site) ----------
+
+
+def test_confabulated_symbol_in_a_root_resolved_file_blocks(tmp_path):
+    """THE silent-skip regression. Once the paths loop resolves
+    `app/core/real_module.py` under backend/, the symbol loop must resolve the
+    SAME file or it hits `if target is None: continue` and never checks the
+    symbol at all — an invented symbol attributed to a real file, which reads as
+    authoritative, ships with no report. Measured: sites 1+2 widened and site 3
+    narrow yields ok=True, msg='ok' for exactly this input."""
+    repo = _monorepo(tmp_path)
+    page = _page(repo, "See `app/core/real_module.py:ghost_fn` for the logic.\n")
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, CFG)
+    assert ok is False, msg
+    assert "cites nonexistent symbol 'ghost_fn' in 'app/core/real_module.py'" in msg
+
+
+def test_real_symbol_in_a_root_resolved_file_passes(tmp_path):
+    """The positive case. NOTE: this test does NOT discriminate site 3 — it
+    passes whether or not the symbol loop is widened, because a narrow loop
+    `continue`s and reports nothing. It is here to prove the widening does not
+    false-block, not to guard the silent skip."""
+    repo = _monorepo(tmp_path)
+    page = _page(repo, "The entry point is `app/core/real_module.py:real_fn`.\n")
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, CFG)
+    assert ok is True, msg
+
+
+def test_symbol_on_an_invented_root_path_reports_path_not_symbol(tmp_path):
+    """CONTROL for site 3: a :symbol citation on a file that exists under NO
+    declared root must report the path problem once (from the paths loop) and
+    must not double-report it as a symbol problem."""
+    repo = _monorepo(tmp_path)
+    page = _page(repo, "See `app/core/nonexistent_module.py:whatever`.\n")
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, CFG)
+    assert ok is False
+    assert "cites nonexistent path 'app/core/nonexistent_module.py'" in msg
+    assert "nonexistent symbol" not in msg
+
+
+def test_symbol_resolution_prefers_the_repo_root_over_a_declared_root(tmp_path):
+    """CONTROL: roots are tried AFTER the repo root, so a real top-level file is
+    never shadowed by a same-named file inside a package root. The symbol must be
+    looked up in the repo-root copy."""
+    repo = _monorepo(tmp_path)
+    (repo / "app" / "core").mkdir(parents=True)
+    (repo / "app" / "core" / "real_module.py").write_text(
+        "def top_level_only():\n    return 1\n"
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "shadow")
+    page = _page(repo, "See `app/core/real_module.py:top_level_only`.\n")
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, CFG)
+    assert ok is True, msg

@@ -316,14 +316,27 @@ def source_roots(config: dict) -> tuple[str, ...]:
 
 
 def _resolves(
-    rel: str, repo_root: Path, files: set[str], docs_dir: str, build_dir: str
+    rel: str,
+    repo_root: Path,
+    files: set[str],
+    docs_dir: str,
+    build_dir: str,
+    roots: tuple[str, ...],
 ) -> bool:
     """True when a cited repo-relative path names something real.
 
-    Three ways to resolve, in order: it is generated build output; it is
-    tracked or present on disk (the disk fallback covers same-run siblings not
-    yet added to git); or it resolves under docs_dir, which is how a docs page
-    naturally cites a sibling page.
+    Four ways to resolve, in order: it is generated build output; it is tracked
+    or present on disk (the disk fallback covers same-run siblings not yet added
+    to git); it resolves under docs_dir, which is how a docs page naturally
+    cites a sibling page; or it resolves under one of the host's declared
+    package roots (CCE-139, `lint.citation_source_roots`). Roots come last, so
+    declaring one can only widen resolution — it can never redirect a path that
+    already resolves.
+
+    `roots` is REQUIRED, not defaulted. This is a private helper with exactly
+    two call sites; a default would let one of them silently keep the narrow
+    behavior, and a block rule that has stopped blocking reports nothing. With
+    no default an un-threaded call site is a TypeError, not a silent hole.
     """
     if build_dir and (rel == build_dir or rel.startswith(build_dir + "/")):
         return True
@@ -331,6 +344,10 @@ def _resolves(
         return True
     if docs_dir:
         alt = f"{docs_dir}/{rel}"
+        if alt in files or (repo_root / alt).exists():
+            return True
+    for root in roots:
+        alt = f"{root}/{rel}"
         if alt in files or (repo_root / alt).exists():
             return True
     return False
@@ -354,6 +371,7 @@ def check_path(
     build_dir = _build_dir(repo_root)
     prefixes = example_prefixes(config)
     exempt = exempt_tokens(config)
+    roots = source_roots(config)
     problems: list[str] = []
     notes: list[str] = []
     for cited in cites["paths"]:
@@ -361,12 +379,12 @@ def check_path(
         if rel is None:
             continue
         if cited in exempt:
-            if _resolves(rel, repo_root, files, docs_dir, build_dir):
+            if _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
                 notes.append(f"stale exemption: '{cited}' now resolves")
             continue
         if any(rel.startswith(p) for p in prefixes):
             continue  # reserved illustrative namespace, never expected to resolve
-        if not _resolves(rel, repo_root, files, docs_dir, build_dir):
+        if not _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
             problems.append(f"cites nonexistent path '{cited}'")
     for name in cites["tests"]:
         exists = cited_test_exists(repo_root, name)

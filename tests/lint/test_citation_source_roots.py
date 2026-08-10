@@ -85,3 +85,110 @@ def test_source_roots_drops_nested_tails_and_dot_entries():
         "lint": {"citation_source_roots": ["backend", "backend/storage", "..", ".", ""]}
     }
     assert citation_exists.source_roots(cfg) == ("backend",)
+
+
+# ---------- site 1 + site 2a: _resolves() and the paths loop ----------
+
+
+def test_import_relative_path_resolves_under_a_declared_root(tmp_path):
+    """The reported failure class: a nested monorepo cites the import-path form
+    (`app/core/real_module.py`) that only resolves from inside backend/."""
+    repo = _monorepo(tmp_path)
+    page = _page(repo, "The entry point is `app/core/real_module.py`.\n")
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, CFG)
+    assert ok is True, msg
+
+
+def test_second_declared_root_also_resolves(tmp_path):
+    """Roots are tried in declaration order; the list is not single-valued."""
+    repo = _monorepo(tmp_path)
+    page = _page(repo, "The widget is `components/widget.tsx`.\n")
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, CFG)
+    assert ok is True, msg
+
+
+def test_invented_path_under_a_declared_root_still_blocks(tmp_path):
+    """CONTROL for sites 1 and 2a. Widening resolution must not become a blanket
+    pass: a file that exists under NO declared root is still a confabulation."""
+    repo = _monorepo(tmp_path)
+    page = _page(repo, "See `app/core/nonexistent_module.py` for the logic.\n")
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, CFG)
+    assert ok is False
+    assert "cites nonexistent path 'app/core/nonexistent_module.py'" in msg
+
+
+def test_undeclared_root_does_not_resolve(tmp_path):
+    """CONTROL: only DECLARED roots widen. A host that declares only backend must
+    not get frontend/ for free."""
+    repo = _monorepo(tmp_path)
+    page = _page(repo, "The widget is `components/widget.tsx`.\n")
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_source_roots": ["backend"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is False
+    assert "cites nonexistent path 'components/widget.tsx'" in msg
+
+
+def test_no_declared_roots_keeps_todays_behavior(tmp_path):
+    """CONTROL: generic-first. A host with no roots is byte-identical to today.
+    This is the guard that makes Track C safe to merge before Track D."""
+    repo = _monorepo(tmp_path)
+    page = _page(repo, "The entry point is `app/core/real_module.py`.\n")
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "cites nonexistent path 'app/core/real_module.py'" in msg
+
+
+def test_nested_tail_root_does_not_widen(tmp_path):
+    """CONTROL for the package-roots-only constraint at the rule level: declaring
+    `backend/app` must not make `core/real_module.py` resolve."""
+    repo = _monorepo(tmp_path)
+    page = _page(repo, "See `core/real_module.py`.\n")
+    files = citation_exists.tracked_files(repo)
+    cfg = {"lint": {"citation_source_roots": ["backend/app"]}}
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is False
+    assert "cites nonexistent path 'core/real_module.py'" in msg
+
+
+# ---------- site 2b: the stale-exemption call site ----------
+
+
+def test_exempt_token_that_resolves_under_a_root_reports_drift(tmp_path):
+    """Site 2b. An exempt token whose file has appeared under a declared package
+    root must surface as `stale exemption`, or the host's exemption list rots
+    with no signal. This is the ONLY assertion that distinguishes the two
+    _resolves() call sites."""
+    repo = _monorepo(tmp_path)
+    page = _page(repo, "The retired shim `app/core/legacy.py` is gone.\n")
+    files = citation_exists.tracked_files(repo)
+    cfg = {
+        "lint": {
+            "citation_source_roots": ["backend", "frontend"],
+            "citation_exempt_tokens": ["app/core/legacy.py"],
+        }
+    }
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is True, msg
+    assert "stale exemption: 'app/core/legacy.py' now resolves" in msg
+
+
+def test_exempt_token_that_resolves_nowhere_reports_no_drift(tmp_path):
+    """CONTROL for site 2b: the drift note must not be fabricated for a token
+    that genuinely resolves under no root."""
+    repo = _monorepo(tmp_path)
+    page = _page(repo, "There is deliberately no `app/core/never_there.py`.\n")
+    files = citation_exists.tracked_files(repo)
+    cfg = {
+        "lint": {
+            "citation_source_roots": ["backend", "frontend"],
+            "citation_exempt_tokens": ["app/core/never_there.py"],
+        }
+    }
+    ok, msg = citation_exists.check_path(page, repo, files, cfg)
+    assert ok is True, msg
+    assert "stale exemption" not in msg

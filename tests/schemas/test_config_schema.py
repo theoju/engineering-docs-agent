@@ -358,3 +358,50 @@ def test_merge_negative_grace_rejected():
     cfg = yaml.safe_load(_BASE_FOR_MERGE + "\nmerge: { checks_grace_seconds: -1 }\n")
     with pytest.raises(ValidationError):
         validate(cfg, SCHEMA)
+
+
+# ---------- CCE-139: lint.citation_source_roots ----------
+
+_BASE_CFG = """
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: { core: docs/core }
+sources: { git: { host: github } }
+publishing:
+  base_url: https://x
+  build_workflow: deploy.yml
+  url_map_rule: standard
+notifications: {}
+"""
+
+
+def test_citation_source_roots_package_roots_accepted():
+    cfg = yaml.safe_load(
+        _BASE_CFG
+        + "lint: { tier1: default, citation_source_roots: [backend, frontend] }\n"
+    )
+    validate(cfg, SCHEMA)
+
+
+def test_citation_source_roots_rejects_a_nested_tail():
+    """Spec: roots must be PACKAGE roots, never a tail like `backend/storage`.
+    A root list deep enough to catch tails is suffix-matching in disguise."""
+    cfg = yaml.safe_load(
+        _BASE_CFG
+        + "lint: { tier1: default, citation_source_roots: [backend/storage] }\n"
+    )
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)
+
+
+def test_citation_source_roots_rejects_a_bare_string():
+    """The value is a list of roots, not one root. An undeclared key would have
+    accepted this silently."""
+    cfg = yaml.safe_load(
+        _BASE_CFG + 'lint: { tier1: default, citation_source_roots: "backend" }\n'
+    )
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)

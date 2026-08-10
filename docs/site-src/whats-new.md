@@ -8,6 +8,9 @@ synthesized_into: []
 
 # What's New
 
+## 2026-08-10T08:47:54.866612+00:00
+- PR #207: Corrected a factual omission on the architecture page describing the fact-checker's warn-layer semantics. The page stated the fact-checker 'never mark[s] the run partial,' but the orchestrator code carries a documented exception: a CCE-114 time-budget cut of the fact-checker loop does flip partial. The page now includes that parenthetical exception, matching the code and its module comment.
+
 ## 2026-08-09T16:21:13.111090+00:00
 - PR #202: Fixed a Tier-1 citation lint false positive: the deterministic `citation_exists` rule was blocking the literal placeholder path `path/to/file.py` — the metasyntactic example the plugin itself ships in `agents/page-author.md` and `CLAUDE.md` — because it matched neither the placeholder-marker heuristic nor an example-prefix reservation. The fix adds `path/to/file.py` to `DEFAULT_EXEMPT_TOKENS` as an exact-match token rather than reserving `path/to/` as a whole example prefix, deliberately avoiding a fail-open subtree exemption. Includes 6 new discriminating tests and an unrelated prettier reflow on the touched architecture page.
 - PR #203: Fixes six confabulated code citations across five architecture/operations docs pages so `citation_exists` no longer blocks them. Each fix verifies the surrounding prose against the real file rather than just swapping in an existing-but-wrong path: two doc↔source-map generator scripts, the diagram-render-gate script, the page-author output schema filename, the actionlint config path/claim, and a full structural rewrite of the diagram-gate page (which cited a workflow file that doesn't exist and had inverted its own CCE-91 incident history). Also swept stale filenames out of frontmatter `source_files:` and Mermaid diagram labels on two of the pages.

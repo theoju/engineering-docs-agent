@@ -5,7 +5,7 @@
 
 ## What it checks
 
-Page prose must match the voice samples provided by the orchestrator. The `content-validator` subagent receives the page text and a bundle of voice samples (recent pages from the same lens, plus optional `docs-agent-voice.md`). It evaluates:
+Page prose must match the voice samples provided by the orchestrator. The `content-validator` subagent receives the page text and a bundle of voice samples (an optional `docs-agent-voice.md` at the repo root, the configured `voice.sample_paths`, and `CLAUDE.md` if present). It evaluates:
 
 - Tone and register (formal vs casual, technical vs prose)
 - Person (consistent first/second/third)

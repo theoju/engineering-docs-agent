@@ -277,14 +277,25 @@ def load_voice_samples(repo_root: Path, config: dict) -> list[dict]:
     cap = 20_000
     sources: list[Path] = []
     voice_cfg = config.get("voice") or {}
+    # The host voice override leads: read first, it survives the cap intact.
+    override = repo_root / "docs-agent-voice.md"
+    if override.exists():
+        sources.append(override)
     for rel in voice_cfg.get("sample_paths") or []:
         sources.append(repo_root / rel)
     claude_md = repo_root / "CLAUDE.md"
     if claude_md.exists():
         sources.append(claude_md)
+    seen: set[Path] = set()
     for src in sources:
         if not src.exists() or not src.is_file():
             continue
+        # CLAUDE.md is appended implicitly and is also a common sample_paths
+        # entry; without this a host config listing it burns the budget twice.
+        key = src.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
         try:
             text = src.read_text()
         except (OSError, UnicodeDecodeError):

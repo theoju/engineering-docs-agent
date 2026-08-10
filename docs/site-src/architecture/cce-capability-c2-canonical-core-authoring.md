@@ -46,7 +46,7 @@ The `page-author` subagent (`agents/page-author.md`) is the runtime executor of 
 - `target_path` — absolute path of the page to write or edit.
 - `action` — `"create"` for new pages, `"edit"` for updates.
 - `summaries` — list of `pr-summarizer` outputs scoped to this page.
-- `voice_samples` — recent pages from the same lens plus CLAUDE.md, loaded by `scripts/state_io.py`.
+- `voice_samples` — an optional repo-root `docs-agent-voice.md`, the configured `voice.sample_paths`, and `CLAUDE.md`, read in that precedence order and capped at 20 KB by `scripts/state_io.py:load_voice_samples`.
 - `frontmatter_template` — the agent-authored field set pre-populated by the orchestrator.
 
 The agent reads voice samples first to match tone, then drafts or patches the page. On `create` it writes a complete file with frontmatter. On `edit` it integrates new content into the existing heading structure rather than appending.

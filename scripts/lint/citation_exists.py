@@ -435,14 +435,35 @@ def check_path(
     return True, "; ".join(["ok"] + notes)
 
 
-def resolve_cited_sources(text: str, repo_root: Path) -> list[str]:
-    """Repo-relative cited paths that exist on disk — the fact-checker's
-    cited_sources input. Ordered, deduped."""
+def resolve_cited_sources(
+    text: str, repo_root: Path, roots: tuple[str, ...] = ()
+) -> list[str]:
+    """Cited paths that exist on disk — the fact-checker's cited_sources input.
+
+    Ordered, deduped, and returned in RESOLVED form: a citation that only
+    resolves under a declared package root (CCE-139) comes back as
+    `backend/app/core/x.py`, not as the `app/core/x.py` the prose wrote, so the
+    fact-checker can open it relative to repo_root. The repo root is tried
+    first, so a declared root never shadows a real top-level file.
+
+    This is a SECOND, independent resolver from _resolves(): it feeds the
+    fact-checker's admission gate (`if not cited_sources: continue`), so
+    widening only the lint would let the linter accept citations the
+    fact-checker cannot see.
+
+    `roots` defaults to () to keep the two-argument shared-helper contract in
+    this module's docstring intact for existing callers.
+    """
     out: list[str] = []
     for cited in extract_citations(text)["paths"]:
         rel = _relativize(cited, repo_root)
-        if rel and (repo_root / rel).exists() and rel not in out:
-            out.append(rel)
+        if rel is None:
+            continue
+        for cand in (rel, *(f"{root}/{rel}" for root in roots)):
+            if (repo_root / cand).exists():
+                if cand not in out:
+                    out.append(cand)
+                break
     return out
 
 

@@ -252,3 +252,53 @@ def test_symbol_resolution_prefers_the_repo_root_over_a_declared_root(tmp_path):
     files = citation_exists.tracked_files(repo)
     ok, msg = citation_exists.check_path(page, repo, files, CFG)
     assert ok is True, msg
+
+
+# ---------- site 4a: resolve_cited_sources (the fact-checker's resolver) ----------
+
+
+def test_resolve_cited_sources_widens_and_returns_the_resolved_path(tmp_path):
+    """Site 4 is a SECOND, independent resolver feeding the fact-checker's
+    admission gate (`if not cited_sources: continue`). Widening only the linter
+    would make it accept citations the fact-checker cannot see. The returned path
+    must be the RESOLVED one — the fact-checker opens it relative to repo_root,
+    so the as-written `app/core/…` form would be a missing file."""
+    repo = _monorepo(tmp_path)
+    text = "The entry point is `app/core/real_module.py`.\n"
+    roots = citation_exists.source_roots(CFG)
+    assert citation_exists.resolve_cited_sources(text, repo, roots) == [
+        "backend/app/core/real_module.py"
+    ]
+
+
+def test_resolve_cited_sources_skips_invented_paths_under_a_root(tmp_path):
+    """CONTROL for site 4: widening must not feed the fact-checker a path that
+    does not exist. A confabulated citation still yields nothing."""
+    repo = _monorepo(tmp_path)
+    text = "See `app/core/nonexistent_module.py` and `app/core/real_module.py`.\n"
+    roots = citation_exists.source_roots(CFG)
+    assert citation_exists.resolve_cited_sources(text, repo, roots) == [
+        "backend/app/core/real_module.py"
+    ]
+
+
+def test_resolve_cited_sources_without_roots_is_unchanged(tmp_path):
+    """CONTROL: the two-argument shared-helper contract still holds, and a host
+    with no declared roots gets byte-identical output to today."""
+    repo = _monorepo(tmp_path)
+    text = "The entry point is `app/core/real_module.py`.\n"
+    assert citation_exists.resolve_cited_sources(text, repo) == []
+    assert citation_exists.resolve_cited_sources(text, repo, ()) == []
+
+
+def test_resolve_cited_sources_prefers_the_repo_root_copy(tmp_path):
+    """CONTROL: roots are tried after the repo root, so the fact-checker reads
+    the top-level file when one exists, not a same-named file under a root."""
+    repo = _monorepo(tmp_path)
+    (repo / "app" / "core").mkdir(parents=True)
+    (repo / "app" / "core" / "real_module.py").write_text("X = 1\n")
+    text = "The entry point is `app/core/real_module.py`.\n"
+    roots = citation_exists.source_roots(CFG)
+    assert citation_exists.resolve_cited_sources(text, repo, roots) == [
+        "app/core/real_module.py"
+    ]

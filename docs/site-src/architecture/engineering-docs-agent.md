@@ -139,7 +139,7 @@ State advances in the same PR as doc changes. If the PR is reverted, the state r
 
 ## Voice matching
 
-`page-author` receives voice samples loaded from the current lens path and from `CLAUDE.md` (if present). An optional `docs-agent-voice.md` override file takes precedence. The few-shot approach is intentional: no separate fine-tuning, no stored embeddings.
+`page-author` receives voice samples assembled by `scripts/state_io.py:load_voice_samples`, which reads three sources in a fixed order: an optional `docs-agent-voice.md` at the repo root, then every path in `voice.sample_paths` from config, then `CLAUDE.md` if it exists. The whole bundle is capped at 20 KB, so order is precedence — the override leads because it must survive the cap intact. A path reached twice (listing `CLAUDE.md` in `sample_paths` is the common case) is read once. The few-shot approach is intentional: no separate fine-tuning, no stored embeddings.
 
 The `load_voice_samples` helper in `scripts/state_io.py` drives the load order.
 

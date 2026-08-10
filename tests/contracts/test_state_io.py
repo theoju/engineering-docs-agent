@@ -199,6 +199,40 @@ def test_load_voice_samples_skips_missing(tmp_path):
     assert samples == []
 
 
+def test_load_voice_samples_includes_docs_agent_voice_override(tmp_path):
+    from state_io import load_voice_samples
+
+    (tmp_path / "docs-agent-voice.md").write_text("Prefer terse sentences.")
+    samples = load_voice_samples(tmp_path, {})
+
+    assert [s["path"] for s in samples] == ["docs-agent-voice.md"]
+
+
+def test_load_voice_samples_override_takes_precedence(tmp_path):
+    """The override is read first, so it survives the 20KB cap intact."""
+    from state_io import load_voice_samples
+
+    (tmp_path / "docs-agent-voice.md").write_text("Override voice.")
+    (tmp_path / "CLAUDE.md").write_text("Host CLAUDE")
+    cfg = {"voice": {"sample_paths": ["CLAUDE.md"]}}
+
+    samples = load_voice_samples(tmp_path, cfg)
+
+    assert samples[0]["path"] == "docs-agent-voice.md"
+
+
+def test_load_voice_samples_does_not_duplicate_claude_md(tmp_path):
+    """CLAUDE.md in sample_paths must not also be appended by the implicit rule."""
+    from state_io import load_voice_samples
+
+    (tmp_path / "CLAUDE.md").write_text("Host CLAUDE")
+    cfg = {"voice": {"sample_paths": ["CLAUDE.md"]}}
+
+    samples = load_voice_samples(tmp_path, cfg)
+
+    assert [s["path"] for s in samples] == ["CLAUDE.md"]
+
+
 def test_resolve_lens_string_form():
     from state_io import resolve_lens
 

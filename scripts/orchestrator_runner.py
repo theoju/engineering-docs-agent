@@ -1612,6 +1612,10 @@ def run(
         # an admitted PR still owes because the authoring loop was cut.
         admission_deferred: list[dict] = []
         deferred_pages_by_pr: dict[int, list[str]] = {}
+        # CCE-140: bound on every path. A run that never truncates defers
+        # nothing, and the deferral-count prune below runs on EVERY run — a
+        # clean run is precisely what resets a PR's "consecutive" history.
+        still_deferred: list[dict] = []
         for i, pr in enumerate(prs):
             if deadline is not None and i > 0 and clock() > deadline:
                 add_partial(
@@ -1685,6 +1689,17 @@ def run(
 
         authored: list[str] = []
         authored_lens: dict[str, str] = {}
+        # CCE-140: the batch keys whose page actually landed. Everything in
+        # per_target that is NOT in here owes its PRs a page — whatever the
+        # reason: a time cut, a failed page-author dispatch, an unknown lens,
+        # an unsafe path, or a lint block that reverted the file. Computing
+        # "owed" as the COMPLEMENT of "landed" is what keeps the advance
+        # cursor honest about failure modes nobody enumerated; an earlier
+        # revision recorded only the time-truncated tail, so a run whose
+        # page-author failed on batch 2 and then truncated at batch 4 still
+        # advanced its baseline past batch 2's PR, permanently.
+        landed_batches: set = set()
+        batch_key_by_path: dict[str, tuple] = {}
         pr_by_number = {pr.get("number"): pr for pr in prs}
         # CCE-119 Item B: resolve the description_quality min_words floor once
         # from config (single source of truth in the lint rule) so an
@@ -1715,18 +1730,9 @@ def run(
                 # covering PRs whose pages it never wrote.
                 #
                 # CCE-140: an admitted PR whose page batch was never written
-                # is NOT done. Record which pages it still owes so the advance
-                # block can hold it out of the cursor prefix (spec Decision 2:
-                # "the baseline advances only to the last PR whose pages all
-                # landed") and so a skip record can name the page.
-                for _dkey, _dbatch in list(per_target.items())[i:]:
-                    for _ds in _dbatch:
-                        _dn = _ds.get("pr_number")
-                        if _dn is None:
-                            continue
-                        deferred_pages_by_pr.setdefault(_dn, []).append(
-                            f"{_dkey[0]}/{_dkey[1]}"
-                        )
+                # is NOT done. The deferred tail is not recorded here — the
+                # complement pass after the lint block covers it, along with
+                # every other way a batch can fail to land.
                 time_truncated = True
                 break
             try:
@@ -1816,6 +1822,10 @@ def run(
             if out.get("ok"):
                 authored.append(str(target_path))
                 authored_lens[str(target_path)] = lens
+                # CCE-140: provisionally landed. A lint block below can still
+                # revert this page, which discards the entry again.
+                landed_batches.add((lens, hint))
+                batch_key_by_path[str(target_path.resolve())] = (lens, hint)
                 if dry_run_dir and not target_path.exists():
                     # CCE-117: mirror the template branch so the dry-run synth
                     # writes the same generator-aware frontmatter the real
@@ -1910,6 +1920,33 @@ def run(
                         state,
                         f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}",
                     )
+                    # CCE-140: the page was just reverted or deleted, so its
+                    # batch did NOT land and its PRs are still owed a page.
+                    # Without this the cursor treats a lint-blocked PR as done
+                    # and the baseline advances past content that was undone
+                    # moments earlier.
+                    landed_batches.discard(
+                        batch_key_by_path.get(str(fail_path.resolve()))
+                    )
+
+        # CCE-140: fold every batch that did not land into the owed map, so
+        # the advance cursor holds those PRs out of its prefix (spec Decision
+        # 2: "the baseline advances only to the last PR whose pages all
+        # landed"). This is the ONLY writer of deferred_pages_by_pr, and it is
+        # a complement rather than a sum of failure sites on purpose: a new
+        # `continue` added to the authoring loop later is covered for free,
+        # whereas an enumeration would silently stop being exhaustive.
+        for (_lens, _hint), _batch in per_target.items():
+            if (_lens, _hint) in landed_batches:
+                continue
+            _label = f"{_lens}/{_hint}"
+            for _s in _batch:
+                _n = _s.get("pr_number")
+                if _n is None:
+                    continue
+                _owed = deferred_pages_by_pr.setdefault(_n, [])
+                if _label not in _owed:
+                    _owed.append(_label)
 
         # CCE-110 layer 3: factual-accuracy fact-checker (warn layer). One
         # dispatch per surviving authored page that cites >=1 resolvable repo
@@ -2218,8 +2255,16 @@ def run(
             # pipeline chose to abandon, and `partial` is what routes it into
             # the notifier digest. It does not veto the merge — the skip only
             # takes effect if this run merges (see _MERGE_VETO_REASON_PREFIXES).
+            # Only PRs the walk ACTUALLY crossed are abandoned. A forgiven PR
+            # sitting behind an older still-deferred one is not passed by the
+            # cursor, so announcing and durably recording its loss would be a
+            # false alarm — and `skipped_prs` is append-only and deduped by
+            # `pr`, so a false entry can never be corrected.
+            _crossed = {p.get("number") for p in cursor_prs}
             _records = []
             for _pr_obj in _skipped_prs:
+                if _pr_obj.get("number") not in _crossed:
+                    continue
                 _k = deferral_key(repo, _pr_obj.get("number"))
                 _pages = sorted(
                     set(deferred_pages_by_pr.get(_pr_obj.get("number"), []))
@@ -2241,18 +2286,28 @@ def run(
                     + (", ".join(_pages) if _pages else "(none authored)"),
                 )
             merge_skipped_pr_records(state, _records)
-            _next_counts = next_deferral_counts(
-                _deferral_counts,
-                repo=repo,
-                window_pr_numbers={
-                    p.get("number") for p in window_prs if p.get("number") is not None
-                },
-                still_deferred_numbers={p.get("number") for p in still_deferred},
-            )
-            if _next_counts:
-                state["deferral_counts"] = _next_counts
-            else:
-                state.pop("deferral_counts", None)
+        # CCE-140: prune and increment on EVERY run, not only a truncated one.
+        # "Consecutive" is only meaningful if a run that PROCESSED a PR clears
+        # its history, and the run that processes it is usually the clean one.
+        # Gating this on `time_truncated` made a truncated/clean/truncated
+        # alternation accumulate toward a skip for a PR the pipeline handled
+        # successfully every other night, and left counts for PRs long past
+        # the baseline orphaned in state.json forever.
+        _prior_counts = state.get("deferral_counts", {}) or {}
+        _next_counts = next_deferral_counts(
+            _prior_counts,
+            repo=repo,
+            window_pr_numbers={
+                p.get("number") for p in window_prs if p.get("number") is not None
+            },
+            still_deferred_numbers={
+                p.get("number") for p in still_deferred if p.get("number") is not None
+            },
+        )
+        if _next_counts:
+            state["deferral_counts"] = _next_counts
+        else:
+            state.pop("deferral_counts", None)
         state["last_successful_run"] = {
             "head_sha": advance_sha,
             "completed_at": now,

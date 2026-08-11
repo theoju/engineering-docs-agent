@@ -22,6 +22,33 @@
       "description": "Operator-set dismissals. Keys are {owner}/{name}#{pr}. Values are dismissal notes (free text).",
       "additionalProperties": { "type": "string" }
     },
+    "deferral_counts": {
+      "type": "object",
+      "description": "CCE-140: consecutive-deferral count per PR. Keys are {owner}/{name}#{pr}, the same shape as dismissed_gap_flags. Runner-owned, not operator-edited. An entry is dropped as soon as its PR is processed or skipped, so a quiescent pipeline carries no entries and the key is absent entirely.",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "skipped_prs": {
+      "type": "array",
+      "description": "CCE-140: PRs abandoned after run.deferral_skip_threshold consecutive deferrals. Append-only — the runner never removes an entry. Absent means no PR has ever been skipped; the key is never seeded empty.",
+      "items": {
+        "type": "object",
+        "required": ["pr", "deferrals", "skipped_at"],
+        "properties": {
+          "pr": {
+            "type": "string",
+            "description": "{owner}/{name}#{pr}, same key shape as dismissed_gap_flags."
+          },
+          "url": { "type": "string" },
+          "pages": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "lens/page_hint targets this PR still owed when it was skipped. Empty when the admission gate never reached the PR, so no page was ever routed for it."
+          },
+          "deferrals": { "type": "integer", "minimum": 0 },
+          "skipped_at": { "type": "string" }
+        }
+      }
+    },
     "cursors": { "type": "object" }
   }
 }

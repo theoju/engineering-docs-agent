@@ -342,3 +342,50 @@ def test_save_current_run_clears_stale_sibling(tmp_path):
     assert not sibling.exists(), (
         "save_current_run must remove a stale sibling when state has no current_run"
     )
+
+
+# ---------------------------------------------------------------------------
+# CCE-140: back-compat at the real load path
+# ---------------------------------------------------------------------------
+
+
+def test_load_state_validated_accepts_a_pre_cce140_state_file(tmp_path):
+    """CCE-140 back-compat at the real load path, not just the schema. This is
+    the exact byte content of tests/fixtures/e2e_host/.engineering-docs-agent/
+    state.json, which is what a host that predates CCE-140 has on disk."""
+    from state_io import load_state_validated
+
+    p = tmp_path / "state.json"
+    p.write_text('{ "version": "1", "dismissed_gap_flags": {}, "cursors": {} }')
+    loaded = load_state_validated(p)
+    assert loaded == {"version": "1", "dismissed_gap_flags": {}, "cursors": {}}
+    # The reader contract the runner relies on: absent means empty.
+    assert loaded.get("skipped_prs", []) == []
+    assert loaded.get("deferral_counts", {}) == {}
+    assert json.loads(p.read_text()) == loaded, "load must not rewrite the file"
+
+
+def test_save_persistent_state_round_trips_the_cce140_keys(tmp_path):
+    from state_io import save_persistent_state
+
+    state = {
+        "version": "1",
+        "last_successful_run": {"head_sha": "abc"},
+        "deferral_counts": {"o/r#5": 2},
+        "skipped_prs": [
+            {
+                "pr": "o/r#4",
+                "url": "https://github.com/o/r/pull/4",
+                "pages": ["core/a.md"],
+                "deferrals": 3,
+                "skipped_at": "2026-08-11T03:00:00+00:00",
+            }
+        ],
+        "current_run": {"partial": True},
+    }
+    p = tmp_path / "state.json"
+    save_persistent_state(p, state)
+    written = json.loads(p.read_text())
+    assert "current_run" not in written
+    assert written["deferral_counts"] == {"o/r#5": 2}
+    assert written["skipped_prs"][0]["pr"] == "o/r#4"

@@ -1,5 +1,5 @@
 ---
-description: "Documents architecture orchestrator: the CCE-109/CCE-114 soft time-budget check bounds every expensive loop in the nightly run, CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages, CCE-125 makes a gap-detector 'couldn't judge' verdict an info-only advisory outcome, and CCE-127 degrades a failed GitHub App token mint to a blocking partial reason instead of killing the job."
+description: "Documents architecture orchestrator: the CCE-109/CCE-114 soft time-budget check bounds every expensive loop in the nightly run, CCE-138 makes the authoring loop's soft-deadline truncation set time_truncated so the CCE-109 baseline-advance cursor is reachable from both the admission and authoring loops, CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages, CCE-125 makes a gap-detector 'couldn't judge' verdict an info-only advisory outcome, and CCE-127 degrades a failed GitHub App token mint to a blocking partial reason instead of killing the job."
 source_files:
   - CHANGELOG.md
   - scripts/orchestrator_runner.py
@@ -11,8 +11,9 @@ source_files:
   - tests/orchestrator/test_enforce_agent_frontmatter.py
   - tests/orchestrator/test_agent_authored_create_frontmatter.py
   - tests/orchestrator/test_gap_detector_unjudged.py
+  - tests/orchestrator/test_authoring_truncation_advance.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-08-08"
+last_reviewed: "2026-08-11"
 status: draft
 doc_kind: architecture
 ---
@@ -68,10 +69,19 @@ if deadline is not None and i > 0 and clock() > deadline:
         f"time_budget_exceeded: authored {i}/{len(per_target)} "
         f"page batches (budget {budget}s); deferring the rest",
     )
+    time_truncated = True
     break
 ```
 
 This is the checkpoint CCE-109 was missing. Authoring is the single most expensive phase — one Claude dispatch per `(lens, page_hint)` batch — and admission alone completes too early in the run to bound it. Before CCE-114, a large window could pass the admission check in minutes and then author straight through the deadline into the workflow's hard kill; one observed run (27263616736) started roughly 20 page-author dispatches after the deadline had already passed, and — per `CHANGELOG.md` — six consecutive scheduled nightlies died this way with all work discarded.
+
+### CCE-138: the authoring break was missing the flag the promotion block reads
+
+The `time_truncated = True` assignment above is a CCE-138 fix, not part of the original CCE-114 checkpoint. Downstream, after gap-detection, the run promotes `current_run.head_sha` into `last_successful_run.head_sha` (`scripts/orchestrator_runner.py`), and that promotion branches on `time_truncated`: when it's set, the run computes a cursor from the admitted PRs (`_last_processed_merge_sha`, resolved and window-checked via `_rev_parse_commit` and `_sha_in_window`) and refuses to advance at all in three cases it can't prove safe — no admitted PR has a usable `merge_sha`, a deferred PR has no `merge_sha` to re-anchor to, or the cursor doesn't resolve inside the window. When `time_truncated` is false, the block takes its `else` branch and persists the full window `head_sha` instead.
+
+The PR-admission break (above) has set `time_truncated` since CCE-109. The authoring break added by CCE-114 truncates for the identical reason — the deadline passed mid-loop — but historically set nothing, so an authoring-truncated run fell through to the `else` branch: the baseline advanced to the full window `head_sha` even though only some `(lens, page_hint)` batches had been authored, and the un-authored batches were dropped with no record that they were ever owed. The omission produced no error at the truncation site itself; its only consequence was a baseline value written much later, in an unrelated function, which is why it went unnoticed. Measured on the `advanced-data-import-system` host: every one of the ten docs-agent PRs merged there between 2026-06-26 and 2026-07-25 advanced the baseline this way.
+
+CCE-138's fix is the single assignment shown above — no new state, no new refusal branch. It makes the CCE-109 cursor and its three refusal reasons reachable from the authoring loop for the first time; they were already correct, just unreachable from this path. `tests/orchestrator/test_authoring_truncation_advance.py` covers it with five tests, mutation-verified by deleting the `time_truncated = True` line: four of the five fail, asserting the negative (`advance_sha != head_sha`) rather than only the positive (`advance_sha == cursor`), since a fixture where the two coincide would pass vacuously on the unfixed code. The fifth test pins that admission-only truncation is unchanged by the fix.
 
 **fact-checker warn layer** (`scripts/orchestrator_runner.py`) and **gap-detector loop** (`scripts/orchestrator_runner.py`) drop the `i > 0` guard entirely — they skip outright the moment the deadline has passed, with no minimum-progress guarantee:
 

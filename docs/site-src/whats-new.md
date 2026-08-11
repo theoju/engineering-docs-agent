@@ -8,6 +8,48 @@ synthesized_into: []
 
 # What's New
 
+## 2026-08-11T08:13:22.888649+00:00
+- PR #211: Fixes the authoring-loop truncation path in the nightly orchestrator so that when the authoring loop hits the soft deadline, it now sets `time_truncated` (mirroring the pre-existing PR-admission loop). With the flag set, the existing CCE-109 promotion block correctly takes its cursor-based branch and advances the baseline only to the last processed PR's merge sha, instead of falling through to the `else` branch that wrote the full window HEAD as the new baseline. No new state or refusal logic was added — the fix makes the CCE-109 refusal branches reachable from the authoring loop. Five lines of production change plus five new tests (mutation-verified: reverting `time_truncated = True` fails four of the five).
+- PR #212: Adds an additive, opt-in `lint.citation_source_roots` config list to the `citation_exists` Tier-1 lint rule. When a host declares package roots (e.g. `[backend, frontend]`), citation path resolution tries them after the repo root and docs_dir — never before — so a declared root can only widen what resolves, never redirect a path that already resolves. The change threads the new roots through all four resolution sites (the core `_resolves()` helper, both `check_path()` call sites, the symbol-loop target resolution, and `resolve_cited_sources()`) plus the orchestrator call site that feeds the fact-checker's citation list, so lint and fact-checking see a consistent widened view. A schema entry rejects bare strings and any root containing a slash, preventing suffix-matching tails from being configured even by hand. Separately, fixes the `pr_summarizer` output schema so a `notes` key is permitted inside individual `doc_targets` items (previously only the root object allowed `notes`, causing a valid per-target caveat to be rejected as an unknown-key violation).
+### Gaps flagged
+- theoju/engineering-docs-agent#211: No allowlist match and size_filter has no min_loc/min_files configured, so the size gate doesn't apply — falls to LLM judgment. This PR changes core orchestrator state-advancement logic (scripts/orchestrator_runner.py) governing how the nightly baseline cursor is persisted after truncation, fixing a correctness bug where un-authored PR batches were silently dropped from state while being reported as covered. This is exactly the class of change (subtle state/behavior correctness fix in a shared, production-critical pipeline component, with downstream Track B/C dependents referencing specific decisions) a senior engineer would expect a written plan for — and indeed the PR itself includes one (docs/superpowers/plans/2026-08-10-cce-138-cursor-honesty.md), corroborating that judgment.
+- theoju/engineering-docs-agent#212: Empty allowlist_paths (no glob match possible) and an incomplete size_filter (no min_loc/min_files thresholds set) push evaluation to LLM judgment. The change modifies core Tier-1 block-lint semantics (citation_exists), adds a new host-facing config field (lint.citation_source_roots) to templates/config.schema.json, touches four distinct resolver call sites plus the orchestrator, and is explicitly Track C of a larger multi-track design (ADIS-490, CCE-138/139/140). This is exactly the class of change — new config surface, altered validation/blocking behavior, cross-cutting resolver semantics — a senior engineer would expect a written spec/plan for, and indeed the PR includes docs/superpowers/plans/2026-08-10-cce-139-citation-source-roots.md accompanying it.
+### Pages to review (source drift)
+- architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
+- architecture/cce-capability-c-canonical-core-citations.md — changed: docs/superpowers/plans/2026-08-10-cce-138-cursor-honesty.md, docs/superpowers/plans/2026-08-10-cce-139-citation-source-roots.md, scripts/lint/citation_exists.py, templates/config.schema.json
+- architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-08-10-cce-138-cursor-honesty.md, docs/superpowers/plans/2026-08-10-cce-139-citation-source-roots.md
+- architecture/cce10-source-collector-canonical-shape.md — changed: scripts/orchestrator_runner.py
+- architecture/cce12-source-collector-tool-use-diagnostics.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-decision-archive.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-source-map-drift.md — changed: agents/schemas/pr_summarizer.schema.json, scripts/orchestrator_runner.py
+- architecture/cce32-github-pages-publish-target.md — changed: docs/superpowers/plans/2026-08-10-cce-138-cursor-honesty.md, docs/superpowers/plans/2026-08-10-cce-139-citation-source-roots.md
+- architecture/cce4-schema-enforcement.md — changed: agents/pr-summarizer.md, agents/schemas/pr_summarizer.schema.json, scripts/orchestrator_runner.py
+- architecture/cce6-7-8-batch.md — changed: scripts/orchestrator_runner.py
+- architecture/engineering-docs-agent.md — changed: scripts/lint/citation_exists.py
+- architecture/index.md — changed: scripts/orchestrator_runner.py
+- architecture/orchestrator.md — changed: CHANGELOG.md, scripts/orchestrator_runner.py, tests/orchestrator/test_authoring_truncation_advance.py
+- architecture/publish-verifier.md — changed: templates/config.schema.json
+- architecture/structured-docs-site-generation.md — changed: agents/schemas/pr_summarizer.schema.json, docs/superpowers/plans/2026-08-10-cce-138-cursor-honesty.md, docs/superpowers/plans/2026-08-10-cce-139-citation-source-roots.md
+- archive/2026-07-13-cce120-gap-detector-prid-injection.md — changed: scripts/orchestrator_runner.py
+- archive/cce14-source-collector-prompt-hardening.md — changed: scripts/orchestrator_runner.py
+- archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
+- archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
+- archive/v0-1-1-hardening.md — changed: scripts/orchestrator_runner.py, templates/config.schema.json
+### Pages to review (citation drift)
+- architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+### Core pages to review (drift)
+- architecture/cce-capability-c-canonical-core-citations.md (source, citation)
+- architecture/cce-capability-c2-canonical-core-authoring.md (source)
+- architecture/cce10-source-collector-canonical-shape.md (source)
+- architecture/cce12-source-collector-tool-use-diagnostics.md (source)
+- architecture/cce23-decision-archive.md (source)
+- architecture/cce23-source-map-drift.md (source)
+- architecture/cce32-github-pages-publish-target.md (source)
+- architecture/cce4-schema-enforcement.md (source)
+- architecture/cce6-7-8-batch.md (source)
+- architecture/engineering-docs-agent.md (source)
+- architecture/structured-docs-site-generation.md (source)
+
 ## 2026-08-10T19:17:56.705395+00:00
 - PR #207: Corrected a factual error on the docs site's architecture page describing the fact-checker's behavior. The page claimed the fact-checker "never mark[s] the run partial," but the orchestrator code contains a documented exception: a CCE-114 time-budget cut of the fact-checker loop does flip `partial`. The edit restores that parenthetical exception so the page matches the code.
 

@@ -45,6 +45,30 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+@pytest.fixture(autouse=True)
+def _pin_repo_slug(monkeypatch):
+    """Pin the repo slug every orchestrator test already assumes.
+
+    `detect_repo` prefers $GITHUB_REPOSITORY, falls back to the origin remote,
+    and only then returns the `unknown/unknown` sentinel. Host repos scaffolded
+    by `init_host` are `git init`-ed with no remote, so on a developer machine
+    the sentinel is what every computed pr_id gets — and the shared
+    `fakes_*/fake_gap_detector.json` payloads hardcode `unknown/unknown#1` to
+    match.
+
+    On GitHub Actions $GITHUB_REPOSITORY is always set, so the same code
+    produced `theoju/engineering-docs-agent#1` and every assertion keyed on a
+    computed pr_id failed in CI while passing locally. Pinning it here makes
+    the directory hermetic instead of accidentally correct, and keeps the
+    checked-in fixtures true.
+
+    Deliberately set rather than deleted: `delenv` would leave the git-remote
+    branch reachable, so a scaffolded host that ever gained an origin would
+    reintroduce exactly this bug.
+    """
+    monkeypatch.setenv("GITHUB_REPOSITORY", "unknown/unknown")
+
+
 @pytest.fixture
 def init_host(tmp_path):
     """Factory: scaffold a host repo (git init + config + seeded state) in

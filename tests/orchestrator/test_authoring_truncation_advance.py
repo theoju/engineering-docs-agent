@@ -91,7 +91,9 @@ THREE_HINTS = ["connectors/alpha.md", "connectors/beta.md", "connectors/gamma.md
 AUTHORING_TRUNCATION_CLOCK = [0, 10, 20, 150]
 
 
-def test_authoring_truncation_advances_to_cursor_not_head(tmp_path, init_host):
+def test_authoring_truncation_holds_baseline_when_every_pr_owes_pages(
+    tmp_path, init_host, read_current_run
+):
     repo = tmp_path
     state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
     base, (c1, c2, c3, c4) = _seed_window(repo, state_path, 4)
@@ -119,14 +121,25 @@ def test_authoring_truncation_advances_to_cursor_not_head(tmp_path, init_host):
     advance = written["last_successful_run"]["head_sha"]
     head = _git(repo, "rev-parse", "HEAD")
     assert head == c4
-    # THE assertion: the bug was a fall-through to head, so the negative is
-    # what discriminates. Keep it even though the positive below implies it.
+    # THE assertion, unchanged and still the discriminating one: the bug
+    # Track A fixed was a fall-through to head.
     assert advance != head, written["last_successful_run"]
-    assert advance == c3, written["last_successful_run"]
-    # A truncated run also stamps the window it covered for the CCE-43 guard.
+    # CCE-140 narrowed the cursor. The summarizer fixture is replayed per PR
+    # (orchestrator_runner.py:617) and the runner stamps the real number onto
+    # each summary (:1518), so every PR contributes to every page batch —
+    # cutting after batch 0 leaves ALL THREE PRs owing pages, the walk stops
+    # at the oldest one, and nothing may anchor the advance. Before CCE-140
+    # this asserted `advance == c3`, i.e. an advance past two PRs whose pages
+    # were never written; spec Decision 2 forbids exactly that.
+    assert advance == base, written["last_successful_run"]
+    # A truncated run still stamps the window it covered for the CCE-43 guard.
     assert written["last_successful_run"].get("window_head_sha") == c4, written[
         "last_successful_run"
     ]
+    cr = read_current_run(state_path)
+    assert any(
+        "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
 
 
 def test_authoring_truncation_without_cursor_holds_baseline(
@@ -187,10 +200,15 @@ def test_authoring_truncation_with_unresolvable_cursor_holds_baseline(
     advance = written["last_successful_run"]["head_sha"]
     assert advance != head, written["last_successful_run"]
     assert advance == "old_sha_000", written["last_successful_run"]
+    # CCE-140: the cursor walk now empties before any sha is rev-parsed (all
+    # three PRs owe pages), so the run refuses at the no_cursor branch rather
+    # than at out_of_window. The baseline outcome — held, not advanced — is
+    # identical, which is what this test exists to pin. The out_of_window
+    # branch stays covered from the ADMISSION path by
+    # tests/orchestrator/test_time_budget.py.
     cr = read_current_run(state_path)
     assert any(
-        "time_budget_advance_out_of_window" in r and "unresolvable" in r
-        for r in cr["partial_reasons"]
+        "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]
     ), cr["partial_reasons"]
 
 
@@ -221,7 +239,11 @@ def test_authoring_truncation_never_reports_unanchored_deferred(
     written = json.loads(state_path.read_text())
     advance = written["last_successful_run"]["head_sha"]
     assert advance != c4, written["last_successful_run"]
-    assert advance == c3, written["last_successful_run"]
+    # CCE-140: all three PRs owe pages, so the walk stops at PR #1 and the
+    # baseline holds. The point of the test is unchanged and is the assertion
+    # below: `unanchored_deferred` must stay silent on the authoring path,
+    # because `admission_deferred` is empty when the admission gate completed.
+    assert advance == base, written["last_successful_run"]
     cr = read_current_run(state_path)
     assert not any(
         "time_budget_no_advance_unanchored_deferred" in r for r in cr["partial_reasons"]

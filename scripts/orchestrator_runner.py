@@ -418,6 +418,40 @@ def _last_processed_merge_sha(admitted_prs: list[dict]) -> str | None:
     return None
 
 
+def advance_cursor_list(
+    admitted: list[dict],
+    deferred_tail: list[dict],
+    *,
+    held_back: set,
+) -> list[dict]:
+    """Return the PR list whose newest merge_sha may anchor the advance.
+
+    CCE-140. ``admitted`` is the oldest-first prefix this run processed;
+    ``deferred_tail`` is the oldest-first remainder the admission gate never
+    reached. Walk both in window order and stop at the first PR number in
+    ``held_back``.
+
+    The CCE-109 cursor is a PREFIX boundary: advancing the baseline to PR k's
+    merge sha declares every PR at index <= k done. So the walk must stop at
+    the OLDEST unfinished PR, never merely exclude it — advancing past it
+    would strand it outside every future window, and nothing ever
+    re-collects it.
+
+    ``held_back`` carries PRs this run did not finish (admission-deferred or
+    authoring-deferred) MINUS the ones forgiven by the CCE-140 deferral-skip
+    hatch. Forgiveness is what lets the walk continue into ``deferred_tail``.
+
+    With ``held_back`` empty and an empty tail this is the identity on
+    ``admitted`` — the pre-CCE-140 behaviour.
+    """
+    out: list[dict] = []
+    for pr in list(admitted) + list(deferred_tail):
+        if pr.get("number") in held_back:
+            break
+        out.append(pr)
+    return out
+
+
 def _git_is_ancestor(repo_root: Path, anc: str, desc: str) -> bool | None:
     """``git merge-base --is-ancestor`` as a tri-state: True/False, or None
     when the relation is unverifiable (bad object, no git, other git error).
@@ -1472,7 +1506,13 @@ def run(
             except (KeyError, OSError):
                 available_sections_by_lens[_ln] = []
         time_truncated = False
-        deferred_unanchored = False
+        # CCE-140: the full window, oldest-first, before admission truncation.
+        # Deferral counting is keyed to the window a run actually saw.
+        window_prs = list(prs)
+        # PRs the admission gate never reached (oldest-first), and the pages
+        # an admitted PR still owes because the authoring loop was cut.
+        admission_deferred: list[dict] = []
+        deferred_pages_by_pr: dict[int, list[str]] = {}
         for i, pr in enumerate(prs):
             if deadline is not None and i > 0 and clock() > deadline:
                 add_partial(
@@ -1483,10 +1523,11 @@ def run(
                 )
                 # A deferred PR without a merge_sha can't be re-anchored by the
                 # next window — advancing past it would lose it forever, so the
-                # advance block below must refuse when any exist.
-                deferred_unanchored = any(
-                    not (p.get("merge_sha") or "").strip() for p in prs[i:]
-                )
+                # advance block below must refuse when any exist. CCE-140 moves
+                # that test into the advance block so it can be evaluated over
+                # the STILL-deferred set (a PR forgiven by the deferral-skip
+                # hatch is deliberately being lost and must not block).
+                admission_deferred = prs[i:]
                 prs = prs[:i]
                 time_truncated = True
                 break
@@ -1573,6 +1614,20 @@ def run(
                 # this the advance block below falls through to
                 # current_run.head_sha and the run persists a baseline
                 # covering PRs whose pages it never wrote.
+                #
+                # CCE-140: an admitted PR whose page batch was never written
+                # is NOT done. Record which pages it still owes so the advance
+                # block can hold it out of the cursor prefix (spec Decision 2:
+                # "the baseline advances only to the last PR whose pages all
+                # landed") and so a skip record can name the page.
+                for _dkey, _dbatch in list(per_target.items())[i:]:
+                    for _ds in _dbatch:
+                        _dn = _ds.get("pr_number")
+                        if _dn is None:
+                            continue
+                        deferred_pages_by_pr.setdefault(_dn, []).append(
+                            f"{_dkey[0]}/{_dkey[1]}"
+                        )
                 time_truncated = True
                 break
             try:
@@ -1980,8 +2035,30 @@ def run(
             # past an unanchorable deferred PR, and persist only the canonical
             # full SHA. Every refusal keeps the baseline — partial, retried
             # next run, but no silent regression and no lost PR.
+            skipped_numbers: set = set()
             advance_sha = prior_baseline_sha
-            cursor = _last_processed_merge_sha(prs)
+            # CCE-140: hold every PR this run did not finish out of the cursor
+            # prefix. `skipped_numbers` is populated in the deferral-skip block
+            # below; on a run with no skips it is empty and `held_back` is
+            # exactly "everything unfinished".
+            held_back = (
+                set(deferred_pages_by_pr)
+                | {p.get("number") for p in admission_deferred}
+            ) - skipped_numbers
+            still_deferred = [
+                p
+                for p in list(admission_deferred)
+                + [
+                    pr_by_number[n]
+                    for n in sorted(deferred_pages_by_pr)
+                    if n in pr_by_number
+                ]
+                if p.get("number") in held_back
+            ]
+            cursor_prs = advance_cursor_list(
+                prs, admission_deferred, held_back=held_back
+            )
+            cursor = _last_processed_merge_sha(cursor_prs)
             window = f"{(prior_baseline_sha or '(root)')[:8]}..{head_sha[:8]}"
             full_cursor = _rev_parse_commit(repo_root, cursor) if cursor else None
             if cursor is None:
@@ -1990,7 +2067,7 @@ def run(
                     "time_budget_no_advance_no_cursor: truncated run had no "
                     "admitted PR with a usable merge_sha; baseline unchanged",
                 )
-            elif deferred_unanchored:
+            elif any(not (p.get("merge_sha") or "").strip() for p in still_deferred):
                 add_partial(
                     state,
                     f"time_budget_no_advance_unanchored_deferred: a deferred "

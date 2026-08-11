@@ -78,3 +78,28 @@ def test_cursor_list_does_not_walk_the_tail_when_an_admitted_pr_is_held_back():
 
 def test_cursor_list_empty_inputs():
     assert orun.advance_cursor_list([], [], held_back=set()) == []
+
+
+# ---------------------------------------------------------------------------
+# resolve_deferral_threshold
+# ---------------------------------------------------------------------------
+
+
+def test_threshold_defaults_to_three():
+    assert orun.DEFAULT_DEFERRAL_SKIP_THRESHOLD == 3
+    assert orun.resolve_deferral_threshold({}) == 3
+    assert orun.resolve_deferral_threshold({"run": {}}) == 3
+
+
+def test_threshold_reads_the_config_key():
+    assert orun.resolve_deferral_threshold({"run": {"deferral_skip_threshold": 5}}) == 5
+
+
+def test_threshold_zero_disables_skipping():
+    assert orun.resolve_deferral_threshold({"run": {"deferral_skip_threshold": 0}}) == 0
+
+
+def test_threshold_tolerates_a_malformed_run_block():
+    """Same posture as resolve_merge_settings: a non-dict block falls back to
+    the default rather than raising inside run()."""
+    assert orun.resolve_deferral_threshold({"run": "nope"}) == 3

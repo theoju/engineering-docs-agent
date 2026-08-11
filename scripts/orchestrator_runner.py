@@ -310,6 +310,8 @@ def _summarize_tool_use(events: list[dict]) -> dict:
 
 DEFAULT_TIME_BUDGET_SECONDS = 2700  # 45 min; below the 60-min job hard limit
 
+DEFAULT_DEFERRAL_SKIP_THRESHOLD = 3
+
 DEFAULT_MERGE_POLICY = "auto"
 DEFAULT_CHECKS_GRACE_SECONDS = 120
 DEFAULT_CHECKS_TIMEOUT_SECONDS = 900
@@ -356,6 +358,23 @@ def resolve_time_budget(config: dict, cli_override: int | None) -> int:
     val = run_cfg.get("time_budget_seconds")
     if val is None:
         return DEFAULT_TIME_BUDGET_SECONDS
+    return int(val)
+
+
+def resolve_deferral_threshold(config: dict) -> int:
+    """Resolve `run.deferral_skip_threshold` (CCE-140).
+
+    Absent `run:` block, a malformed (non-dict) block, or an absent key all
+    resolve to DEFAULT_DEFERRAL_SKIP_THRESHOLD (3) — same default-ON posture
+    as `resolve_merge_settings`, so an existing host gains the skip hatch with
+    no config edit. A value <= 0 disables skipping.
+    """
+    run_cfg = config.get("run")
+    if not isinstance(run_cfg, dict):
+        run_cfg = {}
+    val = run_cfg.get("deferral_skip_threshold")
+    if val is None:
+        return DEFAULT_DEFERRAL_SKIP_THRESHOLD
     return int(val)
 
 

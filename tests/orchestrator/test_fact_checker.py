@@ -379,3 +379,58 @@ def test_run_threads_fact_warnings_to_pr_and_digest(init_host, tmp_path, monkeyp
     assert len(seen_pr["fact_warnings"]) == 1
     assert "page says X but code does Y" in seen_pr["fact_warnings"][0]
     assert seen_notifier["digest"]["fact_check_warnings"] == seen_pr["fact_warnings"]
+
+
+# ---------------------------------------------------------------------------
+# CCE-140: the demotion's two surviving surfaces
+# ---------------------------------------------------------------------------
+
+
+def test_fact_warnings_still_reach_the_pr_body_after_the_gate_demotion():
+    """CCE-140: with the merge gate gone, the PR body is one of the two
+    places a contradiction warning survives. Pin it."""
+    import orchestrator_runner as orun
+
+    body = orun._compose_pr_body(
+        changed_files=["docs/site-src/core/a.md"],
+        lens_paths={"core": "docs/site-src/core"},
+        partial=True,
+        partial_reasons=["time_budget_exceeded: authored 1/3 page batches"],
+        baseline_sha="a" * 40,
+        current_sha="b" * 40,
+        fact_warnings=["`core/a.md`: contradicts source"],
+    )
+    assert "**Factual-accuracy warnings:**" in body
+    assert "`core/a.md`: contradicts source" in body
+
+
+def test_fact_warnings_still_reach_the_notifier_digest(tmp_path, monkeypatch, init_host):
+    """CCE-140: the notification is the other surviving surface. Capture the
+    digest handed to the notifier dispatch and assert the key is populated."""
+    import orchestrator_runner as orun
+
+    init_host({"version": "1", "dismissed_gap_flags": {}, "cursors": {}})
+    seen: dict = {}
+    real_dispatch = orun.dispatch_validated
+
+    def spy(name, inputs, **kw):
+        if name == "notifier":
+            seen["digest"] = json.loads(json.dumps(inputs["digest"]))
+        return real_dispatch(name, inputs, **kw)
+
+    monkeypatch.setattr(orun, "dispatch_validated", spy)
+    monkeypatch.setattr(orun, "open_or_append_pr", lambda *a, **kw: (99, []))
+
+    class _NoopGh:
+        def __init__(self, *a, **kw):
+            pass
+
+    monkeypatch.setattr(orun, "GhClient", _NoopGh)
+    monkeypatch.setattr(
+        orun,
+        "_maybe_auto_merge",
+        lambda *a, **kw: ({"merged": False, "reason": "policy_manual"}, []),
+    )
+    rc = orun.run(tmp_path, dry_run_dir=Path(__file__).parent / "fakes", no_pr=False)
+    assert rc == 0
+    assert "fact_check_warnings" in seen["digest"]

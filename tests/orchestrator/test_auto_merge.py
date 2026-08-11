@@ -145,6 +145,19 @@ def test_fact_warnings_never_gate_the_merge():
     assert not any("fact_check_warnings" in r for r, _ in reasons)
 
 
+def test_fact_warnings_do_not_gate_a_cursor_backed_partial_either():
+    """The two relaxations compose: warnings + partial + a cursor still
+    merges."""
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
+    outcome, _ = _run(
+        gh,
+        partial=True,
+        advance_cursor_backed=True,
+        fact_warnings=["a.md: contradicts source", "b.md: contradicts source"],
+    )
+    assert outcome["merged"] is True
+
+
 def test_human_edited_pr_is_never_merged():
     gh = FakeGhClient(
         pr_view_commits=GhResult(

@@ -301,13 +301,21 @@ def test_a_deferred_pr_accumulates_a_count(tmp_path, init_host):
     assert written["last_successful_run"]["head_sha"] == c2
 
 
-def test_a_pr_at_the_threshold_is_skipped_and_recorded(tmp_path, init_host):
+def test_a_pr_at_the_threshold_is_skipped_and_recorded(
+    tmp_path, init_host, monkeypatch
+):
     """Seed the count at 3, so THIS run is the fourth. The cursor walks past
-    PR 3 to the window HEAD, a skipped_prs entry lands, and a NON-info_only
-    partial reason names the PR."""
+    PR 3, a skipped_prs entry lands, and a NON-info_only partial reason names
+    the PR.
+
+    The window carries a fourth, non-PR commit so that walking to c3 is a
+    statement about the cursor rather than about HEAD: with only three
+    commits, `advance == c3` and `advance == head` are the same assertion and
+    would hold even if forgiveness never ran.
+    """
     repo = tmp_path
     state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
-    _base, (c1, c2, c3) = _seed_window(repo, state_path)
+    _base, (c1, c2, c3, c4) = _seed_window(repo, state_path, 4)
     state_path.write_text(
         json.dumps(
             {
@@ -322,6 +330,20 @@ def test_a_pr_at_the_threshold_is_skipped_and_recorded(tmp_path, init_host):
         tmp_path.parent / f"fakes_cce140_skip_{tmp_path.name}",
         _window_prs(c1, c2, c3),
     )
+    # Spy on the kwarg, because neither surface downstream of it can carry the
+    # claim: `current_run.partial` was already flipped True by the admission
+    # truncation several steps earlier, and the run's exit summary re-prints
+    # every reason under a PARTIAL prefix regardless of how it was recorded.
+    # Both read identical whether the skip is info_only or not (verified by
+    # mutation -- forcing info_only=True left both green).
+    _real_add_partial = orun.add_partial
+    seen: list[tuple[str, bool]] = []
+
+    def _spy(state, reason, *, info_only=False):
+        seen.append((reason, info_only))
+        return _real_add_partial(state, reason, info_only=info_only)
+
+    monkeypatch.setattr(orun, "add_partial", _spy)
     rc = orun.run(
         repo,
         dry_run_dir=fakes,
@@ -331,8 +353,10 @@ def test_a_pr_at_the_threshold_is_skipped_and_recorded(tmp_path, init_host):
     )
     assert rc == 0
     written = json.loads(state_path.read_text())
-    # The cursor forgives PR 3 and walks into the deferred tail.
+    # The cursor forgives PR 3 and walks into the deferred tail -- but only as
+    # far as PR 3's merge, never to HEAD.
     assert written["last_successful_run"]["head_sha"] == c3, written
+    assert written["last_successful_run"]["head_sha"] != c4, written
     entries = written["skipped_prs"]
     assert [e["pr"] for e in entries] == ["unknown/unknown#3"]
     assert entries[0]["deferrals"] == 3
@@ -343,9 +367,11 @@ def test_a_pr_at_the_threshold_is_skipped_and_recorded(tmp_path, init_host):
     reason = [r for r in cr["partial_reasons"] if r.startswith("deferral_skip:")]
     assert len(reason) == 1, cr["partial_reasons"]
     assert "unknown/unknown#3" in reason[0]
-    assert cr["partial"] is True, (
+    recorded = [(r, i) for r, i in seen if r.startswith("deferral_skip:")]
+    assert len(recorded) == 1, seen
+    assert recorded[0][1] is False, (
         "the skip reason must NOT be info_only -- it is a recorded content "
-        "loss and it has to reach the notifier digest"
+        f"loss and it has to reach the notifier digest: {recorded[0]}"
     )
 
 
@@ -614,6 +640,6 @@ def test_no_skip_is_recorded_for_a_pr_the_cursor_never_crosses(tmp_path, init_ho
         f"it, so nothing was abandoned and nothing may be recorded: {written}"
     )
     cr = _read_current_run(state_path)
-    assert not [r for r in cr["partial_reasons"] if r.startswith("deferral_skip:")], (
-        cr["partial_reasons"]
-    )
+    assert not [r for r in cr["partial_reasons"] if r.startswith("deferral_skip:")], cr[
+        "partial_reasons"
+    ]

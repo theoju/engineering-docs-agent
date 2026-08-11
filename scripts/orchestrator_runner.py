@@ -2180,6 +2180,8 @@ def run(
             ci_provider=config.get("publishing", {}).get("ci_provider"),
             deadline=deadline,
             clock=clock,
+            advance_cursor_backed=advance_cursor_backed,
+            partial_reasons=tuple(state["current_run"]["partial_reasons"]),
         )
         for reason, info_only in merge_reasons:
             add_partial(state, reason, info_only=info_only)
@@ -2910,6 +2912,28 @@ def _auto_close_superseded_docs_agent_prs(
     return reasons
 
 
+# CCE-140: partial reasons that veto auto-merge even on a cursor-backed
+# advance. The cursor proves the BASELINE is honest; it says nothing about
+# whether this PR is safe to land. `app_token_unavailable` is recorded as a
+# blocking reason at :1377 for exactly this purpose (README §nightly): a PR
+# built on the fallback GITHUB_TOKEN never fires host CI, so `gh pr checks`
+# returns [] and the zero-checks branch below would read that as green.
+# Match is by prefix, against the reason string as stored in state.
+#
+# `deferral_skip:` is deliberately NOT here — a skip only happens on a
+# truncated run and only takes effect if that run merges.
+_MERGE_VETO_REASON_PREFIXES: tuple[str, ...] = ("app_token_unavailable",)
+
+
+def merge_veto_reason(partial_reasons) -> str | None:
+    """Return the first veto prefix present in ``partial_reasons``, else None."""
+    for reason in partial_reasons or ():
+        for prefix in _MERGE_VETO_REASON_PREFIXES:
+            if reason.startswith(prefix):
+                return prefix
+    return None
+
+
 def _maybe_auto_merge(
     gh: "GhClient",
     *,
@@ -2924,14 +2948,30 @@ def _maybe_auto_merge(
     sleep: Callable[[float], None] = time.sleep,
     bot_author_names: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_NAMES,
     bot_author_emails: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_EMAILS,
+    advance_cursor_backed: bool = False,
+    partial_reasons: tuple[str, ...] = (),
 ) -> tuple[dict, list[tuple[str, bool]]]:
     """CCE-101: squash-merge the docs-agent PR when the run earned it.
 
-    Eligibility (cheapest first): policy auto → non-partial → zero
-    fact-checker warnings → no human commits on the PR → enough CCE-109
-    budget left to wait out the check-grace window. Then a bounded poll
-    of `gh pr checks`; zero registered checks after the grace window
-    means a no-App-token host (the in-run validation is the gate there).
+    Eligibility (cheapest first): policy auto → no vetoing partial reason →
+    non-partial OR a cursor-backed advance → no human commits on the PR →
+    enough CCE-109 budget left to wait out the check-grace window. Then a
+    bounded poll of `gh pr checks`; zero registered checks after the grace
+    window means a no-App-token host (the in-run validation is the gate
+    there).
+
+    CCE-140: `partial` alone no longer blocks. Every run this pipeline has
+    ever produced is partial, so the unconditional block meant the auto-merge
+    path never once fired on the flagship host and ten PRs were merged by
+    hand until the human stopped. `advance_cursor_backed` is the replacement
+    invariant: True only when advance_sha was assigned from a cursor that
+    passed `_sha_in_window`, i.e. the baseline moves by exactly the PRs whose
+    pages all landed.
+
+    Fact-checker warnings are NOT an eligibility input (CCE-140 / spec
+    Decision 4). They ride the PR body, the digest, and the notification.
+    `fact_warnings` is retained in the signature only so the caller's kwargs
+    and the digest composition need no change.
 
     Returns (merge_outcome, reasons): merge_outcome is the digest's
     ``{"merged": bool, "reason": str | None}``; reasons feed the caller's
@@ -2949,10 +2989,17 @@ def _maybe_auto_merge(
         # The configured normal path for a manual host — no reason entry,
         # the digest's merge_outcome line carries it.
         return {"merged": False, "reason": "policy_manual"}, []
-    if partial:
+    veto = merge_veto_reason(partial_reasons)
+    if veto:
+        return skip("merge_vetoed", veto)
+    if partial and not advance_cursor_backed:
+        # CCE-140 / spec Decision 2. A partial run whose advance came from the
+        # CCE-109 cursor has, by construction, advanced only past PRs whose
+        # pages all landed; its reverted pages stay in-window and are
+        # re-authored next run. A partial run that would advance to FULL HEAD
+        # has not — merging it promotes the baseline past work that was never
+        # authored, which is the silent-loss bug, automated nightly.
         return skip("partial_run")
-    if fact_warnings:
-        return skip("fact_check_warnings", f"{len(fact_warnings)} warning(s)")
 
     # Human-edit guard (same authority as D2 auto-close): run it on both
     # PR paths — on a fresh PR every commit is the bot's, so the extra

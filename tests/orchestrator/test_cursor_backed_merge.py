@@ -103,3 +103,63 @@ def test_truncated_run_with_a_real_cursor_reports_cursor_backed(tmp_path, init_h
     assert advance == c2, written["last_successful_run"]
     assert advance != c3, "cursor-backed advance must not reach full HEAD"
     assert runner._LAST_ADVANCE_CURSOR_BACKED is True
+
+
+def test_lint_block_partial_run_does_not_auto_merge_end_to_end(
+    tmp_path, monkeypatch, init_host
+):
+    """Wired, not mocked at the gate: a lint-block partial run opens its PR
+    and leaves it open. The FakeGhClient call log is the assertion -- no
+    pr_merge, ever."""
+    from gh_client import FakeGhClient, GhResult
+
+    init_host({"version": "1", "dismissed_gap_flags": {}, "cursors": {}})
+    config_path = tmp_path / ".engineering-docs-agent" / "config.yml"
+    config_path.write_text(
+        config_path.read_text()
+        + "\nmerge:\n  policy: auto\n  checks_grace_seconds: 0\n"
+        + "  checks_timeout_seconds: 0\n"
+    )
+    fake = None
+
+    def _fake_factory(repo_root):
+        nonlocal fake
+        fake = FakeGhClient(
+            pr_create=GhResult(ok=True, value=12),
+            pr_view_commits=GhResult(
+                ok=True,
+                value=[
+                    {
+                        "authors": [
+                            {
+                                "name": "engineering-docs-agent[bot]",
+                                "login": "engineering-docs-agent-bot",
+                                "email": (
+                                    "engineering-docs-agent@users.noreply."
+                                    "github.com"
+                                ),
+                            }
+                        ]
+                    }
+                ],
+            ),
+            pr_checks=GhResult(ok=True, value=[]),
+        )
+        return fake
+
+    monkeypatch.setattr(runner, "GhClient", _fake_factory)
+    real_run = runner.subprocess.run
+
+    def selective(cmd, *a, **kw):
+        if isinstance(cmd, list) and cmd[:2] == ["git", "-C"] and "push" in cmd:
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(runner.subprocess, "run", selective)
+
+    rc = runner.run(tmp_path, dry_run_dir=FAKES_BLOCK, no_pr=False)
+    assert rc == 0
+    # The run must actually have reached the gate; otherwise the negative
+    # assertion below is vacuous. `pr_create` proves the PR path ran.
+    assert [c for c in fake.calls if c[0] == "pr_create"], fake.calls
+    assert not [c for c in fake.calls if c[0] == "pr_merge"], fake.calls

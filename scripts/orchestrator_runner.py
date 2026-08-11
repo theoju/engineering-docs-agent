@@ -477,6 +477,79 @@ def advance_cursor_list(
     return out
 
 
+def deferral_key(repo: dict, pr_number) -> str:
+    """`{owner}/{name}#{pr}` — one PR-identity shape across state.json.
+
+    Same string the gap-detector builds for `pr_id`, and the same key shape
+    `dismissed_gap_flags` uses, so an operator reading state.json sees one
+    vocabulary.
+    """
+    return f"{repo['owner']}/{repo['name']}#{pr_number}"
+
+
+def partition_deferrals(
+    deferred: list[dict],
+    *,
+    counts: dict,
+    repo: dict,
+    threshold: int,
+) -> tuple[list[dict], list[dict]]:
+    """Split this run's deferred PRs into ``(skipped_now, still_deferred)``.
+
+    CCE-140 / spec Decision 3: "Skip after 3 consecutive deferrals, record
+    every skip durably, and enable notifications. A loud, recorded loss beats
+    an indefinite silent stall."
+
+    ``counts`` is the PRIOR consecutive-deferral map, so a PR whose stored
+    count already equals ``threshold`` has been deferred on that many runs and
+    this run is the (threshold+1)-th — the one that abandons it. ``threshold``
+    <= 0 disables skipping entirely and every deferred PR stays deferred.
+
+    Order-independent: the prefix-boundary invariant is enforced structurally
+    by ``advance_cursor_list``, not here.
+    """
+    if threshold <= 0:
+        return [], list(deferred)
+    skipped: list[dict] = []
+    still: list[dict] = []
+    for pr in deferred:
+        if int(counts.get(deferral_key(repo, pr.get("number")), 0)) >= threshold:
+            skipped.append(pr)
+        else:
+            still.append(pr)
+    return skipped, still
+
+
+def next_deferral_counts(
+    counts: dict,
+    *,
+    repo: dict,
+    window_pr_numbers: set,
+    still_deferred_numbers: set,
+) -> dict:
+    """Return the next persistent consecutive-deferral map (never mutates
+    ``counts``).
+
+    - in this window AND still deferred → count + 1
+    - in this window and NOT still deferred → entry dropped. Covers both the
+      processed case and the skipped case; "consecutive" means consecutive, so
+      an intermittently-slow PR never accumulates toward a skip.
+    - not in this window at all → carried forward unchanged. A window can
+      shrink transiently when the source-collector degrades, and absence is
+      not evidence a PR was processed. Growth is bounded because a PR leaves
+      the window only once the baseline passes it, which requires it to be in
+      the cursor prefix, which requires it not to be deferred.
+    """
+    out = dict(counts)
+    for n in window_pr_numbers:
+        k = deferral_key(repo, n)
+        if n in still_deferred_numbers:
+            out[k] = int(out.get(k, 0)) + 1
+        else:
+            out.pop(k, None)
+    return out
+
+
 def _git_is_ancestor(repo_root: Path, anc: str, desc: str) -> bool | None:
     """``git merge-base --is-ancestor`` as a tri-state: True/False, or None
     when the relation is unverifiable (bad object, no git, other git error).

@@ -103,3 +103,111 @@ def test_threshold_tolerates_a_malformed_run_block():
     """Same posture as resolve_merge_settings: a non-dict block falls back to
     the default rather than raising inside run()."""
     assert orun.resolve_deferral_threshold({"run": "nope"}) == 3
+
+
+# ---------------------------------------------------------------------------
+# deferral_key / partition_deferrals / next_deferral_counts
+# ---------------------------------------------------------------------------
+
+_REPO = {"owner": "o", "name": "r"}
+
+
+def test_deferral_key_matches_the_dismissed_gap_flags_shape():
+    """One key shape across the whole state file. The runner already builds
+    this string for gap-detector pr_ids at orchestrator_runner.py:1901."""
+    assert orun.deferral_key(_REPO, 5) == "o/r#5"
+
+
+def test_partition_leaves_an_under_threshold_pr_deferred():
+    skipped, still = orun.partition_deferrals(
+        [_pr(5, "e")], counts={"o/r#5": 2}, repo=_REPO, threshold=3
+    )
+    assert skipped == []
+    assert [p["number"] for p in still] == [5]
+
+
+def test_partition_skips_a_pr_that_has_already_hit_the_threshold():
+    """'3 consecutive deferrals -> skipped on the 4th': the count reaching 3
+    is what THIS run reads, so this run is the fourth."""
+    skipped, still = orun.partition_deferrals(
+        [_pr(5, "e")], counts={"o/r#5": 3}, repo=_REPO, threshold=3
+    )
+    assert [p["number"] for p in skipped] == [5]
+    assert still == []
+
+
+def test_partition_skips_above_the_threshold_too():
+    skipped, _ = orun.partition_deferrals(
+        [_pr(5, "e")], counts={"o/r#5": 9}, repo=_REPO, threshold=3
+    )
+    assert [p["number"] for p in skipped] == [5]
+
+
+def test_partition_treats_an_unseen_pr_as_count_zero():
+    skipped, still = orun.partition_deferrals(
+        [_pr(5, "e")], counts={}, repo=_REPO, threshold=3
+    )
+    assert skipped == []
+    assert [p["number"] for p in still] == [5]
+
+
+def test_threshold_zero_never_skips():
+    skipped, still = orun.partition_deferrals(
+        [_pr(5, "e")], counts={"o/r#5": 99}, repo=_REPO, threshold=0
+    )
+    assert skipped == []
+    assert [p["number"] for p in still] == [5]
+
+
+def test_counts_increment_for_a_still_deferred_pr():
+    out = orun.next_deferral_counts(
+        {"o/r#5": 1},
+        repo=_REPO,
+        window_pr_numbers={5, 6},
+        still_deferred_numbers={5},
+    )
+    assert out["o/r#5"] == 2
+
+
+def test_counts_reset_when_a_pr_is_processed():
+    """'Consecutive' means consecutive: a PR that got processed this run
+    loses its history, so an intermittently-slow PR is never skipped."""
+    out = orun.next_deferral_counts(
+        {"o/r#5": 2},
+        repo=_REPO,
+        window_pr_numbers={5},
+        still_deferred_numbers=set(),
+    )
+    assert "o/r#5" not in out
+
+
+def test_counts_drop_a_skipped_pr():
+    """A skipped PR is in the window and not still-deferred, so the same
+    reset rule drops it — and it never returns to any window."""
+    out = orun.next_deferral_counts(
+        {"o/r#4": 3},
+        repo=_REPO,
+        window_pr_numbers={4},
+        still_deferred_numbers=set(),
+    )
+    assert "o/r#4" not in out
+
+
+def test_counts_carry_forward_a_pr_absent_from_this_window():
+    """A window can shrink transiently when the source-collector degrades.
+    Absence is not evidence the PR was processed, so its history survives."""
+    out = orun.next_deferral_counts(
+        {"o/r#9": 2},
+        repo=_REPO,
+        window_pr_numbers={5},
+        still_deferred_numbers=set(),
+    )
+    assert out["o/r#9"] == 2
+
+
+def test_counts_do_not_mutate_the_input():
+    counts = {"o/r#5": 1}
+    orun.next_deferral_counts(
+        counts, repo=_REPO, window_pr_numbers={5}, still_deferred_numbers={5}
+    )
+    assert counts == {"o/r#5": 1}

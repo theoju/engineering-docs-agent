@@ -258,6 +258,31 @@ def add_partial(state: dict, reason: str, *, info_only: bool = False) -> None:
     emit_stderr(safe_reason, info_only=info_only)
 
 
+def merge_skipped_pr_records(state: dict, records: list[dict]) -> None:
+    """Append CCE-140 skip records to the durable ``skipped_prs`` list.
+
+    The single writer of that key, mirroring ``add_partial``'s ownership of
+    ``partial_reasons``. Contract:
+
+    - Append-only. A record is never removed and never rewritten; the list is
+      the pipeline's permanent account of content it chose to abandon.
+    - Idempotent per PR. Identity is the ``pr`` field (``{owner}/{name}#{pr}``),
+      so a retry inside one run cannot double-record.
+    - Never seeds the key. An empty ``records`` leaves ``state`` untouched, so
+      a host that has never skipped keeps a state.json byte-identical to its
+      pre-CCE-140 content and the absent key reads as ``[]`` everywhere.
+    """
+    if not records:
+        return
+    existing = state.setdefault("skipped_prs", [])
+    seen = {e.get("pr") for e in existing}
+    for rec in records:
+        if rec.get("pr") in seen:
+            continue
+        existing.append(rec)
+        seen.add(rec.get("pr"))
+
+
 def cleanup_empty_parents(path: Path, *, until: Path) -> None:
     """Walk up from path.parent removing empty dirs; stop at `until` (exclusive)."""
     until_resolved = until.resolve()

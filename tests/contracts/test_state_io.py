@@ -389,3 +389,54 @@ def test_save_persistent_state_round_trips_the_cce140_keys(tmp_path):
     assert "current_run" not in written
     assert written["deferral_counts"] == {"o/r#5": 2}
     assert written["skipped_prs"][0]["pr"] == "o/r#4"
+
+
+def test_merge_skipped_pr_records_creates_the_key_only_when_there_is_a_record():
+    from state_io import merge_skipped_pr_records
+
+    state = {"version": "1"}
+    merge_skipped_pr_records(state, [])
+    assert "skipped_prs" not in state, (
+        "an empty append must leave a quiescent host's state.json byte-"
+        "identical to today's"
+    )
+    merge_skipped_pr_records(
+        state,
+        [
+            {
+                "pr": "o/r#4",
+                "url": "https://github.com/o/r/pull/4",
+                "pages": ["core/a.md"],
+                "deferrals": 3,
+                "skipped_at": "2026-08-11T03:00:00+00:00",
+            }
+        ],
+    )
+    assert [e["pr"] for e in state["skipped_prs"]] == ["o/r#4"]
+
+
+def test_merge_skipped_pr_records_appends_and_never_rewrites_history():
+    from state_io import merge_skipped_pr_records
+
+    state = {
+        "version": "1",
+        "skipped_prs": [
+            {"pr": "o/r#1", "deferrals": 3, "skipped_at": "2026-08-01T00:00:00+00:00"}
+        ],
+    }
+    merge_skipped_pr_records(
+        state,
+        [{"pr": "o/r#4", "deferrals": 3, "skipped_at": "2026-08-11T03:00:00+00:00"}],
+    )
+    assert [e["pr"] for e in state["skipped_prs"]] == ["o/r#1", "o/r#4"]
+
+
+def test_merge_skipped_pr_records_is_idempotent_per_pr():
+    """A retry inside one run must not double-record. Identity is the pr key."""
+    from state_io import merge_skipped_pr_records
+
+    state = {"version": "1"}
+    rec = {"pr": "o/r#4", "deferrals": 3, "skipped_at": "2026-08-11T03:00:00+00:00"}
+    merge_skipped_pr_records(state, [rec])
+    merge_skipped_pr_records(state, [rec])
+    assert len(state["skipped_prs"]) == 1

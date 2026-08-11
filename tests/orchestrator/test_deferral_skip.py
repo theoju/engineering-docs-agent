@@ -729,3 +729,55 @@ def test_the_baseline_stops_at_the_last_pr_whose_pages_all_landed(tmp_path, init
         "either strands it below the baseline forever"
     )
     assert orun._LAST_ADVANCE_CURSOR_BACKED is True
+
+
+def test_a_fully_forgiven_window_may_be_cursor_backed_at_head(tmp_path, init_host):
+    """`advance_cursor_backed` is not a synonym for "advance stayed below
+    HEAD", and a future reader must not "fix" it into one.
+
+    When every deferred PR has been forgiven by the skip hatch, the walk
+    covers the whole window and the cursor lands on HEAD itself -- so a
+    cursor-backed advance and a full-HEAD advance coincide, which reads at a
+    glance like the exact leak the CCE-140 gate exists to stop. It is not: the
+    forgiven PRs are in `skipped_prs` and named in a non-info partial reason,
+    so nothing the baseline crossed is unaccounted for. The invariant is "the
+    baseline moved only past PRs that landed or were deliberately abandoned",
+    not "the baseline stayed below HEAD" -- and this run is therefore
+    legitimately eligible to merge.
+
+    Deliberately seeds a THREE-commit window (no trailing c4) so cursor and
+    HEAD are the same sha. Every other test in this file avoids that on
+    purpose; this one is where it is the point.
+    """
+    repo = tmp_path
+    state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
+    base, (c1, c2, c3) = _seed_window(repo, state_path, 3)
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "last_successful_run": {"head_sha": base},
+                "deferral_counts": {"unknown/unknown#3": 3},
+            }
+        )
+    )
+    fakes = _fakes_with_prs(
+        FAKES_MULTI,
+        tmp_path.parent / f"fakes_cce140_forgiven_{tmp_path.name}",
+        _window_prs(c1, c2, c3),
+    )
+    rc = orun.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=_fake_clock([0, 50, 150]),  # admit 2 of 3, defer PR 3
+    )
+    assert rc == 0
+    written = json.loads(state_path.read_text())
+    head = _git(repo, "rev-parse", "HEAD")
+    assert head == c3, "fixture precondition: the newest PR merge IS HEAD here"
+    assert written["last_successful_run"]["head_sha"] == head, written
+    assert orun._LAST_ADVANCE_CURSOR_BACKED is True
+    # What makes it honest rather than a leak.
+    assert [e["pr"] for e in written["skipped_prs"]] == ["unknown/unknown#3"]

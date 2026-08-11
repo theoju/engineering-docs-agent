@@ -1981,10 +1981,18 @@ def run(
             for i, page in enumerate(fact_pages):
                 # CCE-114: advisory layer — skip the remaining pages outright
                 # once the deadline passes (no at-least-one guarantee; every
-                # post-deadline second risks the hard kill). The reason is
-                # deliberately NOT info-only: pages that were never
-                # fact-checked must not auto-merge, and the CCE-101 gate
-                # keys off `partial`.
+                # post-deadline second risks the hard kill). The reason stays
+                # NOT info-only, but CCE-140 changed what that buys: it no
+                # longer implies "must not auto-merge". `partial` alone stops
+                # blocking the merge, and CCE-140 Decision 4 makes the
+                # fact-checker non-gating in both directions — its warnings
+                # do not block a merge, so its ABSENCE cannot either. What
+                # the non-info flag still does is mark the run degraded for
+                # the digest and the PR body. A veto here would re-stall the
+                # pipeline on the most common truncation there is, which is
+                # the failure this epic exists to end; the safety the merge
+                # actually rests on is the cursor, which advances only past
+                # PRs whose pages landed.
                 if deadline is not None and clock() > deadline:
                     add_partial(
                         state,
@@ -2248,6 +2256,15 @@ def run(
                 )
                 if ok:
                     advance_sha = full_cursor
+                    # NOT equivalent to "advance_sha < head_sha". When every
+                    # deferred PR has been forgiven by the skip hatch, the
+                    # walk covers the whole window and the cursor can land on
+                    # HEAD itself. That is honest rather than a leak: the
+                    # forgiven PRs are recorded in `skipped_prs` and alarmed,
+                    # so nothing crossed here is unaccounted for. The
+                    # invariant the merge gate rests on is "the baseline moved
+                    # only past PRs that landed or were deliberately
+                    # abandoned" — not "the baseline stayed below HEAD".
                     advance_cursor_backed = True
                 else:
                     add_partial(

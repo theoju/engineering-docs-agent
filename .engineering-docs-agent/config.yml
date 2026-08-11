@@ -1,3 +1,28 @@
+# CCE-140. Keeps this dogfood host inside its own job timeout now that a
+# truncated run can earn a merge.
+#
+# `_maybe_auto_merge` used to be clamped to the run deadline, so the whole run
+# finished within `time_budget_seconds`. CCE-140 exempts the merge epilogue
+# from that budget when the advance is cursor-backed — a truncated run is past
+# its deadline by construction, so enforcing it there would refuse every merge
+# the change exists to perform. The epilogue is now bounded separately, by
+# `merge.checks_timeout_seconds` (default 900s), measured from the merge
+# attempt.
+#
+# At the 2700s default that is 2700 + 900 = 3600s, exactly
+# `.github/workflows/docs-agent-nightly.yml`'s `timeout-minutes: 60` — and the
+# App token minted mid-job carries a 1h TTL besides. The first cursor-backed
+# truncated run would be hard-killed mid-poll, and the kill lands BEFORE the
+# notifier dispatch at the end of run(), so it would fail silently: no digest,
+# no partial reasons, no alarm. Strictly worse than forfeiting the merge,
+# which at least reports that it forfeited.
+#
+# 2100 + 900 = 3000s leaves ten minutes of headroom. Raising this back toward
+# 2700 requires lowering `merge.checks_timeout_seconds` by as much; the SUM is
+# what has to clear both the job timeout and the token TTL.
+run:
+  time_budget_seconds: 2100
+
 docs:
   framework: mkdocs
   # Publish-aligned (CCE-34): the agent authors into the SAME tree MkDocs

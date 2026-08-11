@@ -191,6 +191,34 @@ def test_exhausted_time_budget_skips_before_polling():
     assert not [c for c in gh.calls if c[0] == "pr_checks"]
 
 
+def test_cursor_backed_run_is_exempt_from_the_run_deadline():
+    """CCE-140. The control above is the same call with the flag off.
+
+    The run deadline bounds the authoring work. It cannot also bound the merge
+    epilogue, because the ONLY run that can be cursor-backed is a
+    time-truncated one -- already past `deadline` by construction. Enforcing
+    it here refuses every run the feature exists to merge: the partial gate
+    opens and this check closes it three lines later, silently, with a green
+    suite. (That is not hypothetical -- it is what the first end-to-end merge
+    test caught: `auto_merge_skipped: time_budget` on a perfectly eligible
+    run.)
+
+    The epilogue stays bounded by grace/timeout measured from now, so this is
+    an exemption from the SPENT budget, not from all bounds.
+    """
+    gh = _eligible_gh()
+    clock = FakeClock(t=1000.0)
+    outcome, reasons = _run(
+        gh,
+        partial=True,
+        advance_cursor_backed=True,
+        deadline=1060.0,  # identical to the control: already exhausted
+        clock=clock,
+    )
+    assert outcome["merged"] is True, (outcome, reasons)
+    assert [c for c in gh.calls if c[0] == "pr_merge"], gh.calls
+
+
 # ---------------------------------------------------------------------------
 # Task 7: _maybe_auto_merge — check poll, merge, pages dispatch
 # ---------------------------------------------------------------------------

@@ -3211,14 +3211,30 @@ def _maybe_auto_merge(
 
     grace = merge_settings["checks_grace_seconds"]
     timeout = merge_settings["checks_timeout_seconds"]
-    if deadline is not None and clock() + grace > deadline:
+    # CCE-140: the CCE-109 run deadline governs the AUTHORING work — the
+    # expensive, interruptible part. It must not govern the merge epilogue,
+    # because the only run that can be cursor-backed is a time-truncated one,
+    # and a time-truncated run is BY DEFINITION already past `deadline`.
+    # Enforcing it here refuses every run this feature exists to merge: the
+    # gate three lines up opens, and this check closes it — the original
+    # never-auto-merges bug, one layer deeper and just as silent.
+    #
+    # The epilogue stays bounded, by the operator's own grace/timeout config
+    # measured from now instead of by the spent authoring budget. Operator
+    # consequence: a run that earns a merge may exceed `time_budget_seconds`
+    # by up to `merge.checks_timeout_seconds` (default 900s) while it waits
+    # out host CI. That is the designed cost of auto-merge on the
+    # non-truncated path already; CCE-140 makes the truncated path pay it too
+    # rather than forfeit the merge.
+    merge_deadline = None if advance_cursor_backed else deadline
+    if merge_deadline is not None and clock() + grace > merge_deadline:
         return skip("time_budget")
 
     start = clock()
     grace_end = start + grace
     poll_end = start + timeout
-    if deadline is not None:
-        poll_end = min(poll_end, deadline)
+    if merge_deadline is not None:
+        poll_end = min(poll_end, merge_deadline)
 
     while True:
         checks = gh.pr_checks(pr_number)

@@ -48,6 +48,8 @@ The workflow runs its GitHub App-token step under `continue-on-error` and export
 
 Auto-merge eligibility (CCE-140): `merge.policy: auto` (the default when the block is absent), no vetoing partial reason, and either a non-partial run **or** a run whose baseline advance came from the CCE-109 cursor. Fact-checker warnings never gate the merge — they ride the PR body and the notification. A PR deferred on `run.deferral_skip_threshold` consecutive runs (default 3; set `0` to disable) is abandoned on the next run, recorded in `state.json`'s append-only `skipped_prs` array, and named in a partial reason so the notification carries it. A human commit on the docs-agent PR still blocks the merge unconditionally.
 
+**Time budget, and why the merge is exempt from it.** `run.time_budget_seconds` bounds the *authoring* work — the expensive, interruptible part. It does not bound the merge epilogue when the advance is cursor-backed, because the only run that can BE cursor-backed is a time-truncated one, which is past its deadline by construction: enforcing the run budget there would refuse every run auto-merge exists for, silently. The epilogue stays bounded by `merge.checks_grace_seconds` / `merge.checks_timeout_seconds` measured from the merge attempt, so **a run that earns a merge may overrun `time_budget_seconds` by up to `checks_timeout_seconds` (default 900s) while it waits out host CI.** Size the workflow's own job timeout for `time_budget_seconds + checks_timeout_seconds`. Lower `merge.checks_timeout_seconds` if you would rather forfeit a merge than let the nightly run long.
+
 To fire it manually:
 
 ```bash

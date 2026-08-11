@@ -100,14 +100,53 @@ def test_deferral_counts_rejects_a_non_integer():
         validate({"version": "1", "deferral_counts": {"o/r#1": "two"}}, SCHEMA)
 
 
-def test_pre_cce140_state_still_validates():
-    """Back-compat, both directions. A state.json written before CCE-140 has
-    neither key; the root declares required:['version'] and no
+def test_pre_cce140_state_validates_against_the_new_schema():
+    """Forward direction: a state.json written before CCE-140 has neither new
+    key, and the root declares required:['version'] with no
     additionalProperties:false, so nothing about the old file becomes invalid
-    and there is no migration step. The reverse also holds — a new-format file
-    validates against the OLD schema — which matters because the plugin is
-    consumed at ref: main with no release step."""
+    and no migration step is needed."""
     legacy = {"version": "1", "dismissed_gap_flags": {}, "cursors": {}}
     validate(legacy, SCHEMA)
-    assert "skipped_prs" not in legacy
-    assert "deferral_counts" not in legacy
+
+
+def test_post_cce140_state_validates_against_the_old_schema():
+    """Reverse direction, which is the one that can actually bite.
+
+    The plugin is consumed at `ref: main` with no release step, so a host can
+    run yesterday's checkout against a state.json that today's run wrote. If
+    the old schema rejected the new keys, that host hard-fails on load --
+    `load_state_validated` raises StateError -- holding a state file it cannot
+    repair by rolling back.
+
+    The claim previously lived only in prose; the assertion beside it checked
+    `"skipped_prs" not in legacy` against a dict literal declared two lines
+    above, which cannot fail. Here the pre-CCE-140 schema is reconstructed by
+    removing exactly the two property declarations this change added, and a
+    fully-populated new-format state is validated against it. It passes only
+    because the root carries no `additionalProperties: false` -- adding one
+    later breaks this test, which is the point.
+    """
+    old_schema = json.loads(json.dumps(SCHEMA))
+    removed = [
+        old_schema["properties"].pop(k, None)
+        for k in ("deferral_counts", "skipped_prs")
+    ]
+    assert all(r is not None for r in removed), (
+        "both CCE-140 keys must be declared in the current schema, or this "
+        "test is reconstructing something other than the old schema"
+    )
+    modern = {
+        "version": "1",
+        "last_successful_run": {"head_sha": "a" * 40},
+        "deferral_counts": {"o/r#3": 2},
+        "skipped_prs": [
+            {
+                "pr": "o/r#3",
+                "url": "https://github.com/o/r/pull/3",
+                "pages": ["core/x.md"],
+                "deferrals": 3,
+                "skipped_at": "2026-08-10T07:00:00Z",
+            }
+        ],
+    }
+    validate(modern, old_schema)

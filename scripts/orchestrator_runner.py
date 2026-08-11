@@ -315,6 +315,12 @@ DEFAULT_CHECKS_GRACE_SECONDS = 120
 DEFAULT_CHECKS_TIMEOUT_SECONDS = 900
 _CHECKS_POLL_INTERVAL_SECONDS = 15.0
 
+# CCE-140 test seam: the last run's `advance_cursor_backed` decision. run()
+# stamps it on every pass so an integration test can assert the gate input
+# without threading a return value through run()'s int contract. Never read
+# by production code — _maybe_auto_merge takes the value as an argument.
+_LAST_ADVANCE_CURSOR_BACKED = False
+
 
 def resolve_merge_settings(config: dict) -> dict:
     """CCE-101: resolve the merge-gate settings with default-ON semantics.
@@ -2037,6 +2043,7 @@ def run(
             # next run, but no silent regression and no lost PR.
             skipped_numbers: set = set()
             advance_sha = prior_baseline_sha
+            advance_cursor_backed = False
             # CCE-140: hold every PR this run did not finish out of the cursor
             # prefix. `skipped_numbers` is populated in the deferral-skip block
             # below; on a run with no skips it is empty and `held_back` is
@@ -2089,6 +2096,7 @@ def run(
                 )
                 if ok:
                     advance_sha = full_cursor
+                    advance_cursor_backed = True
                 else:
                     add_partial(
                         state,
@@ -2097,6 +2105,12 @@ def run(
                     )
         else:
             advance_sha = state["current_run"]["head_sha"]
+            # A non-truncated run advances to the full window HEAD. That is
+            # correct when the run is clean, and it is exactly the advance the
+            # CCE-140 merge gate must refuse to merge when the run is partial.
+            advance_cursor_backed = False
+        global _LAST_ADVANCE_CURSOR_BACKED
+        _LAST_ADVANCE_CURSOR_BACKED = advance_cursor_backed
         state["last_successful_run"] = {
             "head_sha": advance_sha,
             "completed_at": now,

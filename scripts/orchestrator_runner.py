@@ -748,7 +748,21 @@ def dispatch_subagent(
     - the subagent emits unparseable JSON
     """
     if dry_run_dir is not None:
-        fixture = dry_run_dir / f"fake_{name.replace('-', '_')}.json"
+        stem = f"fake_{name.replace('-', '_')}"
+        # A `<stem>__pr<N>.json` fixture, when present, wins over the shared
+        # one. Without it a dry run cannot model a window whose PRs produce
+        # DIFFERENT doc targets: every PR reads the same file, so every page
+        # batch contains every PR and the window can only land or fail as a
+        # whole. The CCE-140 baseline rule — advance only to the last PR whose
+        # pages all landed — says nothing under that constraint, which is why
+        # its mixed case had no end-to-end coverage.
+        pr = inputs.get("pr") if isinstance(inputs, dict) else None
+        number = pr.get("number") if isinstance(pr, dict) else None
+        if number is not None:
+            per_pr = dry_run_dir / f"{stem}__pr{number}.json"
+            if per_pr.exists():
+                return load_json(per_pr)
+        fixture = dry_run_dir / f"{stem}.json"
         if not fixture.exists():
             return None
         return load_json(fixture)

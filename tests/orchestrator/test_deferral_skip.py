@@ -643,3 +643,89 @@ def test_no_skip_is_recorded_for_a_pr_the_cursor_never_crosses(tmp_path, init_ho
     assert not [r for r in cr["partial_reasons"] if r.startswith("deferral_skip:")], cr[
         "partial_reasons"
     ]
+
+
+def test_the_baseline_stops_at_the_last_pr_whose_pages_all_landed(tmp_path, init_host):
+    """CCE-140 Decision 2's POSITIVE case, which nothing covered end to end.
+
+    Every prior integration test drives a window whose PRs either all land or
+    all fail, because one static summarizer fixture is replayed for every PR:
+    each page batch then contains every admitted PR, so the cursor walk can
+    only return the whole prefix or nothing. Under that constraint the rule
+    this track exists to enforce -- "advance only to the last PR whose pages
+    ALL landed" -- has no observable content, and the three rewritten Track A
+    tests collapsing from `advance == c3` to `advance == base` is what that
+    looks like from the outside.
+
+    Per-PR summarizer fixtures make the mixed case expressible. PR 1 owns
+    alpha.md and PR 2 owns beta.md; beta lint-blocks and is reverted, so PR 2
+    is owed a page and PR 3 was never admitted. The walk must stop AT PR 1 --
+    not before it, which would forfeit an earned advance, and not past it,
+    which is the silent loss. Both neighbours are asserted, because a test
+    that only pins the upper bound passes on a run that advanced nothing.
+    """
+    repo = tmp_path
+    state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
+    base, (c1, c2, c3, c4) = _seed_window(repo, state_path, 4)
+    fakes = _fakes_with_prs(
+        FAKES_MULTI,
+        tmp_path.parent / f"fakes_cce140_mixed_{tmp_path.name}",
+        _window_prs(c1, c2, c3),
+    )
+    summ = json.loads((FAKES_MULTI / "fake_pr_summarizer.json").read_text())
+    for number, hint in ((1, "alpha.md"), (2, "beta.md"), (3, "gamma.md")):
+        (fakes / f"fake_pr_summarizer__pr{number}.json").write_text(
+            json.dumps(
+                {
+                    **summ,
+                    "doc_targets": [
+                        {
+                            "lens": "core",
+                            "action": "create",
+                            "page_hint": f"connectors/{hint}",
+                        }
+                    ],
+                }
+            )
+        )
+    # Only beta is rejected. The revert is keyed by path, so reporting it on
+    # every validation pass reverts exactly the one batch that owns it.
+    (fakes / "fake_content_validator.json").write_text(
+        json.dumps(
+            {
+                "passed": [],
+                "failed": [
+                    {
+                        "path": "docs/site-src/core/connectors/beta.md",
+                        "rule": "frontmatter_schema",
+                        "severity": "block",
+                        "message": "missing required field: status",
+                    }
+                ],
+            }
+        )
+    )
+    rc = orun.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=_fake_clock([0, 50, 150]),  # admit PR 1 and PR 2, defer PR 3
+    )
+    assert rc == 0
+    written = json.loads(state_path.read_text())
+    advance = written["last_successful_run"]["head_sha"]
+    assert (repo / "docs/site-src/core/connectors/alpha.md").exists(), (
+        "PR 1's page must have landed, or the advance below is not an EARNED "
+        "one and this test is pinning the all-fail case again"
+    )
+    assert not (repo / "docs/site-src/core/connectors/beta.md").exists(), (
+        "PR 2's page must have been reverted by the lint block"
+    )
+    assert advance == c1, written["last_successful_run"]
+    assert advance != base, "PR 1 finished; refusing its advance forfeits work"
+    assert advance not in (c2, c3, c4), (
+        "PR 2 is owed a page and PR 3 was never admitted; advancing past "
+        "either strands it below the baseline forever"
+    )
+    assert orun._LAST_ADVANCE_CURSOR_BACKED is True

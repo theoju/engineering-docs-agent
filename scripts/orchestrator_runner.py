@@ -22,6 +22,7 @@ from state_io import (
     load_config_validated,
     load_state_validated,
     load_voice_samples,
+    merge_skipped_pr_records,
     resolve_lens,
     save_current_run,
     save_persistent_state,
@@ -2133,7 +2134,24 @@ def run(
             # past an unanchorable deferred PR, and persist only the canonical
             # full SHA. Every refusal keeps the baseline — partial, retried
             # next run, but no silent regression and no lost PR.
-            skipped_numbers: set = set()
+            # CCE-140: decide which deferred PRs this run abandons, BEFORE the
+            # cursor walk — forgiveness is what lets the walk continue past
+            # them. `counts` is the PRIOR map, so a stored count equal to the
+            # threshold means this run is the (threshold+1)-th.
+            _deferral_counts = state.get("deferral_counts", {}) or {}
+            _threshold = resolve_deferral_threshold(config)
+            _deferred_all = list(admission_deferred) + [
+                pr_by_number[n]
+                for n in sorted(deferred_pages_by_pr)
+                if n in pr_by_number
+            ]
+            _skipped_prs, _still_deferred = partition_deferrals(
+                _deferred_all,
+                counts=_deferral_counts,
+                repo=repo,
+                threshold=_threshold,
+            )
+            skipped_numbers = {p.get("number") for p in _skipped_prs}
             advance_sha = prior_baseline_sha
             advance_cursor_backed = False
             # CCE-140: hold every PR this run did not finish out of the cursor
@@ -2144,16 +2162,7 @@ def run(
                 set(deferred_pages_by_pr)
                 | {p.get("number") for p in admission_deferred}
             ) - skipped_numbers
-            still_deferred = [
-                p
-                for p in list(admission_deferred)
-                + [
-                    pr_by_number[n]
-                    for n in sorted(deferred_pages_by_pr)
-                    if n in pr_by_number
-                ]
-                if p.get("number") in held_back
-            ]
+            still_deferred = _still_deferred
             cursor_prs = advance_cursor_list(
                 prs, admission_deferred, held_back=held_back
             )
@@ -2203,6 +2212,47 @@ def run(
             advance_cursor_backed = False
         global _LAST_ADVANCE_CURSOR_BACKED
         _LAST_ADVANCE_CURSOR_BACKED = advance_cursor_backed
+        if time_truncated:
+            # CCE-140 / spec Decision 3. Record the loss loudly and durably.
+            # The reason is deliberately NOT info_only: it is content the
+            # pipeline chose to abandon, and `partial` is what routes it into
+            # the notifier digest. It does not veto the merge — the skip only
+            # takes effect if this run merges (see _MERGE_VETO_REASON_PREFIXES).
+            _records = []
+            for _pr_obj in _skipped_prs:
+                _k = deferral_key(repo, _pr_obj.get("number"))
+                _pages = sorted(
+                    set(deferred_pages_by_pr.get(_pr_obj.get("number"), []))
+                )
+                _records.append(
+                    {
+                        "pr": _k,
+                        "url": _pr_obj.get("url", ""),
+                        "pages": _pages,
+                        "deferrals": int(_deferral_counts.get(_k, 0)),
+                        "skipped_at": now,
+                    }
+                )
+                add_partial(
+                    state,
+                    f"deferral_skip: {_k} skipped after "
+                    f"{int(_deferral_counts.get(_k, 0))} consecutive deferrals "
+                    f"(threshold {_threshold}); pages="
+                    + (", ".join(_pages) if _pages else "(none authored)"),
+                )
+            merge_skipped_pr_records(state, _records)
+            _next_counts = next_deferral_counts(
+                _deferral_counts,
+                repo=repo,
+                window_pr_numbers={
+                    p.get("number") for p in window_prs if p.get("number") is not None
+                },
+                still_deferred_numbers={p.get("number") for p in still_deferred},
+            )
+            if _next_counts:
+                state["deferral_counts"] = _next_counts
+            else:
+                state.pop("deferral_counts", None)
         state["last_successful_run"] = {
             "head_sha": advance_sha,
             "completed_at": now,

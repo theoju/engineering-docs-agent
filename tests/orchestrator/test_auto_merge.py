@@ -90,6 +90,8 @@ def _run(
     deadline=None,
     clock=None,
     ci_provider=None,
+    advance_cursor_backed=False,
+    partial_reasons=(),
 ):
     clock = clock or FakeClock()
     return orun._maybe_auto_merge(
@@ -103,6 +105,8 @@ def _run(
         clock=clock,
         sleep=clock.sleep,
         ci_provider=ci_provider,
+        advance_cursor_backed=advance_cursor_backed,
+        partial_reasons=partial_reasons,
     )
 
 
@@ -122,15 +126,36 @@ def test_partial_run_skips_with_info_reason():
     assert not [c for c in gh.calls if c[0] == "pr_merge"]
 
 
-def test_fact_warnings_demote_to_manual_review():
-    """CCE-110 guard: under auto-merge nobody reads the PR, so a
-    contradiction warning must withhold the merge (not the content)."""
-    gh = FakeGhClient()
+def test_fact_warnings_never_gate_the_merge():
+    """CCE-140 / spec Decision 4. This test is the exact inverse of the
+    CCE-110 behaviour it replaces, and the inversion is the point.
+
+    The fact-checker documents itself as a warn layer at
+    scripts/orchestrator_runner.py:1755-1760 -- 'Findings are operator-facing
+    warnings only: info_only reasons, a PR-body section, and the run record
+    -- never a partial flag, never a dropped page.' skip('fact_check_warnings')
+    contradicted that contract. Under a fully autonomous policy the choice is
+    not 'merge vs. a human reads it', it is 'merge vs. the pipeline stalls
+    forever', so the warning rides the PR body and the notification instead.
+    """
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
     outcome, reasons = _run(gh, fact_warnings=["page.md: contradicts source"])
-    assert outcome["reason"] == "fact_check_warnings"
-    assert reasons[0][0].startswith("auto_merge_skipped: fact_check_warnings")
-    assert reasons[0][1] is True
-    assert not [c for c in gh.calls if c[0] == "pr_merge"]
+    assert outcome == {"merged": True, "reason": None}
+    assert ("pr_merge", (7,)) in gh.calls
+    assert not any("fact_check_warnings" in r for r, _ in reasons)
+
+
+def test_fact_warnings_do_not_gate_a_cursor_backed_partial_either():
+    """The two relaxations compose: warnings + partial + a cursor still
+    merges."""
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
+    outcome, _ = _run(
+        gh,
+        partial=True,
+        advance_cursor_backed=True,
+        fact_warnings=["a.md: contradicts source", "b.md: contradicts source"],
+    )
+    assert outcome["merged"] is True
 
 
 def test_human_edited_pr_is_never_merged():
@@ -164,6 +189,34 @@ def test_exhausted_time_budget_skips_before_polling():
     outcome, reasons = _run(gh, deadline=1060.0, clock=clock)
     assert outcome["reason"] == "time_budget"
     assert not [c for c in gh.calls if c[0] == "pr_checks"]
+
+
+def test_cursor_backed_run_is_exempt_from_the_run_deadline():
+    """CCE-140. The control above is the same call with the flag off.
+
+    The run deadline bounds the authoring work. It cannot also bound the merge
+    epilogue, because the ONLY run that can be cursor-backed is a
+    time-truncated one -- already past `deadline` by construction. Enforcing
+    it here refuses every run the feature exists to merge: the partial gate
+    opens and this check closes it three lines later, silently, with a green
+    suite. (That is not hypothetical -- it is what the first end-to-end merge
+    test caught: `auto_merge_skipped: time_budget` on a perfectly eligible
+    run.)
+
+    The epilogue stays bounded by grace/timeout measured from now, so this is
+    an exemption from the SPENT budget, not from all bounds.
+    """
+    gh = _eligible_gh()
+    clock = FakeClock(t=1000.0)
+    outcome, reasons = _run(
+        gh,
+        partial=True,
+        advance_cursor_backed=True,
+        deadline=1060.0,  # identical to the control: already exhausted
+        clock=clock,
+    )
+    assert outcome["merged"] is True, (outcome, reasons)
+    assert [c for c in gh.calls if c[0] == "pr_merge"], gh.calls
 
 
 # ---------------------------------------------------------------------------
@@ -402,3 +455,99 @@ def test_cancelled_check_fails_fast_as_red():
     assert outcome["reason"] == "checks_failed"
     assert "ci" in reasons[0][0]
     assert not [c for c in gh.calls if c[0] == "pr_merge"]
+
+
+# ---------------------------------------------------------------------------
+# CCE-140: partial runs merge when — and only when — cursor-backed
+# ---------------------------------------------------------------------------
+
+
+def test_partial_run_with_full_head_advance_still_never_merges():
+    """THE DANGEROUS CASE, at the gate. Relaxing `partial` must not relax it
+    for a run whose advance_sha is the full window HEAD: merging that promotes
+    a baseline past pages that were reverted."""
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
+    outcome, reasons = _run(gh, partial=True, advance_cursor_backed=False)
+    assert outcome == {"merged": False, "reason": "partial_run"}
+    assert reasons == [("auto_merge_skipped: partial_run", True)]
+    assert not [c for c in gh.calls if c[0] == "pr_merge"]
+
+
+def test_partial_run_with_cursor_backed_advance_merges():
+    """Spec Decision 2: a partial run whose advance came from the cursor has,
+    by construction, advanced only past PRs whose pages all landed."""
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
+    outcome, reasons = _run(gh, partial=True, advance_cursor_backed=True)
+    assert outcome == {"merged": True, "reason": None}
+    assert ("pr_merge", (7,)) in gh.calls
+    assert ("auto_merge_succeeded: pr=7", True) in reasons
+
+
+def test_cursor_backed_partial_still_loses_to_the_human_edit_guard():
+    """The human-edit guard sits AFTER the new gate and must stay decisive.
+    Before CCE-140 this assertion was vacuous on every real host: no partial
+    run ever reached the guard, because skip('partial_run') returned first."""
+    gh = _eligible_gh(
+        pr_view_commits=GhResult(
+            ok=True,
+            value=[
+                {"authors": [_bot_author()]},
+                {"authors": [{"name": "Theo", "login": "theoju", "email": "t@x.com"}]},
+            ],
+        ),
+        pr_checks=GhResult(ok=True, value=[_green()]),
+    )
+    outcome, _ = _run(gh, partial=True, advance_cursor_backed=True)
+    assert outcome["reason"] == "human_edited"
+    assert not [c for c in gh.calls if c[0] == "pr_merge"]
+
+
+def test_app_token_unavailable_vetoes_even_a_cursor_backed_partial():
+    """README:47 / orchestrator_runner.py:1377 record app_token_unavailable as
+    a BLOCKING reason expressly so auto-merge skips: a PR built on the fallback
+    GITHUB_TOKEN never fires host CI, so `pr_checks` returns [] and the
+    zero-checks path would read that as 'nothing failed'. The cursor proves
+    the BASELINE is honest; it says nothing about whether the PR is safe to
+    land."""
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[]))
+    outcome, reasons = _run(
+        gh,
+        partial=True,
+        advance_cursor_backed=True,
+        partial_reasons=(
+            "app_token_unavailable: GitHub App installation token could not "
+            "be minted; run degraded to GITHUB_TOKEN, so host CI will not "
+            "fire on this PR. Verify the App is installed on this repo.",
+        ),
+    )
+    assert outcome["reason"] == "merge_vetoed"
+    assert reasons[0][0].startswith(
+        "auto_merge_skipped: merge_vetoed: app_token_unavailable"
+    )
+    assert reasons[0][1] is True
+    assert not [c for c in gh.calls if c[0] == "pr_merge"]
+
+
+def test_deferral_skip_reason_does_not_veto_the_merge():
+    """A skip only ever happens on a truncated run, and it only takes effect
+    if the run merges. Vetoing it would make the hatch a no-op that re-fires
+    forever."""
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
+    outcome, _ = _run(
+        gh,
+        partial=True,
+        advance_cursor_backed=True,
+        partial_reasons=(
+            "deferral_skip: o/r#5 skipped after 3 consecutive deferrals; "
+            "pages=core/connectors/beta.md",
+        ),
+    )
+    assert outcome["merged"] is True
+
+
+def test_non_partial_run_still_merges_with_no_cursor():
+    """Back-compat: the clean path is untouched. A non-partial run advances to
+    full HEAD (cursor_backed False) and must still merge."""
+    gh = _eligible_gh(pr_checks=GhResult(ok=True, value=[_green()]))
+    outcome, _ = _run(gh, partial=False, advance_cursor_backed=False)
+    assert outcome["merged"] is True

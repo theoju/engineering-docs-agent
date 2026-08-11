@@ -405,3 +405,47 @@ def test_citation_source_roots_rejects_a_bare_string():
     )
     with pytest.raises(ValidationError):
         validate(cfg, SCHEMA)
+
+
+# ---------------------------------------------------------------------------
+# CCE-140: run.deferral_skip_threshold
+# ---------------------------------------------------------------------------
+
+_CCE140_BASE_CFG = """
+docs:
+  framework: mkdocs
+  source_dir: docs
+  whats_new_file: docs/whats-new.md
+  agent_editable_paths: ["docs/**"]
+  lens_paths: { core: docs/core }
+sources: { git: { host: github } }
+lint: { tier1: default, tier2: {}, tier3: {} }
+publishing:
+  base_url: https://x
+  build_workflow: deploy.yml
+  url_map_rule: standard
+notifications: {}
+"""
+
+
+def test_run_block_accepts_deferral_skip_threshold():
+    """CCE-140: the `run` block sets additionalProperties: false, so an
+    undeclared key makes load_config_validated raise and the runner exit 2.
+    The schema edit is a hard requirement, not documentation."""
+    cfg = yaml.safe_load(_CCE140_BASE_CFG)
+    cfg["run"] = {"time_budget_seconds": 2700, "deferral_skip_threshold": 3}
+    validate(cfg, SCHEMA)
+
+
+def test_run_block_still_rejects_an_unknown_key():
+    cfg = yaml.safe_load(_CCE140_BASE_CFG)
+    cfg["run"] = {"deferral_skip_threshhold": 3}  # typo, one 'h' too many
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)
+
+
+def test_deferral_skip_threshold_rejects_a_negative():
+    cfg = yaml.safe_load(_CCE140_BASE_CFG)
+    cfg["run"] = {"deferral_skip_threshold": -1}
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)

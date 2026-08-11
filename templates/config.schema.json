@@ -191,6 +191,11 @@
           "type": "integer",
           "minimum": 0,
           "description": "CCE-109: soft per-run time budget in seconds. 0 = unlimited. Default 2700."
+        },
+        "deferral_skip_threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "CCE-140: number of CONSECUTIVE runs a PR may be deferred before the next run abandons it — the advance cursor walks past it, an entry is appended to state.json `skipped_prs`, and a non-informational partial reason names the PR and its pages. Default 3. 0 disables skipping entirely, which restores the pre-CCE-140 indefinite-stall behaviour."
         }
       }
     },

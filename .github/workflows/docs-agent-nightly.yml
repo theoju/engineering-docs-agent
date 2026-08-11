@@ -40,7 +40,20 @@ concurrency:
 jobs:
   author:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # CCE-140: 60 -> 90. A cursor-backed truncated run now continues into the
+    # merge epilogue, which is bounded by merge.checks_timeout_seconds (900s)
+    # measured from the merge attempt rather than by the run's spent time
+    # budget. Job total is setup (~6m) + authoring (35m, see
+    # .engineering-docs-agent/config.yml) + the post-deadline tail (the
+    # in-flight page batch, site generators, push, PR create; ~5m) + 15m of
+    # check-polling = ~61m, which 60 cannot hold. A kill here lands BEFORE
+    # run()'s notifier dispatch, so it would be a SILENT failure — the one
+    # outcome worse than forfeiting the merge. Matches the ADIS host's 90.
+    #
+    # This is headroom, not a target: the binding ceiling is still the App
+    # installation token's 1h TTL, minted after setup, which the config's
+    # 2100s budget is sized against.
+    timeout-minutes: 90
     env:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       # CCE-53: surface Jira basic-auth credentials into the runner env so

@@ -91,7 +91,9 @@ THREE_HINTS = ["connectors/alpha.md", "connectors/beta.md", "connectors/gamma.md
 AUTHORING_TRUNCATION_CLOCK = [0, 10, 20, 150]
 
 
-def test_authoring_truncation_advances_to_cursor_not_head(tmp_path, init_host):
+def test_authoring_truncation_holds_baseline_when_every_pr_owes_pages(
+    tmp_path, init_host, read_current_run
+):
     repo = tmp_path
     state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
     base, (c1, c2, c3, c4) = _seed_window(repo, state_path, 4)
@@ -119,14 +121,25 @@ def test_authoring_truncation_advances_to_cursor_not_head(tmp_path, init_host):
     advance = written["last_successful_run"]["head_sha"]
     head = _git(repo, "rev-parse", "HEAD")
     assert head == c4
-    # THE assertion: the bug was a fall-through to head, so the negative is
-    # what discriminates. Keep it even though the positive below implies it.
+    # THE assertion, unchanged and still the discriminating one: the bug
+    # Track A fixed was a fall-through to head.
     assert advance != head, written["last_successful_run"]
-    assert advance == c3, written["last_successful_run"]
-    # A truncated run also stamps the window it covered for the CCE-43 guard.
+    # CCE-140 narrowed the cursor. The summarizer fixture is replayed per PR
+    # (orchestrator_runner.py:617) and the runner stamps the real number onto
+    # each summary (:1518), so every PR contributes to every page batch —
+    # cutting after batch 0 leaves ALL THREE PRs owing pages, the walk stops
+    # at the oldest one, and nothing may anchor the advance. Before CCE-140
+    # this asserted `advance == c3`, i.e. an advance past two PRs whose pages
+    # were never written; spec Decision 2 forbids exactly that.
+    assert advance == base, written["last_successful_run"]
+    # A truncated run still stamps the window it covered for the CCE-43 guard.
     assert written["last_successful_run"].get("window_head_sha") == c4, written[
         "last_successful_run"
     ]
+    cr = read_current_run(state_path)
+    assert any(
+        "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
 
 
 def test_authoring_truncation_without_cursor_holds_baseline(
@@ -164,22 +177,38 @@ def test_authoring_truncation_without_cursor_holds_baseline(
 def test_authoring_truncation_with_unresolvable_cursor_holds_baseline(
     tmp_path, init_host, read_current_run
 ):
-    # CCE-109 refusal branch 3 (out_of_window), now reachable from the authoring
-    # loop: fakes_multi's merge_shas are the literals "a"/"b"/"c", which no
-    # rev-parse can resolve, so the advance is refused and the baseline holds.
+    """CCE-109 refusal branch 3 (`out_of_window`) reached with a NON-EMPTY
+    cursor, which is the only way it says anything.
+
+    Reaching it takes care under CCE-140. A PR whose merge_sha cannot be
+    resolved sorts last (`_order_prs_oldest_first`), so it is the first PR a
+    truncation defers, which holds it back, which stops the walk before it --
+    and the run refuses at `no_cursor` instead, several branches earlier.
+    fakes_multi is the fixture that gets past that: EVERY PR carries a bogus
+    sha ("a"/"b"/"c"), so they share one sort key, keep their original order,
+    and the admitted prefix ends on a cursor that is present but unresolvable.
+
+    ONE hint (not THREE) is what makes the difference: the authoring loop runs
+    to completion, so no PR owes a page and the cursor survives the walk. With
+    three hints every PR owes a page, the walk empties, and this test
+    degenerates into a duplicate of the `no_cursor` test above -- which is
+    exactly what it had silently become.
+    """
     repo = tmp_path
     state_path = init_host(
         {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
     )
     fakes = _fakes(
-        tmp_path.parent / f"trackA_unresolvable_{tmp_path.name}", None, THREE_HINTS
+        tmp_path.parent / f"trackA_unresolvable_{tmp_path.name}",
+        None,
+        ["connectors/solo.md"],
     )
     rc = runner.run(
         repo,
         dry_run_dir=fakes,
         no_pr=True,
         time_budget_seconds=100,
-        now_monotonic=_fake_clock(AUTHORING_TRUNCATION_CLOCK),
+        now_monotonic=_fake_clock([0, 50, 150]),  # admit 2 of 3
     )
     assert rc == 0
     written = json.loads(state_path.read_text())
@@ -188,44 +217,75 @@ def test_authoring_truncation_with_unresolvable_cursor_holds_baseline(
     assert advance != head, written["last_successful_run"]
     assert advance == "old_sha_000", written["last_successful_run"]
     cr = read_current_run(state_path)
+    # Preconditions: neither earlier branch fired, so the refusal below is
+    # genuinely the out_of_window one and not a rename of the no_cursor test.
+    assert not any(
+        "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
     assert any(
-        "time_budget_advance_out_of_window" in r and "unresolvable" in r
-        for r in cr["partial_reasons"]
+        "time_budget_advance_out_of_window" in r for r in cr["partial_reasons"]
     ), cr["partial_reasons"]
 
 
-def test_authoring_truncation_never_reports_unanchored_deferred(
+def test_an_unanchored_deferred_pr_refuses_an_otherwise_earned_advance(
     tmp_path, init_host, read_current_run
 ):
-    # CCE-109 refusal branch 2 (unanchored_deferred) stays unreachable from a
-    # pure authoring truncation, and must: `deferred_unanchored` is computed
-    # only in the admission break, and an authoring-truncated run deferred no
-    # PR at all. PR #2 has no merge_sha, so ordering sinks it last → the cursor
-    # is PR #3's c3, and no unanchored-deferred refusal fires.
+    """CCE-109 refusal branch 2 (`unanchored_deferred`), which CCE-140 makes
+    LOAD-BEARING rather than obsolete.
+
+    It is tempting to read this branch as redundant now: `advance_cursor_list`
+    stops at the oldest held-back PR, every still-deferred PR is held back, so
+    the cursor can never reach past one. That reasoning holds only while list
+    order tracks commit order -- and `_order_prs_oldest_first` documents the
+    one case where it does not: a PR whose `merge_sha` is missing "sorts last
+    (cannot anchor the cursor)". Sunk to the tail, it LOOKS newest to the
+    walk, while its true merge point is unknown and may be older than the
+    cursor. The list prefix is then not a commit-graph prefix, and advancing
+    strands that PR outside every future window -- permanently, since nothing
+    re-collects below the baseline.
+
+    So the guard has to fire even though the walk looks clean. Deleting it
+    would trade a held baseline for a lost PR, which is the trade this whole
+    epic exists to stop making.
+
+    This replaces a test that asserted the branch stays SILENT on the
+    authoring path. That claim died with CCE-140 (`still_deferred` now
+    includes authoring-deferred PRs), and the assertion was vacuous besides:
+    it sits behind an `elif`, and in that fixture every PR owed a page, so
+    `cursor is None` short-circuited before the branch was ever evaluated.
+    """
     repo = tmp_path
     state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
     base, (c1, _c2, c3, c4) = _seed_window(repo, state_path, 4)
     fakes = _fakes(
         tmp_path.parent / f"trackA_unanchored_{tmp_path.name}",
         [_pr(1, c1), _pr(2), _pr(3, c3)],
-        THREE_HINTS,
+        # ONE hint: the authoring loop runs to completion, so no PR owes a
+        # page and the cursor is genuinely earned. Only the unanchored
+        # deferral stands between this run and an advance to c3.
+        ["connectors/solo.md"],
     )
     rc = runner.run(
         repo,
         dry_run_dir=fakes,
         no_pr=True,
         time_budget_seconds=100,
-        now_monotonic=_fake_clock(AUTHORING_TRUNCATION_CLOCK),
+        now_monotonic=_fake_clock([0, 50, 150]),  # admit 2 of 3
     )
     assert rc == 0
     written = json.loads(state_path.read_text())
     advance = written["last_successful_run"]["head_sha"]
-    assert advance != c4, written["last_successful_run"]
-    assert advance == c3, written["last_successful_run"]
     cr = read_current_run(state_path)
+    # Precondition: the walk DID produce a cursor. Without this the refusal
+    # below could be the no_cursor branch and the test would prove nothing.
     assert not any(
+        "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+    assert any(
         "time_budget_no_advance_unanchored_deferred" in r for r in cr["partial_reasons"]
     ), cr["partial_reasons"]
+    assert advance == base, written["last_successful_run"]
+    assert advance != c3 and advance != c4, written["last_successful_run"]
 
 
 def test_admission_truncation_advance_unchanged_by_track_a(

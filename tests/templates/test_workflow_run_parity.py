@@ -178,7 +178,14 @@ def test_04_literal_equals_shape_contract(template_doc, dogfood_doc) -> None:
         )
         jobs = list(doc["jobs"].values())
         assert len(jobs) == 1, f"{label}: expected exactly 1 job"
-        assert jobs[0]["timeout-minutes"] == 60, f"{label}: timeout-minutes != 60"
+        # CCE-140: 60 -> 90. A cursor-backed truncated run continues into the
+        # merge epilogue, bounded by merge.checks_timeout_seconds (900s) from
+        # the merge attempt rather than by the spent run budget — so the
+        # default budget alone (2700s) already reached 3600s = the old 60,
+        # before setup or the post-deadline tail. The kill would land before
+        # the notifier dispatch, making it silent. Both files move together;
+        # that is what this parity assertion is for.
+        assert jobs[0]["timeout-minutes"] == 90, f"{label}: timeout-minutes != 90"
         perms = doc["permissions"]
         for k in ("contents", "pull-requests", "issues"):
             assert k in perms, f"{label}: missing permissions.{k}"

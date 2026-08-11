@@ -22,6 +22,7 @@ from state_io import (
     load_config_validated,
     load_state_validated,
     load_voice_samples,
+    merge_skipped_pr_records,
     resolve_lens,
     save_current_run,
     save_persistent_state,
@@ -310,10 +311,18 @@ def _summarize_tool_use(events: list[dict]) -> dict:
 
 DEFAULT_TIME_BUDGET_SECONDS = 2700  # 45 min; below the 60-min job hard limit
 
+DEFAULT_DEFERRAL_SKIP_THRESHOLD = 3
+
 DEFAULT_MERGE_POLICY = "auto"
 DEFAULT_CHECKS_GRACE_SECONDS = 120
 DEFAULT_CHECKS_TIMEOUT_SECONDS = 900
 _CHECKS_POLL_INTERVAL_SECONDS = 15.0
+
+# CCE-140 test seam: the last run's `advance_cursor_backed` decision. run()
+# stamps it on every pass so an integration test can assert the gate input
+# without threading a return value through run()'s int contract. Never read
+# by production code — _maybe_auto_merge takes the value as an argument.
+_LAST_ADVANCE_CURSOR_BACKED = False
 
 
 def resolve_merge_settings(config: dict) -> dict:
@@ -350,6 +359,23 @@ def resolve_time_budget(config: dict, cli_override: int | None) -> int:
     val = run_cfg.get("time_budget_seconds")
     if val is None:
         return DEFAULT_TIME_BUDGET_SECONDS
+    return int(val)
+
+
+def resolve_deferral_threshold(config: dict) -> int:
+    """Resolve `run.deferral_skip_threshold` (CCE-140).
+
+    Absent `run:` block, a malformed (non-dict) block, or an absent key all
+    resolve to DEFAULT_DEFERRAL_SKIP_THRESHOLD (3) — same default-ON posture
+    as `resolve_merge_settings`, so an existing host gains the skip hatch with
+    no config edit. A value <= 0 disables skipping.
+    """
+    run_cfg = config.get("run")
+    if not isinstance(run_cfg, dict):
+        run_cfg = {}
+    val = run_cfg.get("deferral_skip_threshold")
+    if val is None:
+        return DEFAULT_DEFERRAL_SKIP_THRESHOLD
     return int(val)
 
 
@@ -416,6 +442,113 @@ def _last_processed_merge_sha(admitted_prs: list[dict]) -> str | None:
         if sha:
             return sha
     return None
+
+
+def advance_cursor_list(
+    admitted: list[dict],
+    deferred_tail: list[dict],
+    *,
+    held_back: set,
+) -> list[dict]:
+    """Return the PR list whose newest merge_sha may anchor the advance.
+
+    CCE-140. ``admitted`` is the oldest-first prefix this run processed;
+    ``deferred_tail`` is the oldest-first remainder the admission gate never
+    reached. Walk both in window order and stop at the first PR number in
+    ``held_back``.
+
+    The CCE-109 cursor is a PREFIX boundary: advancing the baseline to PR k's
+    merge sha declares every PR at index <= k done. So the walk must stop at
+    the OLDEST unfinished PR, never merely exclude it — advancing past it
+    would strand it outside every future window, and nothing ever
+    re-collects it.
+
+    ``held_back`` carries PRs this run did not finish (admission-deferred or
+    authoring-deferred) MINUS the ones forgiven by the CCE-140 deferral-skip
+    hatch. Forgiveness is what lets the walk continue into ``deferred_tail``.
+
+    With ``held_back`` empty and an empty tail this is the identity on
+    ``admitted`` — the pre-CCE-140 behaviour.
+    """
+    out: list[dict] = []
+    for pr in list(admitted) + list(deferred_tail):
+        if pr.get("number") in held_back:
+            break
+        out.append(pr)
+    return out
+
+
+def deferral_key(repo: dict, pr_number) -> str:
+    """`{owner}/{name}#{pr}` — one PR-identity shape across state.json.
+
+    Same string the gap-detector builds for `pr_id`, and the same key shape
+    `dismissed_gap_flags` uses, so an operator reading state.json sees one
+    vocabulary.
+    """
+    return f"{repo['owner']}/{repo['name']}#{pr_number}"
+
+
+def partition_deferrals(
+    deferred: list[dict],
+    *,
+    counts: dict,
+    repo: dict,
+    threshold: int,
+) -> tuple[list[dict], list[dict]]:
+    """Split this run's deferred PRs into ``(skipped_now, still_deferred)``.
+
+    CCE-140 / spec Decision 3: "Skip after 3 consecutive deferrals, record
+    every skip durably, and enable notifications. A loud, recorded loss beats
+    an indefinite silent stall."
+
+    ``counts`` is the PRIOR consecutive-deferral map, so a PR whose stored
+    count already equals ``threshold`` has been deferred on that many runs and
+    this run is the (threshold+1)-th — the one that abandons it. ``threshold``
+    <= 0 disables skipping entirely and every deferred PR stays deferred.
+
+    Order-independent: the prefix-boundary invariant is enforced structurally
+    by ``advance_cursor_list``, not here.
+    """
+    if threshold <= 0:
+        return [], list(deferred)
+    skipped: list[dict] = []
+    still: list[dict] = []
+    for pr in deferred:
+        if int(counts.get(deferral_key(repo, pr.get("number")), 0)) >= threshold:
+            skipped.append(pr)
+        else:
+            still.append(pr)
+    return skipped, still
+
+
+def next_deferral_counts(
+    counts: dict,
+    *,
+    repo: dict,
+    window_pr_numbers: set,
+    still_deferred_numbers: set,
+) -> dict:
+    """Return the next persistent consecutive-deferral map (never mutates
+    ``counts``).
+
+    - in this window AND still deferred → count + 1
+    - in this window and NOT still deferred → entry dropped. Covers both the
+      processed case and the skipped case; "consecutive" means consecutive, so
+      an intermittently-slow PR never accumulates toward a skip.
+    - not in this window at all → carried forward unchanged. A window can
+      shrink transiently when the source-collector degrades, and absence is
+      not evidence a PR was processed. Growth is bounded because a PR leaves
+      the window only once the baseline passes it, which requires it to be in
+      the cursor prefix, which requires it not to be deferred.
+    """
+    out = dict(counts)
+    for n in window_pr_numbers:
+        k = deferral_key(repo, n)
+        if n in still_deferred_numbers:
+            out[k] = int(out.get(k, 0)) + 1
+        else:
+            out.pop(k, None)
+    return out
 
 
 def _git_is_ancestor(repo_root: Path, anc: str, desc: str) -> bool | None:
@@ -615,7 +748,21 @@ def dispatch_subagent(
     - the subagent emits unparseable JSON
     """
     if dry_run_dir is not None:
-        fixture = dry_run_dir / f"fake_{name.replace('-', '_')}.json"
+        stem = f"fake_{name.replace('-', '_')}"
+        # A `<stem>__pr<N>.json` fixture, when present, wins over the shared
+        # one. Without it a dry run cannot model a window whose PRs produce
+        # DIFFERENT doc targets: every PR reads the same file, so every page
+        # batch contains every PR and the window can only land or fail as a
+        # whole. The CCE-140 baseline rule — advance only to the last PR whose
+        # pages all landed — says nothing under that constraint, which is why
+        # its mixed case had no end-to-end coverage.
+        pr = inputs.get("pr") if isinstance(inputs, dict) else None
+        number = pr.get("number") if isinstance(pr, dict) else None
+        if number is not None:
+            per_pr = dry_run_dir / f"{stem}__pr{number}.json"
+            if per_pr.exists():
+                return load_json(per_pr)
+        fixture = dry_run_dir / f"{stem}.json"
         if not fixture.exists():
             return None
         return load_json(fixture)
@@ -1472,7 +1619,17 @@ def run(
             except (KeyError, OSError):
                 available_sections_by_lens[_ln] = []
         time_truncated = False
-        deferred_unanchored = False
+        # CCE-140: the full window, oldest-first, before admission truncation.
+        # Deferral counting is keyed to the window a run actually saw.
+        window_prs = list(prs)
+        # PRs the admission gate never reached (oldest-first), and the pages
+        # an admitted PR still owes because the authoring loop was cut.
+        admission_deferred: list[dict] = []
+        deferred_pages_by_pr: dict[int, list[str]] = {}
+        # CCE-140: bound on every path. A run that never truncates defers
+        # nothing, and the deferral-count prune below runs on EVERY run — a
+        # clean run is precisely what resets a PR's "consecutive" history.
+        still_deferred: list[dict] = []
         for i, pr in enumerate(prs):
             if deadline is not None and i > 0 and clock() > deadline:
                 add_partial(
@@ -1483,10 +1640,11 @@ def run(
                 )
                 # A deferred PR without a merge_sha can't be re-anchored by the
                 # next window — advancing past it would lose it forever, so the
-                # advance block below must refuse when any exist.
-                deferred_unanchored = any(
-                    not (p.get("merge_sha") or "").strip() for p in prs[i:]
-                )
+                # advance block below must refuse when any exist. CCE-140 moves
+                # that test into the advance block so it can be evaluated over
+                # the STILL-deferred set (a PR forgiven by the deferral-skip
+                # hatch is deliberately being lost and must not block).
+                admission_deferred = prs[i:]
                 prs = prs[:i]
                 time_truncated = True
                 break
@@ -1545,6 +1703,17 @@ def run(
 
         authored: list[str] = []
         authored_lens: dict[str, str] = {}
+        # CCE-140: the batch keys whose page actually landed. Everything in
+        # per_target that is NOT in here owes its PRs a page — whatever the
+        # reason: a time cut, a failed page-author dispatch, an unknown lens,
+        # an unsafe path, or a lint block that reverted the file. Computing
+        # "owed" as the COMPLEMENT of "landed" is what keeps the advance
+        # cursor honest about failure modes nobody enumerated; an earlier
+        # revision recorded only the time-truncated tail, so a run whose
+        # page-author failed on batch 2 and then truncated at batch 4 still
+        # advanced its baseline past batch 2's PR, permanently.
+        landed_batches: set = set()
+        batch_key_by_path: dict[str, tuple] = {}
         pr_by_number = {pr.get("number"): pr for pr in prs}
         # CCE-119 Item B: resolve the description_quality min_words floor once
         # from config (single source of truth in the lint rule) so an
@@ -1573,6 +1742,11 @@ def run(
                 # this the advance block below falls through to
                 # current_run.head_sha and the run persists a baseline
                 # covering PRs whose pages it never wrote.
+                #
+                # CCE-140: an admitted PR whose page batch was never written
+                # is NOT done. The deferred tail is not recorded here — the
+                # complement pass after the lint block covers it, along with
+                # every other way a batch can fail to land.
                 time_truncated = True
                 break
             try:
@@ -1662,6 +1836,10 @@ def run(
             if out.get("ok"):
                 authored.append(str(target_path))
                 authored_lens[str(target_path)] = lens
+                # CCE-140: provisionally landed. A lint block below can still
+                # revert this page, which discards the entry again.
+                landed_batches.add((lens, hint))
+                batch_key_by_path[str(target_path.resolve())] = (lens, hint)
                 if dry_run_dir and not target_path.exists():
                     # CCE-117: mirror the template branch so the dry-run synth
                     # writes the same generator-aware frontmatter the real
@@ -1756,6 +1934,33 @@ def run(
                         state,
                         f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}",
                     )
+                    # CCE-140: the page was just reverted or deleted, so its
+                    # batch did NOT land and its PRs are still owed a page.
+                    # Without this the cursor treats a lint-blocked PR as done
+                    # and the baseline advances past content that was undone
+                    # moments earlier.
+                    landed_batches.discard(
+                        batch_key_by_path.get(str(fail_path.resolve()))
+                    )
+
+        # CCE-140: fold every batch that did not land into the owed map, so
+        # the advance cursor holds those PRs out of its prefix (spec Decision
+        # 2: "the baseline advances only to the last PR whose pages all
+        # landed"). This is the ONLY writer of deferred_pages_by_pr, and it is
+        # a complement rather than a sum of failure sites on purpose: a new
+        # `continue` added to the authoring loop later is covered for free,
+        # whereas an enumeration would silently stop being exhaustive.
+        for (_lens, _hint), _batch in per_target.items():
+            if (_lens, _hint) in landed_batches:
+                continue
+            _label = f"{_lens}/{_hint}"
+            for _s in _batch:
+                _n = _s.get("pr_number")
+                if _n is None:
+                    continue
+                _owed = deferred_pages_by_pr.setdefault(_n, [])
+                if _label not in _owed:
+                    _owed.append(_label)
 
         # CCE-110 layer 3: factual-accuracy fact-checker (warn layer). One
         # dispatch per surviving authored page that cites >=1 resolvable repo
@@ -1776,10 +1981,18 @@ def run(
             for i, page in enumerate(fact_pages):
                 # CCE-114: advisory layer — skip the remaining pages outright
                 # once the deadline passes (no at-least-one guarantee; every
-                # post-deadline second risks the hard kill). The reason is
-                # deliberately NOT info-only: pages that were never
-                # fact-checked must not auto-merge, and the CCE-101 gate
-                # keys off `partial`.
+                # post-deadline second risks the hard kill). The reason stays
+                # NOT info-only, but CCE-140 changed what that buys: it no
+                # longer implies "must not auto-merge". `partial` alone stops
+                # blocking the merge, and CCE-140 Decision 4 makes the
+                # fact-checker non-gating in both directions — its warnings
+                # do not block a merge, so its ABSENCE cannot either. What
+                # the non-info flag still does is mark the run degraded for
+                # the digest and the PR body. A veto here would re-stall the
+                # pipeline on the most common truncation there is, which is
+                # the failure this epic exists to end; the safety the merge
+                # actually rests on is the cursor, which advances only past
+                # PRs whose pages landed.
                 if deadline is not None and clock() > deadline:
                     add_partial(
                         state,
@@ -1980,8 +2193,39 @@ def run(
             # past an unanchorable deferred PR, and persist only the canonical
             # full SHA. Every refusal keeps the baseline — partial, retried
             # next run, but no silent regression and no lost PR.
+            # CCE-140: decide which deferred PRs this run abandons, BEFORE the
+            # cursor walk — forgiveness is what lets the walk continue past
+            # them. `counts` is the PRIOR map, so a stored count equal to the
+            # threshold means this run is the (threshold+1)-th.
+            _deferral_counts = state.get("deferral_counts", {}) or {}
+            _threshold = resolve_deferral_threshold(config)
+            _deferred_all = list(admission_deferred) + [
+                pr_by_number[n]
+                for n in sorted(deferred_pages_by_pr)
+                if n in pr_by_number
+            ]
+            _skipped_prs, _still_deferred = partition_deferrals(
+                _deferred_all,
+                counts=_deferral_counts,
+                repo=repo,
+                threshold=_threshold,
+            )
+            skipped_numbers = {p.get("number") for p in _skipped_prs}
             advance_sha = prior_baseline_sha
-            cursor = _last_processed_merge_sha(prs)
+            advance_cursor_backed = False
+            # CCE-140: hold every PR this run did not finish out of the cursor
+            # prefix. `skipped_numbers` is populated in the deferral-skip block
+            # below; on a run with no skips it is empty and `held_back` is
+            # exactly "everything unfinished".
+            held_back = (
+                set(deferred_pages_by_pr)
+                | {p.get("number") for p in admission_deferred}
+            ) - skipped_numbers
+            still_deferred = _still_deferred
+            cursor_prs = advance_cursor_list(
+                prs, admission_deferred, held_back=held_back
+            )
+            cursor = _last_processed_merge_sha(cursor_prs)
             window = f"{(prior_baseline_sha or '(root)')[:8]}..{head_sha[:8]}"
             full_cursor = _rev_parse_commit(repo_root, cursor) if cursor else None
             if cursor is None:
@@ -1990,7 +2234,7 @@ def run(
                     "time_budget_no_advance_no_cursor: truncated run had no "
                     "admitted PR with a usable merge_sha; baseline unchanged",
                 )
-            elif deferred_unanchored:
+            elif any(not (p.get("merge_sha") or "").strip() for p in still_deferred):
                 add_partial(
                     state,
                     f"time_budget_no_advance_unanchored_deferred: a deferred "
@@ -2012,6 +2256,16 @@ def run(
                 )
                 if ok:
                     advance_sha = full_cursor
+                    # NOT equivalent to "advance_sha < head_sha". When every
+                    # deferred PR has been forgiven by the skip hatch, the
+                    # walk covers the whole window and the cursor can land on
+                    # HEAD itself. That is honest rather than a leak: the
+                    # forgiven PRs are recorded in `skipped_prs` and alarmed,
+                    # so nothing crossed here is unaccounted for. The
+                    # invariant the merge gate rests on is "the baseline moved
+                    # only past PRs that landed or were deliberately
+                    # abandoned" — not "the baseline stayed below HEAD".
+                    advance_cursor_backed = True
                 else:
                     add_partial(
                         state,
@@ -2020,6 +2274,71 @@ def run(
                     )
         else:
             advance_sha = state["current_run"]["head_sha"]
+            # A non-truncated run advances to the full window HEAD. That is
+            # correct when the run is clean, and it is exactly the advance the
+            # CCE-140 merge gate must refuse to merge when the run is partial.
+            advance_cursor_backed = False
+        global _LAST_ADVANCE_CURSOR_BACKED
+        _LAST_ADVANCE_CURSOR_BACKED = advance_cursor_backed
+        if time_truncated:
+            # CCE-140 / spec Decision 3. Record the loss loudly and durably.
+            # The reason is deliberately NOT info_only: it is content the
+            # pipeline chose to abandon, and `partial` is what routes it into
+            # the notifier digest. It does not veto the merge — the skip only
+            # takes effect if this run merges (see _MERGE_VETO_REASON_PREFIXES).
+            # Only PRs the walk ACTUALLY crossed are abandoned. A forgiven PR
+            # sitting behind an older still-deferred one is not passed by the
+            # cursor, so announcing and durably recording its loss would be a
+            # false alarm — and `skipped_prs` is append-only and deduped by
+            # `pr`, so a false entry can never be corrected.
+            _crossed = {p.get("number") for p in cursor_prs}
+            _records = []
+            for _pr_obj in _skipped_prs:
+                if _pr_obj.get("number") not in _crossed:
+                    continue
+                _k = deferral_key(repo, _pr_obj.get("number"))
+                _pages = sorted(
+                    set(deferred_pages_by_pr.get(_pr_obj.get("number"), []))
+                )
+                _records.append(
+                    {
+                        "pr": _k,
+                        "url": _pr_obj.get("url", ""),
+                        "pages": _pages,
+                        "deferrals": int(_deferral_counts.get(_k, 0)),
+                        "skipped_at": now,
+                    }
+                )
+                add_partial(
+                    state,
+                    f"deferral_skip: {_k} skipped after "
+                    f"{int(_deferral_counts.get(_k, 0))} consecutive deferrals "
+                    f"(threshold {_threshold}); pages="
+                    + (", ".join(_pages) if _pages else "(none authored)"),
+                )
+            merge_skipped_pr_records(state, _records)
+        # CCE-140: prune and increment on EVERY run, not only a truncated one.
+        # "Consecutive" is only meaningful if a run that PROCESSED a PR clears
+        # its history, and the run that processes it is usually the clean one.
+        # Gating this on `time_truncated` made a truncated/clean/truncated
+        # alternation accumulate toward a skip for a PR the pipeline handled
+        # successfully every other night, and left counts for PRs long past
+        # the baseline orphaned in state.json forever.
+        _prior_counts = state.get("deferral_counts", {}) or {}
+        _next_counts = next_deferral_counts(
+            _prior_counts,
+            repo=repo,
+            window_pr_numbers={
+                p.get("number") for p in window_prs if p.get("number") is not None
+            },
+            still_deferred_numbers={
+                p.get("number") for p in still_deferred if p.get("number") is not None
+            },
+        )
+        if _next_counts:
+            state["deferral_counts"] = _next_counts
+        else:
+            state.pop("deferral_counts", None)
         state["last_successful_run"] = {
             "head_sha": advance_sha,
             "completed_at": now,
@@ -2089,6 +2408,8 @@ def run(
             ci_provider=config.get("publishing", {}).get("ci_provider"),
             deadline=deadline,
             clock=clock,
+            advance_cursor_backed=advance_cursor_backed,
+            partial_reasons=tuple(state["current_run"]["partial_reasons"]),
         )
         for reason, info_only in merge_reasons:
             add_partial(state, reason, info_only=info_only)
@@ -2819,6 +3140,28 @@ def _auto_close_superseded_docs_agent_prs(
     return reasons
 
 
+# CCE-140: partial reasons that veto auto-merge even on a cursor-backed
+# advance. The cursor proves the BASELINE is honest; it says nothing about
+# whether this PR is safe to land. `app_token_unavailable` is recorded as a
+# blocking reason at :1377 for exactly this purpose (README §nightly): a PR
+# built on the fallback GITHUB_TOKEN never fires host CI, so `gh pr checks`
+# returns [] and the zero-checks branch below would read that as green.
+# Match is by prefix, against the reason string as stored in state.
+#
+# `deferral_skip:` is deliberately NOT here — a skip only happens on a
+# truncated run and only takes effect if that run merges.
+_MERGE_VETO_REASON_PREFIXES: tuple[str, ...] = ("app_token_unavailable",)
+
+
+def merge_veto_reason(partial_reasons) -> str | None:
+    """Return the first veto prefix present in ``partial_reasons``, else None."""
+    for reason in partial_reasons or ():
+        for prefix in _MERGE_VETO_REASON_PREFIXES:
+            if reason.startswith(prefix):
+                return prefix
+    return None
+
+
 def _maybe_auto_merge(
     gh: "GhClient",
     *,
@@ -2833,14 +3176,30 @@ def _maybe_auto_merge(
     sleep: Callable[[float], None] = time.sleep,
     bot_author_names: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_NAMES,
     bot_author_emails: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_EMAILS,
+    advance_cursor_backed: bool = False,
+    partial_reasons: tuple[str, ...] = (),
 ) -> tuple[dict, list[tuple[str, bool]]]:
     """CCE-101: squash-merge the docs-agent PR when the run earned it.
 
-    Eligibility (cheapest first): policy auto → non-partial → zero
-    fact-checker warnings → no human commits on the PR → enough CCE-109
-    budget left to wait out the check-grace window. Then a bounded poll
-    of `gh pr checks`; zero registered checks after the grace window
-    means a no-App-token host (the in-run validation is the gate there).
+    Eligibility (cheapest first): policy auto → no vetoing partial reason →
+    non-partial OR a cursor-backed advance → no human commits on the PR →
+    enough CCE-109 budget left to wait out the check-grace window. Then a
+    bounded poll of `gh pr checks`; zero registered checks after the grace
+    window means a no-App-token host (the in-run validation is the gate
+    there).
+
+    CCE-140: `partial` alone no longer blocks. Every run this pipeline has
+    ever produced is partial, so the unconditional block meant the auto-merge
+    path never once fired on the flagship host and ten PRs were merged by
+    hand until the human stopped. `advance_cursor_backed` is the replacement
+    invariant: True only when advance_sha was assigned from a cursor that
+    passed `_sha_in_window`, i.e. the baseline moves by exactly the PRs whose
+    pages all landed.
+
+    Fact-checker warnings are NOT an eligibility input (CCE-140 / spec
+    Decision 4). They ride the PR body, the digest, and the notification.
+    `fact_warnings` is retained in the signature only so the caller's kwargs
+    and the digest composition need no change.
 
     Returns (merge_outcome, reasons): merge_outcome is the digest's
     ``{"merged": bool, "reason": str | None}``; reasons feed the caller's
@@ -2858,10 +3217,17 @@ def _maybe_auto_merge(
         # The configured normal path for a manual host — no reason entry,
         # the digest's merge_outcome line carries it.
         return {"merged": False, "reason": "policy_manual"}, []
-    if partial:
+    veto = merge_veto_reason(partial_reasons)
+    if veto:
+        return skip("merge_vetoed", veto)
+    if partial and not advance_cursor_backed:
+        # CCE-140 / spec Decision 2. A partial run whose advance came from the
+        # CCE-109 cursor has, by construction, advanced only past PRs whose
+        # pages all landed; its reverted pages stay in-window and are
+        # re-authored next run. A partial run that would advance to FULL HEAD
+        # has not — merging it promotes the baseline past work that was never
+        # authored, which is the silent-loss bug, automated nightly.
         return skip("partial_run")
-    if fact_warnings:
-        return skip("fact_check_warnings", f"{len(fact_warnings)} warning(s)")
 
     # Human-edit guard (same authority as D2 auto-close): run it on both
     # PR paths — on a fresh PR every commit is the bot's, so the extra
@@ -2876,14 +3242,30 @@ def _maybe_auto_merge(
 
     grace = merge_settings["checks_grace_seconds"]
     timeout = merge_settings["checks_timeout_seconds"]
-    if deadline is not None and clock() + grace > deadline:
+    # CCE-140: the CCE-109 run deadline governs the AUTHORING work — the
+    # expensive, interruptible part. It must not govern the merge epilogue,
+    # because the only run that can be cursor-backed is a time-truncated one,
+    # and a time-truncated run is BY DEFINITION already past `deadline`.
+    # Enforcing it here refuses every run this feature exists to merge: the
+    # gate three lines up opens, and this check closes it — the original
+    # never-auto-merges bug, one layer deeper and just as silent.
+    #
+    # The epilogue stays bounded, by the operator's own grace/timeout config
+    # measured from now instead of by the spent authoring budget. Operator
+    # consequence: a run that earns a merge may exceed `time_budget_seconds`
+    # by up to `merge.checks_timeout_seconds` (default 900s) while it waits
+    # out host CI. That is the designed cost of auto-merge on the
+    # non-truncated path already; CCE-140 makes the truncated path pay it too
+    # rather than forfeit the merge.
+    merge_deadline = None if advance_cursor_backed else deadline
+    if merge_deadline is not None and clock() + grace > merge_deadline:
         return skip("time_budget")
 
     start = clock()
     grace_end = start + grace
     poll_end = start + timeout
-    if deadline is not None:
-        poll_end = min(poll_end, deadline)
+    if merge_deadline is not None:
+        poll_end = min(poll_end, merge_deadline)
 
     while True:
         checks = gh.pr_checks(pr_number)

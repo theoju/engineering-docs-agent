@@ -8,6 +8,9 @@ synthesized_into: []
 
 # What's New
 
+## 2026-08-13T05:51:14.070980+00:00
+- PR #216: Moves the graphify semantic-extraction diagnosis from the gitignored `graphify-out/` build directory into a permanent `docs/runbooks/graphify-extraction-findings.md` file so the findings survive a directory rebuild or clean. The runbook documents that graphify extraction is not underproducing nodes (it generates ~4.2 nodes per file) but loses 64% of them at `graphify/llm.py:_out_of_scope`, which discards any node whose `source_file` names a real file not dispatched in the same chunk — explaining why the doc layer (specs/plans) consistently yields ~1 node per file regardless of document size. It also records that reducing batch size from 15 to 3 made cross-file attribution measurably worse (0.98 vs 1.02 nodes/file baseline), that the Gemini free tier is 20 requests per day (not per minute, so one full pass exhausts it), that `_FILE_CHAR_CAP` truncates 23 of 58 spec/plan files at 20,000 chars, an untried reference-aware batching fix, and a `graph.json` NetworkX `links`-vs-`edges` measurement trap that silently zeroes connectivity metrics. No production code changed; the file is placed under `docs/runbooks/` rather than `docs/site-src/` to sit outside the docs-agent lens path and its Tier-1 citation lints.
+
 ## 2026-08-10T19:17:56.705395+00:00
 - PR #207: Corrected a factual error on the docs site's architecture page describing the fact-checker's behavior. The page claimed the fact-checker "never mark[s] the run partial," but the orchestrator code contains a documented exception: a CCE-114 time-budget cut of the fact-checker loop does flip `partial`. The edit restores that parenthetical exception so the page matches the code.
 

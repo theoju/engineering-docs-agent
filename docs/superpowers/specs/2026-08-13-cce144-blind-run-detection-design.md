@@ -9,7 +9,7 @@
 
 The docs-agent nightly cannot report failure.
 
-`orchestrator_runner.run` returns `0` on every path. `main` returns whatever `run` returned, and the workflow's only signal is that exit code. A run in which every subagent was rejected by a rate limit is therefore a green check **by construction** — not by accident, and not by any recoverable condition.
+`orchestrator_runner.run` has no exit path for a run whose agents never answered. It returns `2` on a config error and `1` when the docs PR could not be opened; every other path returns `0`, including the `no_pr` path a fully rate-limited run takes. `main` returns whatever `run` returned, and the workflow's only signal is that exit code. A run in which every subagent was rejected by a rate limit is therefore a green check **by construction** — not by accident, and not by any recoverable condition.
 
 ### The incident
 
@@ -22,17 +22,19 @@ Runs `31472240064` (2026-08-11) and `31579090583` (2026-08-12) both report `conc
  "overageDisabledReason":"org_level_disabled"}}
 ```
 
-`returncode: 1`, `duration_ms: 344`, `total_calls: 0`. Both `source-collector` and `notifier` returned `None`. The watermark froze for three days. Nothing alarmed.
+`returncode: 1`, `duration_ms: 344`, `total_calls: 0`. Both `source-collector` and `notifier` returned `None`. Nothing alarmed.
+
+The 08-11 run's PR (#214) was closed unmerged by the D2 auto-close sweep, so its watermark write was discarded. The 08-12 run's PR (#215) merged — and carried its watermark advance with it. See "The watermark hazard already fired" below.
 
 ### Three independent layers of silence
 
-1. **No non-zero exit exists.** Every `return` in `run` is `0`.
+1. **No exit path distinguishes a dead run.** `run` has seven returns: `2` on a config error (three sites), `1` when the docs PR could not be opened, and `0` on the remaining three. Exit `1` therefore already means "this run failed" — but only for that one narrow cause. A run whose agents never answered takes the `no_pr` path and returns `0`.
 2. **The alarm shares the failure mode.** `notifier` is a Claude CLI subagent drawing on the same quota as the agents it reports on. A quota outage silences the work and its own alarm simultaneously — a correlated single point of failure that no scheduling change touches.
 3. **The fallback diagnostic reads the wrong file.** The `Print partial-run reasons` workflow step greps `.engineering-docs-agent/state.json` for `.current_run.partial_reasons`. But `state_io.save_persistent_state` filters `_EPHEMERAL_KEYS = ("current_run",)` before writing; the reasons go to the sibling `current_run.json`, which the workflow never reads. Verified on disk: `state.json` contains exactly `last_successful_run` and `version`. The step prints nothing, always, and exits 0 either way — indistinguishable from a run with no reasons.
 
 Layer 3 is a decomposition casualty. The step was added when `partial_reasons` lived in `state.json`; the later ephemeral split moved the key for good reasons (merge-as-promotion should commit only durable state) and the reader was never updated.
 
-### The latent watermark hazard
+### The watermark hazard already fired
 
 `orchestrator_runner` coerces a dead source-collector into a valid empty result set:
 
@@ -45,7 +47,13 @@ if sources is None:
 
 "Prevented from judging" becomes "judged: nothing to do." Downstream cannot tell the difference.
 
-The `last_successful_run` assignment is unconditional — its only enclosing block is the `try:` in `run`, not `if prs:` and not any success guard. Today this is not a live data-loss bug, but only because of **merge-as-promotion**: zero PRs means zero authored pages, no docs PR is opened, and the local state write is discarded when the runner is torn down. The guard is incidental. A blind run that authored even one page — a deterministic generator producing a diff, say — would open a PR carrying a watermark advanced past PRs nobody ever read. `last_successful_run` is a consume-once cursor; that loss is permanent.
+The `last_successful_run` assignment is unconditional — its only enclosing block is the `try:` in `run`, not `if prs:` and not any success guard. This is not a latent hazard. It has already caused permanent loss, on this repo, in the incident above.
+
+Run `31579090583` produced PR #215, merged as `3140b9c`, which advanced `last_successful_run.head_sha` from `0c88411` to `08b27e2`. That window contains three feature PRs — #211 (CCE-138), #212 (CCE-139), #213 (CCE-140) — and `grep -rl 'CCE-138\|CCE-139\|CCE-140' docs/site-src/` returns nothing. The cursor now sits at `956144f`, far past `08b27e2`, so those three PRs are behind it for good. `last_successful_run` is a consume-once cursor: no future run will ever read that window again.
+
+An earlier draft of this spec argued the hazard was latent, held off by **merge-as-promotion** — zero PRs means zero authored pages, no docs PR, and the local state write is discarded. Every step of that reasoning is wrong, for one reason it missed: `.engineering-docs-agent/state.json` is a **tracked** file on every host, and `_stage_docs_run_changes` runs `git add -A .` with no "nothing staged → skip PR" guard. `completed_at` is a fresh timestamp on every run, so state.json always diffs and a PR is always opened. Merge-as-promotion promotes the advance; it does not gate it.
+
+PR #215 presented as a routine archive-index refresh — its only other files were deterministic-generator output (`.doc-source-map.json`, `archive/index.md`, `archive/plans.md`) — with the watermark advance buried in the diff. There was no signal that it carried three PRs' worth of skipped work.
 
 ## Design
 
@@ -102,7 +110,9 @@ On `current_run`:
 
 ### Exit code
 
-`run` returns `1` when `current_run.blind` is true, `0` otherwise. `2` remains reserved for `ConfigError`. Every existing `return 0` path keeps returning `0` unless the run is blind.
+`run` returns `1` when `current_run.blind` is true, `0` otherwise. Every existing `return 0` path keeps returning `0` unless the run is blind.
+
+Exit `1` is not a new code. `run` already returns `1` when the docs PR could not be opened, which is the same class of signal — "this run failed, read the reasons." Blind joins that class rather than competing with it, and the operator action is identical for both, so the shared code carries no ambiguity worth a third value. `2` stays with the config-error paths.
 
 The exit code is the channel because it is the only one requiring **zero provisioning**: GitHub's native failure email and a red run-history entry need no secret, no webhook, and no config. It is also the only channel that survives total quota exhaustion, since nothing in the path invokes the Claude CLI.
 
@@ -112,7 +122,29 @@ The `last_successful_run` advance is skipped when the run is blind. The cursor s
 
 ### Auto-merge interlock
 
-No new code. Blind implies `partial`, and `_maybe_auto_merge` already returns `skip("partial_run")` on `partial`. Recorded here so a future reader does not add a redundant gate.
+**This needs new code.** An earlier draft claimed it did not, on the premise that blind implies `partial` and `partial` blocks the merge. That premise held until CCE-140 (`08b27e2`, merged 2026-08-12) narrowed the gate to:
+
+```python
+if partial and not advance_cursor_backed:
+    return skip("partial_run")
+```
+
+CCE-140's reasoning is sound for a _degraded_ run: a cursor-backed advance moves the baseline only past PRs whose pages all landed, so merging it promotes nothing unread. It does not transfer to a _blind_ run. The cursor proves the baseline is honest about what the run **saw**; a blind run did not see.
+
+The gap is reachable, not theoretical. A run that truncates on the CCE-109 time budget sets `advance_cursor_backed = True`. If its `content-validator` dispatch then returns `None`, the run is blind, `partial`, and cursor-backed at once. `_MERGE_VETO_REASON_PREFIXES` is `("app_token_unavailable",)` — a hand-maintained allowlist that does not match `content_validator_invalid` — so no veto fires, `partial and not True` is false, and the merge proceeds. `merge_deadline` is also disabled on the cursor-backed path, removing the time-budget skip that might otherwise have caught it.
+
+`_maybe_auto_merge` therefore gains a `blind: bool = False` keyword and skips unconditionally:
+
+```python
+if blind:
+    return skip("blind_run")
+```
+
+placed **before** the CCE-140 `partial and not advance_cursor_backed` test, next to the existing veto check. `_MERGE_VETO_REASON_PREFIXES` is left alone: once `app_token_unavailable` classifies as blind that entry is redundant, but removing it is a separate behavior change carrying its own risk, and the redundancy costs nothing.
+
+The veto list is the load-bearing lesson here. CCE-140 recognized that narrowing the `partial` gate reopened a hole for one blind reason, and patched it with a string-prefix allowlist — scar tissue from this exact mistake, made once already. An allowlist must be extended by hand for every new blind reason, which is the same classification decay the fail-safe default exists to prevent. Gating on the computed `blind` flag closes the class instead of one member of it.
+
+CLAUDE.md's CCE-127 bullet still states the gate as `if partial: return skip("partial_run")`. That is where this spec inherited the error, and it is corrected in the same change.
 
 ### Workflow repair
 
@@ -127,6 +159,8 @@ CI does not lint `templates/` — `.github/workflows/actionlint.yml` runs bare `
 **Moving the nightly cron.** Considered and rejected as the primary fix. A weekly limit resets once per week, so cron placement rescues at most one night in seven — 08-12 sat near the boundary, 08-11 did not. It is also not the cheap change it appears: hour `7` is hardcoded in `templates/workflow-run.yml`, the dogfood workflow, and `scripts/scaffold_workflow.py`, whose regex both anchors on the literal `7 7` and re-emits the hour in its substitution — only the _minute_ is hashed per host. Plus six test assertions, a published page stating the cron literally, and a re-scaffold of every provisioned host. And the 09:00 UTC boundary is a property of one Anthropic account's quota window, not of arbitrary host repos: encoding it in the fleet default would violate the generic-first mandate. Observed queue drift for the current cron is 48–159 minutes, so the start time is a two-hour-wide distribution that cannot be precisely targeted at a boundary anyway.
 
 **Enabling notifications.** The dogfood sends no digest at all today, healthy or not. An operator decision, tracked separately.
+
+**Recovering the three lost PRs.** CCE-138, CCE-139, and CCE-140 sit behind the cursor and no future run will read them. This change prevents the next occurrence; it cannot replay the last one. Rewinding `last_successful_run.head_sha` to `0c88411` would put that window back in scope, at the cost of re-processing every PR merged since — a week's worth, in one docs PR. That is an operator decision about live host state, and it belongs in its own ticket. It is named here rather than omitted, because a fix that leaves the damage in place and says nothing reads as a fix that repaired it.
 
 ## Generic-first
 
@@ -158,6 +192,12 @@ TDD throughout; every test fails first.
 - degraded run advances it
 - clean run advances it
 
+**Auto-merge interlock**
+
+- blind **and** `advance_cursor_backed=True` → skipped. This is the case current code merges; it is the regression test for the whole section.
+- blind and `advance_cursor_backed=False` → skipped, and the recorded reason is `auto_merge_skipped: blind_run`, not `partial_run`. Asserting the reason string is the point: without it the CCE-140 gate silently covers for a missing blind gate and the test passes against code that does not have one.
+- degraded and `advance_cursor_backed=True` → still merges, exactly as CCE-140 intends. This is the alarm-fatigue guard: it fails if the blind classification over-reaches into the path CCE-140 exists to serve.
+
 **Fixture dry-run integration**
 
 - `source-collector` returns `None` → blind, exit `1`, watermark frozen
@@ -187,3 +227,4 @@ A test that enumerates every blocking `add_partial` call site in `scripts/orches
 3. `Print partial-run reasons` emits actual reasons on a partial run.
 4. A blind run cannot advance `last_successful_run`.
 5. An unclassified new blocking `add_partial` call site fails the classification-coverage test.
+6. A blind run does not auto-merge its PR, including when its advance is cursor-backed, and records `auto_merge_skipped: blind_run`.

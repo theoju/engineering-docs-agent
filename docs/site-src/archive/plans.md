@@ -1,11 +1,14 @@
 # Plans archive
 
-_Auto-generated; 71 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 74 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
 ## 2026-08
 
 | Title | Status | Summary |
 |---|---|---|
+| [Track B — Autonomous Merge Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-08-10-cce-140-autonomous-merge.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
+| [Track C — citation resolution (plugin) Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-08-10-cce-139-citation-source-roots.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development |
+| [Track A — Cursor Honesty Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-08-10-cce-138-cursor-honesty.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-131 `citation_exists` False-Positive Closure — Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-08-08-cce131-citation-exists-false-positive-closure.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [CCE-127 — App-Token Degrade-to-Partial Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-08-07-cce127-app-token-degrade-partial.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 

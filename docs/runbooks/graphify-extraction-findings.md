@@ -51,6 +51,7 @@ The filter is well-designed in general. It is wrong for this document genre.
 | topoff   | 2     | 20    | 2.45           | 1.10       | 0.95        |
 | retry1   | 1     | 1     | 1.00           | 1.00       | 0.00        |
 | batch3   | 3     | 42    | 0.98           | not merged | —           |
+| refaware | 3+cit | 20    | 0.55           | not merged | —           |
 
 The topoff pass at batch 2 suggested small batches were ~6x better. **It did
 not reproduce.** Batch 3 over the specs returned 0.98 nodes/file against a 1.02
@@ -82,13 +83,54 @@ That run is preserved at
   never reads it.** Re-runs always hit the API. There is no cache-replay risk,
   and no cache-replay saving.
 
-## What would actually fix it
+## Reference-aware batching: tried 2026-08-13, rejected
 
-**Reference-aware batching.** Parse each spec's cited code paths — this repo
-cites them explicitly, per the line-free `path/to/file.py` convention in
-CLAUDE.md — and dispatch the spec together with the files it cites, so
-cross-file attribution lands in scope. This targets the 114 dropped nodes
-directly. Untried; blocked on quota at time of writing.
+The fix this document originally proposed — dispatch each spec together with the
+code files it cites, so cross-file attribution lands in scope — was implemented
+(`graphify-out/reference_aware_extract.py`) and run over 20 documents in 7
+requests. **It works as a mechanism and fails as a fix.**
+
+| Measure            | Flat batching | Reference-aware |
+| ------------------ | ------------- | --------------- |
+| Target-nodes/doc   | 1.02          | **0.55**        |
+| Out-of-scope loss  | 64%           | **16%**         |
+| Code nodes rescued | 0             | **84**          |
+
+The rescue is real: 84 concept nodes about `scripts/orchestrator_runner.py`,
+`scripts/state_io.py`, `scripts/gh_client.py` and friends survived, where every
+prior pass discarded them. They attach to the **companions**, though, not to the
+specs — which is consistent, since those nodes were always _about_ the
+companions.
+
+Doc depth got worse, and the reason is **crowding**:
+
+| Files dispatched | Target-nodes/doc |
+| ---------------- | ---------------- |
+| 11               | 1.00             |
+| 12               | 0.67             |
+| 13               | 1.00             |
+| 16               | 0.33             |
+| 18               | **0.00**         |
+| 18               | **0.00**         |
+| 19               | 1.00             |
+
+Two batches returned **zero** nodes for their spec documents while producing 11
+and 17 code nodes; the model omitted the targets outright. The response budget
+per request looks roughly fixed, and code wins the competition against prose, so
+adding companions reallocates capacity rather than adding it. (n=7, and the
+19-file batch scoring 1.00 breaks a clean threshold reading — treat crowding as
+real and the exact cutoff as unestablished.)
+
+**Do not merge that run.** `build_merge` replaces every `source_file` present in
+the new extraction, so merging would swap 0.55/doc in for the existing 1.02/doc
+— a net deletion of doc coverage in exchange for code nodes. The run is
+quarantined at `graphify-out/.graphify_gemini_refaware.jsonl.rejected`.
+
+The correction this forces: rescuing a node and improving the metric it was
+rescued _for_ are different claims, and the original text let the first imply
+the second. Four passes now agree that a spec yields ~1 node about itself and
+that the number does not move under any batching change — which points at the
+extraction prompt, not the batching, as the ceiling. That remains untested.
 
 Rejected alternatives:
 
@@ -113,6 +155,33 @@ Rejected alternatives:
    must therefore write to its own `GX_PROGRESS` file — pointing it at an
    existing pass file whose records already cover the inputs yields
    "nothing to do".
+
+## One minified fixture was 35% of the graph, and it kept coming back
+
+`tests/fixtures/diagrams/render/mermaid.min.js` is a vendored, minified bundle
+kept deliberately as a render fixture. It is therefore **git-tracked**, so
+`.gitignore` cannot exclude it. AST extraction walks every minified symbol and
+emits **2,167 nodes** from that one file — 35% of the whole graph, all of it
+noise that distorts god-node and community analysis.
+
+It was filtered out by hand on 2026-08-10 and silently came back, because the
+globally-seeded `.git/hooks/post-commit` runs `graphify update` after every
+commit. That hook is AST-only and costs nothing, which is why it goes unnoticed:
+it re-extracts from a clean detect and knows nothing about a one-off manual
+filter. Any fix applied to the graph rather than to the _inputs_ is undone by
+the next commit.
+
+The durable fix is `.graphifyignore` at the repo root (gitignore syntax;
+graphify's loader guarantees it can only ever exclude more, never re-include).
+With `*.min.js` / `*.min.css` excluded, detection drops from 819 to 818 files
+and the graph goes 6,196 -> 4,029 nodes with 0 dangling links and all 425
+semantic nodes preserved.
+
+Two general lessons. A build artifact that is _tracked_ defeats every
+git-status-based filter, so "is it tracked?" is not a sufficient proxy for "is
+it source?". And a silent, free, automatic refresh is exactly the kind of
+process that quietly reverts manual curation — check for one before concluding
+that a graph regression came from your own last action.
 
 ## Driver
 

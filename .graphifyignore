@@ -1,0 +1,20 @@
+# graphify: files to keep OUT of the knowledge graph.
+#
+# gitignore syntax. Per graphify's loader this can only ever exclude MORE than
+# .gitignore — a pattern here can never re-include something git ignores.
+#
+# Why this file exists: `tests/fixtures/diagrams/render/mermaid.min.js` is a
+# vendored, minified bundle kept deliberately as a render fixture, so it is
+# git-tracked and .gitignore cannot exclude it. AST extraction walks every
+# minified symbol in it and emits 2,167 nodes — 35% of the entire graph from a
+# single file, all of it noise that crowds out real code in god-node and
+# community analysis.
+#
+# It was filtered out by hand on 2026-08-10, then silently returned: the
+# globally-seeded .git/hooks/post-commit runs `graphify update` after every
+# commit, which re-extracts from a clean detect and knows nothing about a
+# one-off manual filter. Only an ignore file makes the exclusion durable.
+
+# Minified/vendored bundles — no readable symbols, enormous node counts.
+*.min.js
+*.min.css

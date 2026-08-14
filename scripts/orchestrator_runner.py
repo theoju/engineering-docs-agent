@@ -1571,13 +1571,17 @@ def run(
         _record_dispatch_reasons(state, reasons, ok=sources is not None)
         if sources is None:
             if not reasons:
-                add_partial(state, "source_collector_invalid: returned None")
+                add_partial(
+                    state, "source_collector_invalid: returned None", degraded=False
+                )
             sources = {"prs": [], "jira_issues": []}
         else:
             if sources.get("error"):
-                add_partial(state, f"source_collector_error: {sources['error']}")
+                add_partial(
+                    state, f"source_collector_error: {sources['error']}", degraded=False
+                )
             if sources.get("partial"):
-                add_partial(state, "source_collector_partial: true")
+                add_partial(state, "source_collector_partial: true", degraded=False)
 
         # CCE-19: orchestrator-side safety net. The source-collector agent's
         # prompt was observed in 3/5 CCE-16 baseline runs to return PRs whose
@@ -1595,7 +1599,7 @@ def run(
                 out_reasons=clip_reasons,
             )
         for r in clip_reasons:
-            add_partial(state, r)
+            add_partial(state, r, degraded=True)
 
         prs = sources.get("prs", [])
         prs = _order_prs_oldest_first(
@@ -1644,6 +1648,7 @@ def run(
                     f"time_budget_exceeded: admitted {i}/{len(prs)} PRs "
                     f"(budget {budget}s); deferring PR #{pr.get('number')} "
                     f"to next run",
+                    degraded=True,
                 )
                 # A deferred PR without a merge_sha can't be re-anchored by the
                 # next window — advancing past it would lose it forever, so the
@@ -1672,12 +1677,17 @@ def run(
             _record_dispatch_reasons(state, reasons, ok=summary is not None)
             if summary is None:
                 if not reasons:
-                    add_partial(state, f"pr_summarizer_invalid: pr={pr['number']}")
+                    add_partial(
+                        state,
+                        f"pr_summarizer_invalid: pr={pr['number']}",
+                        degraded=False,
+                    )
                 continue
             if summary.get("error"):
                 add_partial(
                     state,
                     f"pr_summarizer_error: pr={pr['number']}: {summary['error']}",
+                    degraded=False,
                 )
                 continue
             # Use the PR's actual number, not summary's echo (which is fixture-static in tests).
@@ -1744,6 +1754,7 @@ def run(
                     state,
                     f"time_budget_exceeded: authored {i}/{len(per_target)} "
                     f"page batches (budget {budget}s); deferring the rest",
+                    degraded=True,
                 )
                 # Track A: an authoring truncation is a truncation. Without
                 # this the advance block below falls through to
@@ -1759,16 +1770,16 @@ def run(
             try:
                 lens_path, _opts = resolve_lens(config, lens)
             except KeyError:
-                add_partial(state, f"unknown_lens: {lens}")
+                add_partial(state, f"unknown_lens: {lens}", degraded=True)
                 continue
             target_path = repo_root / lens_path / hint
             try:
                 rel = target_path.resolve().relative_to(repo_root.resolve())
             except ValueError:
-                add_partial(state, f"unsafe_page_path: {hint}")
+                add_partial(state, f"unsafe_page_path: {hint}", degraded=True)
                 continue
             if not _page_target_is_editable(str(rel), editable_globs):
-                add_partial(state, f"unsafe_page_path: {rel}")
+                add_partial(state, f"unsafe_page_path: {rel}", degraded=True)
                 continue
             target_path.parent.mkdir(parents=True, exist_ok=True)
             action = "edit" if target_path.exists() else "create"
@@ -1841,7 +1852,7 @@ def run(
             _record_dispatch_reasons(state, reasons, ok=out is not None, degraded=True)
             if out is None:
                 if not reasons:
-                    add_partial(state, f"page_author_invalid: {rel}")
+                    add_partial(state, f"page_author_invalid: {rel}", degraded=True)
                 continue
             if out.get("ok"):
                 authored.append(str(target_path))
@@ -1885,7 +1896,11 @@ def run(
             _record_dispatch_reasons(state, reasons, ok=validation is not None)
             if validation is None:
                 if not reasons:
-                    add_partial(state, "content_validator_invalid: returned None")
+                    add_partial(
+                        state,
+                        "content_validator_invalid: returned None",
+                        degraded=False,
+                    )
                 validation = {"failed": []}
             for fail in validation.get("failed", []):
                 if fail.get("severity") == "block":
@@ -1901,12 +1916,15 @@ def run(
                         add_partial(
                             state,
                             f"lint_block_unsafe_path: {fail['path']} (outside repo)",
+                            degraded=True,
                         )
                         continue
                     # Reject empty / "." paths that would cause git checkout HEAD -- .
                     # to restore the entire working tree.
                     if str(rel) in (".", ""):
-                        add_partial(state, "lint_block_unsafe_path: empty path")
+                        add_partial(
+                            state, "lint_block_unsafe_path: empty path", degraded=True
+                        )
                         continue
                     # If the file exists in HEAD, restore it (edit case).
                     # If not (create case), remove it.
@@ -1943,6 +1961,7 @@ def run(
                     add_partial(
                         state,
                         f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}",
+                        degraded=True,
                     )
                     # CCE-140: the page was just reverted or deleted, so its
                     # batch did NOT land and its PRs are still owed a page.
@@ -2009,6 +2028,7 @@ def run(
                         f"time_budget_exceeded: fact-checked {i}/"
                         f"{len(fact_pages)} pages (budget {budget}s); "
                         f"skipping the rest",
+                        degraded=True,
                     )
                     break
                 page_path = Path(page)
@@ -2123,6 +2143,7 @@ def run(
                     state,
                     f"time_budget_exceeded: gap-checked {i}/{len(prs)} PRs "
                     f"(budget {budget}s); skipping the rest",
+                    degraded=True,
                 )
                 break
             pr_id = f"{repo['owner']}/{repo['name']}#{pr['number']}"
@@ -2155,7 +2176,9 @@ def run(
             )
             if verdict is None:
                 if not reasons:
-                    add_partial(state, f"gap_detector_invalid: pr_id={pr_id}")
+                    add_partial(
+                        state, f"gap_detector_invalid: pr_id={pr_id}", degraded=True
+                    )
                 continue
             if verdict.get("needs_spec") is None:
                 # CCE-125: a validated null needs_spec is the agent's "couldn't
@@ -2248,6 +2271,7 @@ def run(
                     state,
                     "time_budget_no_advance_no_cursor: truncated run had no "
                     "admitted PR with a usable merge_sha; baseline unchanged",
+                    degraded=True,
                 )
             elif any(not (p.get("merge_sha") or "").strip() for p in still_deferred):
                 add_partial(
@@ -2255,12 +2279,14 @@ def run(
                     f"time_budget_no_advance_unanchored_deferred: a deferred "
                     f"PR has no merge_sha and would be stranded behind cursor "
                     f"{cursor[:8]}; baseline unchanged",
+                    degraded=True,
                 )
             elif full_cursor is None:
                 add_partial(
                     state,
                     f"time_budget_advance_out_of_window: cursor {cursor[:8]} "
                     f"unresolvable in repo ({window}); baseline unchanged",
+                    degraded=True,
                 )
             else:
                 ok, why = _sha_in_window(
@@ -2286,6 +2312,7 @@ def run(
                         state,
                         f"time_budget_advance_out_of_window: cursor "
                         f"{full_cursor[:8]} {why} ({window}); baseline unchanged",
+                        degraded=True,
                     )
         else:
             advance_sha = state["current_run"]["head_sha"]
@@ -2330,6 +2357,7 @@ def run(
                     f"{int(_deferral_counts.get(_k, 0))} consecutive deferrals "
                     f"(threshold {_threshold}); pages="
                     + (", ".join(_pages) if _pages else "(none authored)"),
+                    degraded=True,
                 )
             merge_skipped_pr_records(state, _records)
         # CCE-140: prune and increment on EVERY run, not only a truncated one.
@@ -2466,7 +2494,7 @@ def run(
         _record_dispatch_reasons(state, reasons, ok=notifier_result is not None)
         if notifier_result is None:
             if not reasons:
-                add_partial(state, "notifier_invalid: returned None")
+                add_partial(state, "notifier_invalid: returned None", degraded=False)
             save_persistent_state(state_path, state)
             save_current_run(state_path, state)
         return 0

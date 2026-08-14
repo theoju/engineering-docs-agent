@@ -950,6 +950,24 @@ def _record_dispatch_reasons(
         add_partial(state, r, info_only=ok, degraded=degraded)
 
 
+def _exit_code(state: dict) -> int:
+    """CCE-144: 1 when the run is blind, else 0.
+
+    Exit 1 is not a new code — `run` already returns 1 when the docs PR could
+    not be opened, which is the same class of signal ("this run failed, read
+    the reasons"). Blind joins that class rather than competing with it, so an
+    operator reading only the run status takes the same action for both.
+    Exit 2 stays with the config-error paths.
+
+    The exit code is the alarm channel because it is the only one requiring
+    zero provisioning: GitHub's native failure email and a red run-history
+    entry need no secret, no webhook, no config. It is also the only channel
+    that survives total quota exhaustion, since nothing in this path invokes
+    the Claude CLI — which is exactly the outage it must report.
+    """
+    return 1 if (state.get("current_run") or {}).get("blind") else 0
+
+
 def dispatch_verified(
     name: str,
     inputs: dict,
@@ -1554,7 +1572,7 @@ def run(
                 f"processed in this hour.",
                 file=sys.stdout,
             )
-            return 0
+            return _exit_code(state)
 
         jira_payload = config.get("sources", {}).get("jira")
         sc_inputs = {
@@ -2397,7 +2415,7 @@ def run(
         save_persistent_state(state_path, state)
         save_current_run(state_path, state)
         if no_pr:
-            return 0
+            return _exit_code(state)
         branch = branch_name(now)
         gh = GhClient(repo_root)
         pr_number, pr_reasons = open_or_append_pr(
@@ -2497,7 +2515,7 @@ def run(
                 add_partial(state, "notifier_invalid: returned None", degraded=False)
             save_persistent_state(state_path, state)
             save_current_run(state_path, state)
-        return 0
+        return _exit_code(state)
     finally:
         try:
             _emit_shutdown_dump(state)

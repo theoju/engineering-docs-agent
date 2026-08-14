@@ -325,7 +325,7 @@ def test_app_token_veto_blocks_the_merge_end_to_end(
         time_budget_seconds=100,
         now_monotonic=_fake_clock([0, 50, 150]),
     )
-    assert rc == 0
+    assert rc == 1  # app_token_unavailable is blind (blocking reason)
     cr = read_current_run(state_path)
     assert runner._LAST_ADVANCE_CURSOR_BACKED is True, (
         "the run must still be cursor-backed, or this test proves nothing "

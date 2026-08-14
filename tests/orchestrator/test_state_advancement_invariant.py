@@ -73,7 +73,9 @@ def test_partial_run_via_source_collector_error_advances_state(
     head_sha = _head_sha(tmp_path)
 
     result = _run_subproc(tmp_path, FAKES_SC_ERROR)
-    assert result.returncode == 0, f"runner failed: {result.stderr}"
+    assert result.returncode == 1, (
+        f"source_collector_error is blind (blocking reason); runner failed: {result.stderr}"
+    )
 
     written = json.loads(state_path.read_text())
     assert written["last_successful_run"]["head_sha"] == head_sha, (

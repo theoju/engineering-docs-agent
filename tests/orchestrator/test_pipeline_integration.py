@@ -573,7 +573,7 @@ def test_invalid_subagent_json_logs_partial_continues(
 
     state_path = init_pipeline_host()
     rc = runner.run(tmp_path, dry_run_dir=FAKES_BAD_JSON, no_pr=True)
-    assert rc == 0
+    assert rc == 1  # pr_summarizer_invalid is blind (blocking reason)
 
     cr = read_current_run(state_path)
     reasons = cr["partial_reasons"]
@@ -680,7 +680,7 @@ def test_source_collector_error_propagates_partial(
 
     state_path = init_pipeline_host()
     rc = runner.run(tmp_path, dry_run_dir=FAKES_SC_ERROR, no_pr=True)
-    assert rc == 0
+    assert rc == 1  # source_collector_error is blind (blocking reason)
 
     cr = read_current_run(state_path)
     reasons = cr["partial_reasons"]

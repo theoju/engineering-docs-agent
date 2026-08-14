@@ -926,21 +926,28 @@ def dispatch_validated(
     return raw, dispatch_reasons
 
 
-def _record_dispatch_reasons(state: dict, reasons: list[str], *, ok: bool) -> None:
-    """Record dispatch_validated reasons onto the run state. (CCE-118)
+def _record_dispatch_reasons(
+    state: dict, reasons: list[str], *, ok: bool, degraded: bool = False
+) -> None:
+    """Record dispatch reasons, classified.
 
-    A dispatch that returned usable output (``ok=True``) can only carry benign
-    ``prose_contamination_rescued`` diagnostics — a schema failure forces the
-    dispatch output to None (see ``dispatch_validated`` above) — so its reasons
-    are recorded ``info_only`` and must NOT flip ``partial``. When the dispatch
-    failed (``ok=False``) the reasons explain dropped work and DO flip
-    ``partial``.
+    When the dispatch SUCCEEDED (``ok=True``) its reasons are retry/warning
+    noise: they are recorded ``info_only`` and must NOT flip ``partial``.
+    When the dispatch failed (``ok=False``) the reasons explain dropped work
+    and DO flip ``partial``.
 
     Advisory layers (fact-checker, deterministic generators) record
     ``info_only=True`` directly and do not route through this helper.
+
+    CCE-144: a failed dispatch is BLIND by default — the agent never answered,
+    so the pipeline was prevented from judging. Pass ``degraded=True`` at the
+    two callsites whose failure holds work back rather than consuming it
+    (page-author, whose unlanded batch keeps its PR out of the advance cursor;
+    gap-detector, whose output is advisory and outside the merge gate).
+    ``ok=True`` outranks ``degraded`` — an advisory reason is advisory.
     """
     for r in reasons:
-        add_partial(state, r, info_only=ok)
+        add_partial(state, r, info_only=ok, degraded=degraded)
 
 
 def dispatch_verified(
@@ -1828,7 +1835,10 @@ def run(
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,
             )
-            _record_dispatch_reasons(state, reasons, ok=out is not None)
+            # CCE-144: degraded, not blind. An unlanded batch is folded into
+            # deferred_pages_by_pr by the complement writer below, holding its
+            # PR out of the advance cursor — the page is re-authored next run.
+            _record_dispatch_reasons(state, reasons, ok=out is not None, degraded=True)
             if out is None:
                 if not reasons:
                     add_partial(state, f"page_author_invalid: {rel}")
@@ -2137,7 +2147,12 @@ def run(
                 cwd=repo_root,
                 inject={"pr_id": pr_id},  # CCE-120: orchestrator-authoritative identity
             )
-            _record_dispatch_reasons(state, reasons, ok=verdict is not None)
+            # CCE-144: degraded, not blind. gap-detector output feeds only a
+            # PR note and is excluded from the CCE-101 auto-merge gate, so a
+            # failure here consumes no docs content.
+            _record_dispatch_reasons(
+                state, reasons, ok=verdict is not None, degraded=True
+            )
             if verdict is None:
                 if not reasons:
                     add_partial(state, f"gap_detector_invalid: pr_id={pr_id}")

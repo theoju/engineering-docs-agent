@@ -339,9 +339,12 @@ def test_a_pr_at_the_threshold_is_skipped_and_recorded(
     _real_add_partial = orun.add_partial
     seen: list[tuple[str, bool]] = []
 
-    def _spy(state, reason, *, info_only=False):
+    def _spy(state, reason, *, info_only=False, degraded=False):
+        # CCE-144 widened add_partial's signature; the spy must accept the new
+        # kwarg and forward it, or every callsite that classifies a reason
+        # raises TypeError through this monkeypatch.
         seen.append((reason, info_only))
-        return _real_add_partial(state, reason, info_only=info_only)
+        return _real_add_partial(state, reason, info_only=info_only, degraded=degraded)
 
     monkeypatch.setattr(orun, "add_partial", _spy)
     rc = orun.run(

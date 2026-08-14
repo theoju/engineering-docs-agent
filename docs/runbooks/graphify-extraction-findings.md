@@ -10,6 +10,13 @@ ceiling, not the batching.** A document-genre instruction takes a spec from 1
 node to 6–8. Three batching experiments moved the number by less than 0.5. See
 "The prompt is the ceiling" below.
 
+**Second answer, added 2026-08-13: the backend is now `claude-cli` on Haiku, not
+Gemini.** A real corpus run then delivered **6.37 nodes/doc over 81 documents**,
+so this document's original "untested at scale" caveat is discharged. Anything
+below framed around Gemini's 20-requests-per-day ceiling describes a backend this
+repo no longer uses — see "The Haiku backend" for what replaced it, and for which
+of the findings below turned out to be Gemini-specific rather than universal.
+
 Code references below point into the **graphify library**
 (`graphifyy`, installed as a uv tool), not into this repo.
 
@@ -90,7 +97,8 @@ That run is preserved at
   claim came from reading the constant at its definition site without reading
   its caller — `_FILE_CHAR_CAP` genuinely looks like a truncation cap there.
 
-- **The Gemini free tier is 20 requests per _day_**, not per minute:
+- **(Historical — Gemini only; the repo now runs `claude-cli`/Haiku.)** **The
+  Gemini free tier is 20 requests per _day_**, not per minute:
   `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, `quotaValue: 20`,
   model `gemini-3-flash`. Re-extracting all 58 files at batch 3 costs ~20
   requests — the entire daily allowance. Iterating on extraction quality more
@@ -138,6 +146,10 @@ per request looks roughly fixed, and code wins the competition against prose, so
 adding companions reallocates capacity rather than adding it. (n=7, and the
 19-file batch scoring 1.00 breaks a clean threshold reading — treat crowding as
 real and the exact cutoff as unestablished.)
+
+> **Crowding is a property of the model, not of batching.** Everything in this
+> section was measured on Gemini. Haiku shows no chunk-3 depth tax at all — see
+> "The Haiku backend". Do not carry a crowding budget across a backend change.
 
 **Do not merge that run.** `build_merge` replaces every `source_file` present in
 the new extraction, so merging would swap 0.55/doc in for the existing 1.02/doc
@@ -244,13 +256,89 @@ Connect the concept nodes to the document node and to each other with edges
   floor from partial coverage, measured under different conditions than the
   single-chunk runs. It is recorded here so the number is not mistaken for a
   comparable result later.
-- **Untested at scale.** Applying this to the full corpus costs the entire
-  20-request/day free-tier allowance across several days, and oversized plans
-  cost ~7 requests each. Whether the per-file gain survives multi-file chunks is
-  exactly the question crowding raised in the reference-aware pass, and it is
-  unanswered.
+- ~~**Untested at scale.**~~ **Discharged 2026-08-13.** This read: "applying
+  this to the full corpus costs the entire 20-request/day free-tier allowance
+  across several days… whether the per-file gain survives multi-file chunks is
+  unanswered." Both halves are now answered. On `claude-cli`/Haiku the free-tier
+  ceiling does not apply, and a real `--update` over 81 documents returned
+  **6.37 nodes/doc** at chunk 3 — the gain survives multi-file chunks on this
+  backend. See "The Haiku backend".
 
-## Two measurement traps hit while diagnosing this
+## The Haiku backend: switched 2026-08-13
+
+The repo now routes semantic extraction through `claude-cli` on Haiku against a
+Claude subscription. Gemini's 20-requests-per-day ceiling was the binding
+constraint on every experiment above — it is why this investigation took three
+days — and it no longer applies.
+
+### Head-to-head, identical 3-file chunk, identical DOCUMENT MODE prompt
+
+| Measure         | Gemini | Haiku (claude-cli) |
+| --------------- | ------ | ------------------ |
+| Nodes           | 10     | **19**             |
+| Internal edges  | 5      | **30**             |
+| Cross-doc edges | 2      | **3**              |
+| Out-of-scope    | 0      | 0                  |
+| Wall clock      | ~40s   | 3m14s              |
+
+Haiku's labels are also more precise: "Auto-merge eligibility: partial==false AND
+no fact warnings AND no human edits" against Gemini's "Merge Eligibility Gate".
+The first is the actual predicate; the second is a section heading.
+
+**No crowding tax.** Haiku returned 6.33 nodes/doc at chunk 3 — its own solo
+depth. The chunk-3 degradation documented in the reference-aware section is a
+Gemini property and does not transfer.
+
+### The real corpus run
+
+`/graphify . --update` over 81 changed documents, chunk 3, concurrency 4:
+
+| Measure               | Result              |
+| --------------------- | ------------------- |
+| Nodes/doc             | **6.37**            |
+| Nodes/doc, prose only | **8.32**            |
+| Failed chunks         | **0 of 37**         |
+| Wall clock            | 16 min              |
+| Graph                 | 4,011 → 4,446 nodes |
+
+The 158 KB CCE-140 plan produced **82 nodes** where every prior pass collapsed it
+to its title.
+
+### Cost, and a correction
+
+An earlier estimate of ~$2.50 for a full pass was **~10x low**. It was derived
+from Gemini's token accounting, which does not transfer: `claude -p` carries the
+entire Claude Code harness — system prompt, CLAUDE.md, MCP tool definitions — in
+every request, and `--no-session-persistence` prevents reuse across chunks.
+
+Measured over 81 docs / 37 requests: **5,026,334 input / 426,871 output tokens**.
+Treat the input figure as an upper bound on billable volume — graphify sums
+`input_tokens + cache_read_input_tokens + cache_creation_input_tokens` into that
+one number, and cache reads bill at a fraction of base input.
+
+On a Claude subscription none of this is billed per token; the figure is the size
+of the rate-limit draw. Wall clock, not requests, is now the scarce resource.
+
+### Operational traps
+
+- **Backend selection is by key _presence_, not configuration.** There is no
+  `backend:` setting. Both the skill and `graphify.llm` choose Gemini whenever
+  `GEMINI_API_KEY` or `GOOGLE_API_KEY` is set, so switching means removing the key
+  from the environment (it is preserved under `GEMINI_API_KEY_DISABLED` in
+  `~/.zshrc`). Re-exporting one anywhere silently reverts extraction to Gemini
+  with no warning.
+- **`GRAPHIFY_CLAUDE_CLI_PARALLEL` is compared with `!= "1"`** — an exact string
+  match. `true`, `yes`, and `TRUE` all fall through to sequential execution, which
+  turned a 16-minute run into a projected 112-minute one with nothing logged.
+- **An unset `GRAPHIFY_CLAUDE_CLI_MODEL` runs Opus**, roughly 15x Haiku's cost for
+  what is structured-JSON extraction. graphify's own source calls Opus "overkill"
+  for this task.
+- **A shell that inherited a Gemini key keeps it.** `zsh -ic` inherits the calling
+  environment, so verifying the switch from an already-running session reports the
+  old value and reads as "the edit didn't work". Check with
+  `env -u GEMINI_API_KEY zsh -ic '...'`.
+
+## Three measurement traps hit while diagnosing this
 
 1. **`graph.json` is NetworkX node-link format: edges live under `links`, not
    `edges`.** Reading `graph["edges"]` with a `.get(..., [])` default returns an
@@ -265,6 +353,25 @@ Connect the concept nodes to the document node and to each other with edges
    must therefore write to its own `GX_PROGRESS` file — pointing it at an
    existing pass file whose records already cover the inputs yields
    "nothing to do".
+3. **The "produced no nodes" warning is dominated by empty files.** The corpus
+   run warned that 19 of 81 dispatched files produced nothing, which reads as a
+   23% failure rate. It is not: **14 of those files are literally 0 bytes** and
+   two more are 28 bytes. This repo carries 36 zero-byte tracked files. Check
+   `stat` before treating that warning as a signal.
+
+   This one is worth recording because it nearly produced a wrong fix. The
+   obvious reading — "raw `stdout`/`stderr` captures are structurally
+   unextractable, exclude them via `.graphifyignore`" — is refuted by the data:
+   `.prompt.txt`, `.stdout.txt`, and `.stderr.txt` all appear on **both** sides
+   of the zero/non-zero split. The split tracks file _size_, not file _type_, and
+   a pattern-based exclusion would have deleted ~30 real nodes from captures that
+   do carry content. A plausible category ("log files") explained the symptom;
+   the actual variable was orthogonal to it.
+
+   The residual genuine oddity: six _other_ 0-byte `.stderr.txt` files each
+   produced exactly 1 node in the same run. Identical input, both outcomes. So
+   the warning is not merely noisy, it is inconsistent — which is another reason
+   not to build a filter on top of it.
 
 ## One minified fixture was 35% of the graph, and it kept coming back
 

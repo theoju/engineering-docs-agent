@@ -1,8 +1,9 @@
 # CCE-144 — Blind-run detection
 
-**Status:** approved
+**Status:** approved — **implemented and merged 2026-08-14.**
 **Date:** 2026-08-13
 **Ticket:** CCE-144
+**Supersedes the CCE-150 archive.** PR #223 (merged 2026-08-14) stamped this document "NOT IMPLEMENTED — archived, branch deleted," on the premise that `feat/CCE-144-blind-run-detection` had been abandoned unpushed and its commits were unreachable. That premise was false: the branch was pushed at `5021f11` and landed under this ticket. Read every "the runner does X" statement below as **current behavior**, not as a proposal. CCE-150 is obsolete and its banner is removed here.
 **Distinct from CCE-128** (pre-checkout job death), which covers the opposite failure: the job dies before `actions/checkout`, so no repo tree exists for an `if: failure()` step to use. This spec covers a job in which _every step is green_ and the run is nonetheless useless.
 
 ## Problem

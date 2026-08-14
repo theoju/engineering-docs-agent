@@ -1,5 +1,7 @@
 # CCE-144 Blind-Run Detection Implementation Plan
 
+> **Executed and landed 2026-08-14.** All seven tasks shipped on `feat/CCE-144-blind-run-detection` and merged to `main` under CCE-144. The completed checkboxes below record work that is **on `main`**, not work stranded on a deleted branch. An earlier archive under CCE-150 (PR #223) claimed the opposite — that the branch was abandoned unpushed and none of this reached `main`. That claim was wrong and is superseded; CCE-150 is obsolete.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the docs-agent nightly capable of reporting failure, so a run whose subagents were all rate-limited turns the check red instead of green, cannot advance its watermark, and cannot auto-merge.

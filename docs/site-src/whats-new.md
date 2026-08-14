@@ -9,30 +9,40 @@ synthesized_into: []
 # What's New
 
 ## 2026-08-13T05:51:14.070980+00:00
-- PR #216: Moves the graphify semantic-extraction diagnosis from the gitignored `graphify-out/` build directory into a permanent `docs/runbooks/graphify-extraction-findings.md` file so the findings survive a directory rebuild or clean. The runbook documents that graphify extraction is not underproducing nodes (it generates ~4.2 nodes per file) but loses 64% of them at `graphify/llm.py:_out_of_scope`, which discards any node whose `source_file` names a real file not dispatched in the same chunk — explaining why the doc layer (specs/plans) consistently yields ~1 node per file regardless of document size. It also records that reducing batch size from 15 to 3 made cross-file attribution measurably worse (0.98 vs 1.02 nodes/file baseline), that the Gemini free tier is 20 requests per day (not per minute, so one full pass exhausts it), that `_FILE_CHAR_CAP` truncates 23 of 58 spec/plan files at 20,000 chars, an untried reference-aware batching fix, and a `graph.json` NetworkX `links`-vs-`edges` measurement trap that silently zeroes connectivity metrics. No production code changed; the file is placed under `docs/runbooks/` rather than `docs/site-src/` to sit outside the docs-agent lens path and its Tier-1 citation lints.
+
+- PR #216: Moves the graphify semantic-extraction diagnosis from the gitignored `graphify-out/` build directory into a permanent `docs/runbooks/graphify-extraction-findings.md` file so the findings survive a directory rebuild or clean. The runbook documents that graphify extraction is not underproducing nodes (it generates ~4.2 nodes per file) but loses 64% of them at `graphify/llm.py:_out_of_scope`, which discards any node whose `source_file` names a real file not dispatched in the same chunk — explaining why the doc layer (specs/plans) consistently yields ~1 node per file regardless of document size. It also records that reducing batch size from 15 to 3 made cross-file attribution measurably worse (0.98 vs 1.02 nodes/file baseline), that the Gemini free tier is 20 requests per day (not per minute, so one full pass exhausts it), that `_FILE_CHAR_CAP` truncates 23 of 58 spec/plan files at 20,000 chars, an untried reference-aware batching fix, and a `graph.json` NetworkX `links`-vs-`edges` measurement trap that silently zeroes connectivity metrics. No production code changed; the file is placed under `docs/runbooks/` rather than `docs/site-src/` to sit outside the docs-agent lens path and its Tier-1 citation lints. **Two claims in this entry were corrected later:** the reference-aware batching fix was tried and rejected (CCE-146), and `_FILE_CHAR_CAP` was found to _slice_ oversized files across multiple requests rather than truncate them (CCE-148) — so the model does see the full text of a large plan, at roughly 7x the request cost. CCE-148 also established that the extraction prompt, not the batching, sets the ~1 node/file ceiling. `docs/runbooks/graphify-extraction-findings.md` carries the current text.
 
 ## 2026-08-10T19:17:56.705395+00:00
+
 - PR #207: Corrected a factual error on the docs site's architecture page describing the fact-checker's behavior. The page claimed the fact-checker "never mark[s] the run partial," but the orchestrator code contains a documented exception: a CCE-114 time-budget cut of the fact-checker loop does flip `partial`. The edit restores that parenthetical exception so the page matches the code.
 
 ## 2026-08-09T16:21:13.111090+00:00
+
 - PR #202: Fixed a Tier-1 citation lint false positive: the deterministic `citation_exists` rule was blocking the literal placeholder path `path/to/file.py` — the metasyntactic example the plugin itself ships in `agents/page-author.md` and `CLAUDE.md` — because it matched neither the placeholder-marker heuristic nor an example-prefix reservation. The fix adds `path/to/file.py` to `DEFAULT_EXEMPT_TOKENS` as an exact-match token rather than reserving `path/to/` as a whole example prefix, deliberately avoiding a fail-open subtree exemption. Includes 6 new discriminating tests and an unrelated prettier reflow on the touched architecture page.
 - PR #203: Fixes six confabulated code citations across five architecture/operations docs pages so `citation_exists` no longer blocks them. Each fix verifies the surrounding prose against the real file rather than just swapping in an existing-but-wrong path: two doc↔source-map generator scripts, the diagram-render-gate script, the page-author output schema filename, the actionlint config path/claim, and a full structural rewrite of the diagram-gate page (which cited a workflow file that doesn't exist and had inverted its own CCE-91 incident history). Also swept stale filenames out of frontmatter `source_files:` and Mermaid diagram labels on two of the pages.
 - PR #205: The page-author subagent contract (agents/page-author.md, step 3) now instructs the authoring agent to put dead/removed file names in a fenced code block and backtick only the surviving name in prose whenever it documents a rename or a corrected citation. This closes a gap where documenting the CCE-132 citation fix required naming the exact confabulated paths that were removed, which caused the deterministic citation_exists Tier-1 lint to block the very page reporting the fix.
+
 ### Pages to review (source drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md — changed: agents/page-author.md, scripts/lint/citation_exists.py, tests/lint/test_citation_exists.py
 - architecture/cce-capability-c2-canonical-core-authoring.md — changed: agents/page-author.md
 - architecture/cce4-schema-enforcement.md — changed: agents/page-author.md
 - architecture/engineering-docs-agent.md — changed: docs/site-src/.doc-source-map.json, scripts/lint/citation_exists.py
 - architecture/orchestrator.md — changed: CHANGELOG.md, agents/page-author.md
+
 ### Pages to review (citation drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+
 ### Core pages to review (drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md (source, citation)
 - architecture/cce-capability-c2-canonical-core-authoring.md (source)
 - architecture/cce4-schema-enforcement.md (source)
 - architecture/engineering-docs-agent.md (source)
 
 ## 2026-08-08T20:02:20.668771+00:00
+
 - PR #187: Docs now cite code line-free (`path/to/file.py` or `path/to/file.py:symbol`, never `path:line`). A new deterministic Tier-1 block lint (`citation_exists`) verifies cited `:symbol` references actually exist in the file, and a new Tier-1 warn lint (`citation_line_free`) flags any surviving `:line` pin as advisory. The `fact-checker` agent contract is scoped to behavioral truth only and no longer emits `contradiction` for citation location/line drift, and the `page-author` agent contract now requires line-free citations. A one-time AST-based migration script converted 99 `path:line` citations across 21 published pages to `path:symbol` or bare `path`.
 - PR #188: Introduces a provider seam in the docs publish-verify path (new scripts/build_poller.py plus a fork in scripts/verify_runner.py) so hosts can declare publishing.ci_provider: circleci. On the CircleCI branch, verification now degrades honestly by returning a non-promoting verdict tagged UNVALIDATED_AGAINST_LIVE_HOST instead of attempting to poll a CircleCI API that has never been validated against a live host. The GitHub Actions path (gh run list polling) is untouched byte-for-byte. The actual CircleCI poller (poll_circleci/map_circleci_status) ships only as documented NotImplementedError stubs plus a FakeCircleCiClient for tests — no real polling logic is shipped or claimed as tested. agents/publish-verifier.md and agents/notifier.md were updated to describe the new provider fork, docs/site-src/setup-guide.md documents the new config option, and templates/config.schema.json gained the ci_provider field.
 - PR #190: Makes the post-merge docs-publish trigger seam provider-aware, mirroring the CCE-63 work that made the verify seam provider-aware. `_maybe_auto_merge` now forks on the host's `publishing.ci_provider` config: for the default/github provider, behavior is unchanged (it still fires `gh.workflow_run(build_workflow)` with the existing info-only `pages_dispatch_succeeded`/`pages_dispatch_failed` reasons). For a non-github provider (e.g. circleci), no GitHub Actions dispatch happens; instead the runner records a single info-only reason, `pages_dispatch_skipped: circleci_trigger_modeled_but_unvalidated`. The real CircleCI trigger path is stubbed behind an `UNVALIDATED_AGAINST_LIVE_HOST` flag that raises `NotImplementedError` if flipped on, so the behavior is honestly modeled rather than guessed at against a live host. New `resolve_build_trigger`/`trigger_circleci`/`TRIGGER_UNVALIDATED_REASON` helpers were added to `scripts/build_poller.py`; no new config field was introduced and merge eligibility is unaffected.
@@ -44,7 +54,9 @@ synthesized_into: []
 - PR #196: Adds a documentation-only update to CLAUDE.md recording the CCE-127 incident learnings: the app-token degradation invariant (a failed GitHub App-token mint step must degrade a nightly run to `partial` rather than kill the job) plus four traps hit while shipping the fix (continue-on-error is required to reach the `||` fallback; export `outcome` not `conclusion`; 404 vs 401 on a token mint means different remediation; CI's actionlint never scans `templates/`). It also records a meta-lesson about `_TEMPLATE_ONLY_DIVERGENCES`: documenting a safety-property gap is not the same as accepting its risk.
 - PR #199: Archives 35 stale `docs-agent/*` branches (spanning 2026-06-11 to 2026-08-08) into `.engineering-docs-agent/stale-prs-archive/` using the existing CCE-90 archive format (body, createdAt, files, headRefName, headRefOid, number, statusCheckRollup, title), then deletes the corresponding remote branches. Only `docs-agent/2026-08-08T08` (PR #198) remains live; the other 35 all belonged to PRs auto-closed as superseded by the CCE-89 D2 sweep and were never merged into main.
 - PR #200: Closes the citation_exists false-positive class that blocked two consecutive nightly runs (PR #197, #198). Rather than downgrading citation_exists severity per-lens or per-page, the fix improves resolver completeness, adds a reserved example-token namespace, and introduces an exempt-token allowlist so the Tier-1 block rule stops flagging tokens that were never real defects in the first place. The change touches the lint rule itself (scripts/lint/citation_exists.py), its config schema, the page-author agent contract, and the architecture page documenting the citation canon.
+
 ### Pages to review (source drift)
+
 - architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
 - architecture/cce-capability-c-canonical-core-citations.md — changed: agents/fact-checker.md, agents/page-author.md, docs/superpowers/plans/2026-07-19-cce122-stable-code-citations.md, docs/superpowers/plans/2026-07-22-cce63-circleci-publish-verifier.md, docs/superpowers/plans/2026-07-23-cce123-publish-trigger-provider-aware.md, docs/superpowers/plans/2026-07-23-cce124-archive-lens-citation-advisory.md, docs/superpowers/plans/2026-07-23-cce125-gap-detector-unjudged-advisory.md, docs/superpowers/plans/2026-08-07-cce127-app-token-degrade-partial.md, docs/superpowers/plans/2026-08-08-cce131-citation-exists-false-positive-closure.md, docs/superpowers/specs/2026-07-18-cce122-stable-code-citations-design.md, docs/superpowers/specs/2026-07-22-cce63-circleci-publish-verifier-design.md, docs/superpowers/specs/2026-07-23-cce123-publish-trigger-provider-aware-design.md, docs/superpowers/specs/2026-07-23-cce124-archive-lens-citation-advisory-design.md, docs/superpowers/specs/2026-07-23-cce125-gap-detector-unjudged-advisory-design.md, docs/superpowers/specs/2026-08-07-cce127-app-token-degrade-partial-design.md, docs/superpowers/specs/2026-08-08-cce131-citation-exists-false-positive-closure-design.md, scripts/lint/citation_exists.py, scripts/lint/citation_line_free.py, scripts/lint/lint_runner.py, scripts/migrate_line_citations.py, templates/config.schema.json
 - architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-07-19-cce122-stable-code-citations.md, docs/superpowers/plans/2026-07-22-cce63-circleci-publish-verifier.md, docs/superpowers/plans/2026-07-23-cce123-publish-trigger-provider-aware.md, docs/superpowers/plans/2026-07-23-cce124-archive-lens-citation-advisory.md, docs/superpowers/plans/2026-07-23-cce125-gap-detector-unjudged-advisory.md, docs/superpowers/plans/2026-08-07-cce127-app-token-degrade-partial.md, docs/superpowers/plans/2026-08-08-cce131-citation-exists-false-positive-closure.md, docs/superpowers/specs/2026-07-18-cce122-stable-code-citations-design.md, docs/superpowers/specs/2026-07-22-cce63-circleci-publish-verifier-design.md, docs/superpowers/specs/2026-07-23-cce123-publish-trigger-provider-aware-design.md, docs/superpowers/specs/2026-07-23-cce124-archive-lens-citation-advisory-design.md, docs/superpowers/specs/2026-07-23-cce125-gap-detector-unjudged-advisory-design.md, docs/superpowers/specs/2026-08-07-cce127-app-token-degrade-partial-design.md, docs/superpowers/specs/2026-08-08-cce131-citation-exists-false-positive-closure-design.md
@@ -66,9 +78,13 @@ synthesized_into: []
 - archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
 - archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
 - archive/v0-1-1-hardening.md — changed: scripts/contracts.py, scripts/lint/lint_runner.py, scripts/orchestrator_runner.py, scripts/verify_runner.py, templates/config.schema.json, tests/contracts/test_contracts.py, tests/orchestrator/test_pipeline_integration.py, tests/orchestrator/test_verify_runner.py
+
 ### Pages to review (citation drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+
 ### Core pages to review (drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md (source, citation)
 - architecture/cce-capability-c2-canonical-core-authoring.md (source)
 - architecture/cce10-source-collector-canonical-shape.md (source)
@@ -82,11 +98,16 @@ synthesized_into: []
 - architecture/structured-docs-site-generation.md (source)
 
 ## 2026-07-16T07:48:15.010916+00:00
+
 - PR #177: The nightly docs-agent PR body and GitHub step summary now render an INFO/advisory header for non-partial runs that merely carry benign, info-only rescue reasons, instead of the alarming 'WARNING — Partial run' banner. `_format_partial_digest` was changed to accept an explicit `partial` flag (matching the run's actual `partial` state) rather than inferring severity from whether `partial_reasons` was non-empty, and that flag is now threaded through all three call sites (`_compose_pr_body`'s two invocations and `_write_step_summary`).
 - PR #178: The nightly docs-agent orchestrator now enforces frontmatter fidelity on agent-authored 'create' pages in production, not just in dry-run: after the page-author subagent returns ok, the orchestrator overwrites the written page's frontmatter with its own deterministic agent_fields (via a new _enforce_agent_frontmatter step), preserving the authored body but no longer trusting the LLM's frontmatter output. Separately, the synthesized description's minimum-word floor is now resolved from the host's description_quality config via a new resolve_min_words(config) helper instead of a duplicated hardcoded constant, so hosts that raise lint.tier1.description_quality.min_words no longer have their agent-authored pages silently dropped by Tier-1 lint. Both fixes are scoped strictly to agent-authored create paths; edits and default-template sections are unchanged.
+
 ### Gaps flagged
+
 - theoju/engineering-docs-agent#178: No allowlist match (config.allowlist_paths is empty) and size_filter has no min_loc/min_files thresholds to apply, so this falls to LLM judgment on the middle tier. The PR changes production dispatch behavior for the orchestrator (post-dispatch frontmatter reconciliation overwriting an LLM-authored page's frontmatter) and introduces a new public config-resolution function (resolve_min_words) that changes lint-floor behavior across hosts. This is exactly the class of change (production-path behavior change + new public surface affecting downstream consumers) a senior engineer would expect a written spec/plan for before merging — and indeed the PR itself includes a design spec and TDD plan under docs/superpowers/, confirming the change warranted one.
+
 ### Pages to review (source drift)
+
 - architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
 - architecture/cce-capability-c-canonical-core-citations.md — changed: docs/superpowers/plans/2026-07-14-cce119-create-path-frontmatter-fidelity.md, docs/superpowers/specs/2026-07-14-cce119-create-path-frontmatter-fidelity-design.md
 - architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-07-14-cce119-create-path-frontmatter-fidelity.md, docs/superpowers/specs/2026-07-14-cce119-create-path-frontmatter-fidelity-design.md
@@ -105,9 +126,13 @@ synthesized_into: []
 - archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
 - archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
 - archive/v0-1-1-hardening.md — changed: scripts/orchestrator_runner.py
+
 ### Pages to review (citation drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+
 ### Core pages to review (drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md (source, citation)
 - architecture/cce-capability-c2-canonical-core-authoring.md (source)
 - architecture/cce10-source-collector-canonical-shape.md (source)
@@ -120,10 +145,15 @@ synthesized_into: []
 - architecture/structured-docs-site-generation.md (source)
 
 ## 2026-07-14T07:45:25.607522+00:00
+
 - PR #175: The docs-agent orchestrator now injects the `pr_id` field into the gap-detector agent's verdict itself, right after dispatch and before schema validation, instead of requiring the LLM subagent to echo back an identity value the orchestrator already constructs. `dispatch_validated` gained an optional `inject: dict | None = None` keyword parameter that merges `{**raw, **inject}` over the subagent's raw response (guarded to only apply when the response is a dict), letting orchestrator-owned fields override or fill in whatever the agent returned. The gap-detector call site now passes `inject={"pr_id": pr_id}`. The `needs_spec` field, which reflects the agent's actual judgment, remains required and unaffected — a genuinely empty verdict still correctly flips the run to partial.
+
 ### Gaps flagged
+
 - theoju/engineering-docs-agent#175: No allowlist globs configured (empty list) and size_filter has no thresholds, so this falls to LLM judgment. The PR modifies `dispatch_validated` in scripts/orchestrator_runner.py — a shared cross-capability contract per CLAUDE.md's helper-contract rule — changing validation-merge semantics that feed CCE-101's auto-merge gate (partial vs non-partial run classification). That's a behavior change to core orchestration logic, not a pure refactor/formatting/dependency bump, so a senior engineer would expect a written spec/plan. Consistent with this, the PR itself ships a design spec and implementation plan under docs/superpowers/.
+
 ### Pages to review (source drift)
+
 - architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
 - architecture/cce-capability-c-canonical-core-citations.md — changed: docs/superpowers/plans/2026-07-12-cce120-gap-detector-prid-injection.md, docs/superpowers/specs/2026-07-12-cce120-gap-detector-prid-injection-design.md
 - architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-07-12-cce120-gap-detector-prid-injection.md, docs/superpowers/specs/2026-07-12-cce120-gap-detector-prid-injection-design.md
@@ -142,9 +172,13 @@ synthesized_into: []
 - archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
 - archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
 - archive/v0-1-1-hardening.md — changed: scripts/orchestrator_runner.py
+
 ### Pages to review (citation drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+
 ### Core pages to review (drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md (source, citation)
 - architecture/cce-capability-c2-canonical-core-authoring.md (source)
 - architecture/cce10-source-collector-canonical-shape.md (source)
@@ -157,8 +191,11 @@ synthesized_into: []
 - architecture/structured-docs-site-generation.md (source)
 
 ## 2026-07-12T07:49:36.422023+00:00
+
 - PR #171: Fixed a bug where the nightly docs-agent orchestrator would flip a run to `partial` even when a subagent's dispatch succeeded and returned valid, schema-passing JSON (merely wrapped in prose and recovered via `_rescue_json_object`). Six blocking-pipeline dispatch callsites (source-collector, pr-summarizer, page-author, content-validator, gap-detector, notifier) previously recorded dispatch reasons via `add_partial(state, r)` with the default `info_only=False`, which unconditionally flagged the run partial. These callsites now route through a new `_record_dispatch_reasons(state, reasons, *, ok=<dispatch succeeded>)` helper: benign prose-wrapped-but-valid rescues are recorded `info_only` (no partial flip), while genuine dispatch failures still flip `partial` as before. Fact-checker advisory reasons and the contradiction-warning auto-merge gate are unchanged.
+
 ### Pages to review (source drift)
+
 - architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
 - architecture/cce-capability-c-canonical-core-citations.md — changed: docs/superpowers/plans/2026-07-11-cce118-benign-rescue-partial.md, docs/superpowers/specs/2026-07-11-cce118-benign-rescue-partial-design.md
 - architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-07-11-cce118-benign-rescue-partial.md, docs/superpowers/specs/2026-07-11-cce118-benign-rescue-partial-design.md
@@ -176,9 +213,13 @@ synthesized_into: []
 - archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
 - archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
 - archive/v0-1-1-hardening.md — changed: scripts/orchestrator_runner.py
+
 ### Pages to review (citation drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+
 ### Core pages to review (drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md (source, citation)
 - architecture/cce-capability-c2-canonical-core-authoring.md (source)
 - architecture/cce10-source-collector-canonical-shape.md (source)
@@ -191,13 +232,18 @@ synthesized_into: []
 - architecture/structured-docs-site-generation.md (source)
 
 ## 2026-07-11T07:44:36.263542+00:00
+
 - PR #135: Added the required agent-authored frontmatter (description, source_files, last_reviewed) to three legacy architecture pages — docs/site-src/architecture/index.md, lint-rules.md, and bootstrap-fail-fast.md — which predated the agent-authored contract.
 - PR #136: The orchestrator's soft time-budget check (from CCE-109) previously ran only at PR admission and at the CCE-101 merge gate, leaving the page-author fan-out loop unbounded once that gate had passed. This PR adds an explicit deadline check before each doc-target authoring dispatch in the authoring loop, and makes the fact-checker and gap-detector loops skip outright (flipping the run to partial) once the deadline has expired, instead of continuing to spawn work past the soft budget.
 - PR #137: The publish-verifier subagent now selects the newest build_workflow run whose createdAt is at or after the merge time, regardless of which event triggered it, then waits for that run to reach status=completed and maps its conclusion to build_status. Previously step 1 filtered runs by event=push and head_branch=main, which meant the verifier polled for a run that would never appear on hosts publishing via pull_request:closed or workflow_dispatch, exhausting verify_timeout_seconds and reporting a red build status even when publishing succeeded.
 - PR #139: Adds the spec and implementation plan documents for CCE-99: a global PostToolUse hook that fires after `gh pr merge`, verifies the merged PR's full 40-character `headRefOid` before force-deleting the corresponding local branch, and prunes any resulting `[gone]` local branches automatically. The hook logic itself lives in the user-global `~/.claude/` ship-skill (worker + tests, hook trigger, settings registration) and is already live; this PR only tracks the design artifacts (spec + plan) in-repo under `docs/superpowers/`.
+
 ### Gaps flagged
+
 - theoju/engineering-docs-agent#136: No allowlist match and no usable size thresholds to filter on, so this falls to LLM judgment. The change alters core runtime behavior of the orchestrator's time-budget enforcement across three loops (page-author fan-out, fact-checker, gap-detector), introducing new deadline-check semantics and a partial-run flip behavior that changes how nightly runs terminate. This is a control-flow/behavioral fix to a previously-known gap (CCE-109), not a refactor or cosmetic change — a senior engineer would expect a short design note or plan describing the new deadline-check placement and per-loop degrade semantics, consistent with this repo's spec-driven conventions.
+
 ### Pages to review (source drift)
+
 - architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
 - architecture/cce-capability-c-canonical-core-citations.md — changed: docs/superpowers/plans/2026-06-10-cce99-post-merge-prune.md, docs/superpowers/specs/2026-06-10-cce99-ship-post-merge-prune-design.md
 - architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-06-10-cce99-post-merge-prune.md, docs/superpowers/specs/2026-06-10-cce99-ship-post-merge-prune-design.md
@@ -215,9 +261,13 @@ synthesized_into: []
 - archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
 - archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
 - archive/v0-1-1-hardening.md — changed: scripts/orchestrator_runner.py
+
 ### Pages to review (citation drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+
 ### Core pages to review (drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md (source, citation)
 - architecture/cce-capability-c2-canonical-core-authoring.md (source)
 - architecture/cce10-source-collector-canonical-shape.md (source)
@@ -230,6 +280,7 @@ synthesized_into: []
 - architecture/structured-docs-site-generation.md (source)
 
 ## 2026-06-10T18:20:27.473771+00:00
+
 - PR #126: A bulk backlog catch-up run processed the ~35-PR window that had been accumulating since 2026-05-29, adding 32 documentation pages across the archive and architecture sections and advancing the docs-agent `last_successful_run` baseline from `bdf0da1a` to `68090590`. The run also introduced a `.doc-source-map.json` drift-tracking artifact. Approximately 19 candidate architecture pages and 3 broken-link pages were dropped by Tier-1 lint due to missing required frontmatter (including `last_reviewed`) and will not auto-regenerate since the baseline has moved past their source PRs.
 - PR #127: Reverted 17 architecture documentation pages that were injected into docs/site-src/architecture/ by PR #126's forensic salvage. At least two pages — orchestrator-state-advancement.md and orchestrator-git-staging.md — contained factually inverted claims and cited tests that do not exist. The remaining 15 were unverified for accuracy. All 17 files were deleted and architecture/index.md was regenerated to list only the 15 verified pre-existing pages. The doom-loop baseline advance and 32 lint-gated backlog pages from the same run were kept intact.
 - PR #128: Adds a soft time-budget mechanism to the nightly docs-agent orchestrator runner (default 2700 s / 45 min, configurable via `run.time_budget_seconds` or `--time-budget-seconds 0` to restore unlimited behavior). The runner now admits PRs oldest-first up to the budget, advances the state cursor to the last fully-processed PR's merge SHA on truncation, and marks the run partial. A Component-4 invariant guard validates that the new cursor is reachable from HEAD and forward of baseline before writing, refusing with a reason code on any violation. Five edge-case hardening fixes cover first-run truncation ordering, merge-SHA-less deferred PR loss, abbreviated SHA normalization, same-hour rerun guard failure-open, and PR-body window overstating coverage on truncation. Config and state schemas are extended accordingly; 19 new tests exercise all plan behaviors and review-identified defects.
@@ -238,12 +289,15 @@ synthesized_into: []
 - PR #131: PR #131 documents the CCE-110 factual-accuracy guard across all affected doc surfaces: the architecture page gains an eighth subagent entry (fact-checker), a new pipeline diagram step, a subagent-table row, and a warn-only semantics paragraph; the orchestrator SKILL.md gains the fact-checker dispatch step and notes the source_paths grounding input; a new operations page (factual-accuracy-guard.md) explains the three guard layers, block-vs-warn rationale, operator workflow, and test entry points; and the pre-existing operations/description-quality-lint-rule.md page is rewritten from scratch to remove confabulated content (fabricated rules/ auto-discovery, min_length:20, lint.rules.*.enabled config) and ground it against the actual code (min_words/forbid_equal_to_title/forbid_trailing_colon under lint.tier1.description_quality, TIER1_DEFAULT registration, shared rule CLI contract, real bootstrap failure path). Auto-generated deterministic artifacts (fact_checker.schema.md, page_author.schema.md evidence field, contracts/API indexes) are regenerated as a side-effect.
 - PR #132: The `framework: none` host-onboarding page's "What runs" list was updated to include two previously missing, framework-independent capabilities: `citation_exists` (a Tier-1 lint rule) and `fact-checker` (the factual-accuracy guard that produces warnings on cited pages). Both require only git and citation metadata, so they run normally on framework-none hosts. The rest of the docs tree was verified clean — no stale "seven subagents" references or hardcoded Tier-1 rule counts remain outside historical specs.
 - PR #133: PR #133 implements the auto-merge gate for nightly docs-agent PRs (CCE-89 D3). When a run is eligible — `merge.policy: auto` (the new default when absent), `partial: false`, zero fact-checker warnings, no human commits on the PR, and sufficient CCE-109 budget remaining — the orchestrator squash-merges the docs PR, deletes the branch, and explicitly dispatches the configured Pages build workflow (since a GITHUB_TOKEN merge cannot fire on:push triggers). Check polling uses the CCE-83 `gh pr checks --json name,state,bucket` vocabulary with a 120-second grace window and a 900-second timeout. Every failure mode is info-only and leaves the PR open. A new `merge:` config block is added to `config.schema.json`, `resolve_merge_settings` defaults to auto, and the setup skill now asks operators to make an explicit choice at scaffold time. The digest gains a `merge_outcome` field. 41 new tests were added (TDD red-first); the full suite reached 1059 passed.
+
 ### Gaps flagged
+
 - theoju/engineering-docs-agent#128: This PR introduces a significant new behavioral feature — a soft time-budget mechanism that changes how the orchestrator admits PRs, advances the baseline cursor, and marks runs as partial. It adds a new user-visible config field (`run.time_budget_seconds`), a new CLI flag (`--time-budget-seconds`), changes state-advancement contracts, and modifies JSON schemas. A senior engineer would expect a written spec and plan for changes of this scope. The PR itself confirms this: it ships both `docs/superpowers/specs/2026-06-09-cce109-time-budget-doom-loop-design.md` and `docs/superpowers/plans/2026-06-09-cce109-time-budget-doom-loop.md`.
 - theoju/engineering-docs-agent#129: This PR introduces a new subagent (fact-checker, the eighth), a new blocking lint rule (citation_exists.py), changes to user-visible PR-body output (factual-accuracy warnings section), a new JSON schema, and orchestrator wiring — all hallmarks of a new subsystem with changed user-visible behavior. A senior engineer would expect a written spec and plan. The PR already includes both (docs/superpowers/specs/2026-06-09-cce110-page-author-confabulation-design.md and docs/superpowers/plans/2026-06-09-cce110-page-author-confabulation.md), confirming the expectation is met.
 - theoju/engineering-docs-agent#133: No dismissed flag, no allowlist paths, and size_filter has no thresholds defined (empty object), so LLM judgment applies. This PR introduces a new default-on auto-merge behavior for docs-agent PRs, a new `merge:` config block in the schema, changes to user-visible orchestration behavior, and security-relevant automation (automated PR merging with branch deletion and workflow dispatch). It touches core orchestration logic (scripts/orchestrator_runner.py +159, scripts/gh_client.py +101), config schema, and skill contracts. A senior engineer would expect a written spec and plan for a change of this scope — and the PR itself confirms that expectation by linking a spec and plan in the body.
 
 ## 2026-06-09T21:49:49.982009+00:00
+
 - PR #125: The release-and-rollback runbook was corrected to accurately describe the two-clock host-pickup model introduced in CCE-86. The previous text incorrectly implied that a tag-pinned host would auto-upgrade at its next nightly cron tick. The runbook now distinguishes the two cases: tag-pinned hosts (`ref: vX.Y.Z`) are frozen at that tag and require a manual pin-bump PR to adopt a new release; main-tracking hosts (`ref: main`) auto-pick-up the latest plugin at the next cron run. The correction also names the currently deployed hosts and their tracking mode.
 - PR #124: Release-prep commit for v0.5.1: CHANGELOG.md stamped from [Unreleased] covering 20 post-v0.5.0 commits (CCE-66, CCE-83, CCE-86, CCE-89 through CCE-108), the previously-missing [0.5.0] section backfilled, and plugin.json version resynchronised from 0.2.0 to 0.5.1. No behaviour or logic changes; artefacts only.
 - PR #123: Adds a version-agnostic release-ops runbook (`docs/runbooks/release-and-rollback.md`) documenting three reusable sections: the two-clock release SLA (Clock 1: `release.yml` validation ~5–10 min; Clock 2: tag-pinned host pickup up to ~24h at the 07:07 UTC daily tick, correcting the ticket's wrong '~60 min' figure), a rollback playbook (`gh release delete <tag> --cleanup-tag --yes` with a decide-first table and post-rollback hygiene for both main-tracking and tag-pinned hosts), and tag-cut-misfire recovery for when `gh release create` succeeds but `release.yml` subsequently fails. Updates the CCE-80 host-migration runbook with a CHANGELOG-update step and cross-link, adds a one-line discoverability pointer in `CLAUDE.md`, and introduces four link-resolution guard tests. Runbooks are kept outside `docs_dir` (`docs/site-src`) by design — maintainer-internal ops, not published to the site.
@@ -283,7 +337,9 @@ synthesized_into: []
 - PR #80: Three agent capability contracts were trimmed to remove over-scoped fields: the `diff_stats` field (lines added/deleted per file) was cut from source-collector's output contract and prompt; pr-summarizer's `files_touched` description was narrowed to paths-only with an explicit `max_files: 50` guard to prevent full file content summarization; and the aspirational `cross_references` section was removed from page-author's output template. No user-facing behavior changed — all removed fields were either unconsumed by the orchestrator or ignored by downstream consumers.
 - PR #79: Two competing setup guides — `docs/setup-guide.md` (a stale root-level draft) and `docs/site-src/ops/setup-and-onboarding.md` — were consolidated into a single canonical document at `docs/site-src/ops/setup-and-onboarding.md`. The root-level draft was deleted. A new regression test (`test_no_duplicate_setup_guide`) was added to assert the duplicate cannot reappear.
 - PR #77: Added a comprehensive end-to-end setup guide (docs/setup-guide.md) replacing a placeholder stub, covering prerequisites, installation, configuration, first run, and troubleshooting for onboarding a new host repo to the plugin. Also added Jira issue conventions to CLAUDE.md — branch-naming (<type>/CCE-<number>-<slug>), commit-message, and PR-title rules — so the /ship skill's extract-jira-key.sh picks up CCE keys automatically.
+
 ### Gaps flagged
+
 - theoju/engineering-docs-agent#121: PR introduces a new module (`scripts/doc_routing.py`) constituting a new subsystem, a schema contract change adding the `doc_kind` enum to the pr-summarizer public API (`agents/schemas/pr-summarizer-output.json`), and a routing behavior change that alters where documentation pages are placed — matching all three 'yes' criteria (new subsystem, new public API, user-visible behavior change). A senior engineer would expect a written spec/plan to accompany this change.
 - theoju/engineering-docs-agent#120: LLM judgment: This PR introduces new public-facing behavior (section overviews, home page rewrite, nav overhaul, repo_url/edit_uri widget) and two new scripts forming a new subsystem (managed_block.py, section_overview.py). It changes user-visible behavior in the rendered docs site and modifies the mkdocs.yml nav contract. A senior engineer would expect a written spec/plan for a change of this scope. The PR in fact already ships both (docs/superpowers/specs/2026-06-08-cce106-section-overviews-home-design.md and docs/superpowers/plans/2026-06-08-cce106-section-overviews-home.md), confirming the expectation.
 - theoju/engineering-docs-agent#119: This PR introduces a new public configuration API (site.sections[].groups with validation), activates a dormant JSON-schema contracts extractor subsystem, and changes user-visible docs-site navigation behavior (grouped API reference). It touches 10 files across schema, core scripts, and tests. A senior engineer would expect a written spec or plan for any change that introduces a new config schema contract, enables a new extractor subsystem, and alters rendered site structure — all three are present here.
@@ -291,7 +347,9 @@ synthesized_into: []
 - theoju/engineering-docs-agent#117: This PR introduces a new automation subsystem (Jira auto-transition on merge), a new external API integration (Jira REST v3/v2 via urllib), and a new GitHub Actions workflow that changes system behavior on every future PR merge. It also handles API secrets/tokens, making it security-relevant. A senior engineer would expect a written spec or plan for a net-new integration that affects all future merges and relies on external credentials — even though the PR body is detailed, it does not constitute a pre-merge spec or design doc reviewed before implementation. Allowlist is empty so tier 1 did not fire; size_filter has no thresholds so tier 3 is unevaluable; LLM judgment applies.
 - theoju/engineering-docs-agent#116: This PR introduces a new subsystem — the SDD fidelity verification ladder — with a formal public API (`runFidelityLadder`), multiple tiered verification modes (Tier 0/1/2 plus a reviewer gate), and a documented behavioral contract for how orchestrator tasks are verified. It closes a previously-unnamed failure mode (phantom-work / no-op subagent self-reports passing as DONE), which is a system-level reliability and correctness concern. A change of this scope — new execution subsystem, new API shape, behavioral changes to orchestrator task completion semantics, 53-case test suite, and accompanying design doc — is exactly the class of change a senior engineer would expect to see preceded by a written spec or plan.
 - theoju/engineering-docs-agent#103: This PR introduces a new script (scripts/enable_pages.py) that makes an active GitHub API call during setup to bootstrap Pages, replaces a previously silent no-op in workflow templates, and modifies the setup skill's step-by-step behavior. These are user-visible behavioral changes to a setup skill — exactly the category a senior engineer would expect a written design rationale or spec to accompany. The PR body already references an existing spec (docs/superpowers/specs/2026-06-02-pages-bootstrap-design.md), confirming the change is spec-worthy. Allowlist is empty; size_filter has no configured thresholds, so LLM judgment applies.
+
 ### Pages to review (source drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md — changed: docs/superpowers/plans/2026-06-03-cce57-onboard-prep-self-assessment.md, docs/superpowers/plans/2026-06-03-cce58-onboard-prep-data-import.md, docs/superpowers/plans/2026-06-03-meta-orchestrator-followup-chain-plan.md, docs/superpowers/plans/2026-06-04-cce77-cycle-hygiene-plan.md, docs/superpowers/plans/2026-06-04-cce77-ship-guardrails-fix.md, docs/superpowers/plans/2026-06-08-cce106-section-overviews-home.md, docs/superpowers/plans/2026-06-08-cce107-arch-index-sort-and-routing.md, docs/superpowers/plans/2026-06-09-cce86-release-rollback-runbook.md, docs/superpowers/specs/2026-06-03-cce57-onboard-prep-self-assessment-design.md, docs/superpowers/specs/2026-06-03-cce58-onboard-prep-data-import-design.md, docs/superpowers/specs/2026-06-03-cce77-ship-guardrails-fix.md, docs/superpowers/specs/2026-06-03-meta-orchestrator-followup-chain.md, docs/superpowers/specs/2026-06-04-cce77-cycle-hygiene-design.md, docs/superpowers/specs/2026-06-08-cce106-section-overviews-home-design.md, docs/superpowers/specs/2026-06-08-cce107-arch-index-sort-and-routing-design.md, docs/superpowers/specs/2026-06-09-cce86-release-rollback-runbook-design.md, docs/superpowers/templates/sdd-fidelity-gate.md, docs/superpowers/templates/sdd-fidelity-gate.mjs, docs/superpowers/templates/sdd-fidelity-gate.test.mjs
 - architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-06-03-cce57-onboard-prep-self-assessment.md, docs/superpowers/plans/2026-06-03-cce58-onboard-prep-data-import.md, docs/superpowers/plans/2026-06-03-meta-orchestrator-followup-chain-plan.md, docs/superpowers/plans/2026-06-04-cce77-cycle-hygiene-plan.md, docs/superpowers/plans/2026-06-04-cce77-ship-guardrails-fix.md, docs/superpowers/plans/2026-06-08-cce106-section-overviews-home.md, docs/superpowers/plans/2026-06-08-cce107-arch-index-sort-and-routing.md, docs/superpowers/plans/2026-06-09-cce86-release-rollback-runbook.md, docs/superpowers/specs/2026-06-03-cce57-onboard-prep-self-assessment-design.md, docs/superpowers/specs/2026-06-03-cce58-onboard-prep-data-import-design.md, docs/superpowers/specs/2026-06-03-cce77-ship-guardrails-fix.md, docs/superpowers/specs/2026-06-03-meta-orchestrator-followup-chain.md, docs/superpowers/specs/2026-06-04-cce77-cycle-hygiene-design.md, docs/superpowers/specs/2026-06-08-cce106-section-overviews-home-design.md, docs/superpowers/specs/2026-06-08-cce107-arch-index-sort-and-routing-design.md, docs/superpowers/specs/2026-06-09-cce86-release-rollback-runbook-design.md, docs/superpowers/templates/sdd-fidelity-gate.md, docs/superpowers/templates/sdd-fidelity-gate.mjs, docs/superpowers/templates/sdd-fidelity-gate.test.mjs
 - architecture/cce10-source-collector-canonical-shape.md — changed: scripts/orchestrator_runner.py
@@ -308,9 +366,13 @@ synthesized_into: []
 - archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
 - archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
 - archive/v0-1-1-hardening.md — changed: scripts/archive_indexes.py, scripts/lint/lint_runner.py, scripts/orchestrator_runner.py
+
 ### Pages to review (citation drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+
 ### Core pages to review (drift)
+
 - architecture/cce-capability-c-canonical-core-citations.md (source, citation)
 - architecture/cce-capability-c2-canonical-core-authoring.md (source)
 - architecture/cce10-source-collector-canonical-shape.md (source)
@@ -325,6 +387,7 @@ synthesized_into: []
 - architecture/structured-docs-site-generation.md (source)
 
 ## 2026-05-29T20:18:08.098558+00:00
+
 - PR #76: Removed the `paths:` filter from the `pull_request` trigger in `.github/workflows/actionlint.yml`. Previously, actionlint only fired when workflow files changed; now it runs on every PR. The `push: paths:` filter is retained so post-merge runs on `main` still only occur when workflows are actually modified.
 - PR #75: Added a `_strip_code_fence` helper to the orchestrator's `dispatch_subagent` function that detects and strips markdown code-fence wrappers (` ```json … ``` `) from subagent output before strict JSON parsing. Previously, the existing `_rescue_json_object` path handled these fences correctly at the content level but appended `prose_contamination_rescued` to `partial_reasons`, causing a 'WARNING — Partial run' banner on every docs-agent PR where any subagent wrapped its JSON in fences (~19% of schema-bearing dispatches on the PR #69 run). The new helper short-circuits cleanly: if the raw output is a bare code fence wrapping valid JSON, strip and parse without marking partial. The rescue path remains intact for genuine prose contamination such as the CCE-15 SessionStart preamble. Two new documentation files (a plan and a spec) were added under `docs/superpowers/` as part of the change.
 - PR #74: Applied four code-quality polish fixes to orchestrator_runner.py identified during the CCE-43 Stage 4 /ship review: extracted branch_name(now) into a named local variable (skip_branch), removed a dead KeyError arm from the _remote_already_processed_window except clause, replaced f-string brace-escaped JSON construction with json.dumps(), and replaced a silent third-branch fallthrough with an explicit raise AssertionError. Accompanying tests in test_open_or_append_pr.py were updated to cover the assertion guard.
@@ -340,14 +403,18 @@ synthesized_into: []
 - PR #61: Splits the monolithic `markdown_hygiene` lint rule into two separate modules: `markdown_hygiene_lang` (severity: warn) for code fences missing language tags, and `markdown_hygiene_structure` (severity: block) for unpaired fences and heading jumps that break MkDocs rendering. The lint runner, both new modules, and a comprehensive test suite for each are updated accordingly.
 - PR #60: Corrected the auth secret reference in `docs/setup-guide.md` from the legacy `ANTHROPIC_API_KEY` to `CLAUDE_CODE_OAUTH_TOKEN`. The guide now explains that the Claude CLI reads OAuth tokens from the `CLAUDE_CODE_OAUTH_TOKEN` slot (tokens starting with `sk-ant-oat…`), and that this is distinct from console API keys (`sk-ant-api…`). The fix aligns the setup guide with the auth path established by CCE-35.
 - PR #50: Adds four fail-fast mechanisms to the C2 bootstrap pipeline: (1) parse_frontmatter_strict, which distinguishes a YAML parse failure from absent frontmatter rather than treating both as absent; (2) a description_quality lint rule registered as a Tier-1 default, blocking thin or missing descriptions before publish; (3) a dispatch_verified wrapper over dispatch_validated that runs a post-write check callback, catching bad artifacts that previously slipped through when page-author returned ok=true; and (4) a _BootstrapProgress atomic per-page progress file enabling safe same-hour re-runs and mid-run recovery. Tests for all four mechanisms are included alongside the implementation.
+
 ### Gaps flagged
+
 - theoju/engineering-docs-agent#73: The change hardens OAuth token validation in CI workflows by replacing a single-line assert with three layered type + length checks. This is explicitly security-relevant — it alters how a credential is verified before use in both the nightly and release pipelines. Security-relevant changes are a canonical example of changes that warrant a written spec or plan so reviewers can evaluate the threat model, the chosen check ordering, and any edge cases (e.g., tokens that are non-empty but structurally invalid). A Jira ticket (CCE-49) exists, which is helpful context, but a brief spec or plan describing the exact checks, why three layers were chosen, and what failure modes they guard against would be expected by a senior engineer before merge.
 - theoju/engineering-docs-agent#65: Not in dismissed_flags. No allowlist paths configured. size_filter is empty so size threshold cannot be applied; falling through to LLM judgment. The PR swaps the CI workflow's authentication mechanism from the default GITHUB_TOKEN to a GitHub App installation token. This is a security-relevant change: it alters how the automated workflow authenticates to GitHub, introduces a new credential surface (the App installation token), and changes the effective permission scope of the workflow. A senior engineer would expect at minimum a short written plan covering the App's permission configuration, how the installation token is scoped, rotation/revocation procedures, and why the default token was insufficient. All four 'yes' signals apply: changed user-visible behavior (PRs now appear as authored by docs-agent-bot), security-relevant credential change, new infrastructure dependency, and potential blast-radius if misconfigured.
 
 ## 2026-05-29T04:34:35.184775+00:00
+
 - PR #58: Adds a `_remote_already_processed_window(repo_root, branch, our_head_sha) -> bool` helper to `scripts/orchestrator_runner.py` that detects same-hour duplicate runs before any subagent is dispatched. The helper fetches `origin/<docs-agent-branch>` and reads its committed `state.json` via `git show`; it returns `True` only when the remote branch's `last_successful_run.head_sha` strictly equals the current run's HEAD SHA. A new call site in `_main()` exits 0 with a skip log line when the helper returns `True`, eliminating the working-tree collision (on `whats-new.md` and `state.json`) that caused the post-CCE-42 smoke-test 2/2 to exit 1. Every failure path — network error, absent branch, missing or corrupted `state.json`, schema drift — returns `False` so the runner proceeds normally. Five unit tests cover all documented failure modes. `skills/engineering-docs-agent/SKILL.md` is updated with a new state-transitions bullet and a renumbered procedure step.
 
 ## 2026-05-28T23:15:56.279744+00:00
+
 - PR #55: Enables the orchestrator's existing subagent forensic capture mode (DOCS_AGENT_DEBUG_DIR, built in CCE-9 + CCE-12) in the nightly CI workflow and adds an actions/upload-artifact@v4 step with 14-day retention and if: always() so per-subagent forensic files — prompt.txt, stdout.txt, stderr.txt, stream.jsonl, meta.json — survive runner teardown even on failure. No Python source changes; the only modified source file is the nightly workflow YAML. Two new internal spec and plan documents were also added under docs/superpowers/.
 
 ## 2026-05-27

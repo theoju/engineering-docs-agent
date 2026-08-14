@@ -58,19 +58,24 @@ def _run_subproc(tmp_path: Path, fakes_dir: Path) -> subprocess.CompletedProcess
     )
 
 
-def test_partial_run_via_source_collector_error_advances_state(
+def test_blind_run_via_source_collector_error_does_not_advance_state(
     tmp_path, init_host, read_current_run
 ):
     """Subagent-error path: source-collector returns error+partial. The run
-    proceeds, ends with current_run.partial=True, and state.json on disk
-    still advances last_successful_run.head_sha to HEAD.
+    proceeds and ends with current_run.partial=True, but state.json on disk
+    must NOT advance last_successful_run.head_sha.
 
-    Per CCE-40 §7 row 4: this is intentional. The PR carries "(partial)"
-    in its body and the operator decides whether to merge.
+    CCE-40 §7 row 4 originally held that a partial run still advances the
+    watermark, back when `partial` was undifferentiated. CCE-144 narrows
+    that rule: a degraded partial still advances (see
+    test_partial_run_via_lint_block_advances_state, which now carries the
+    CCE-40 rule forward for the degraded case); a blind partial does not.
+    source_collector_error is classified blind, and last_successful_run is
+    a consume-once cursor — a window it skips past is never re-read, so
+    advancing it here would silently lose the run's content forever.
     """
     seeded = {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
     state_path = init_host(seeded)
-    head_sha = _head_sha(tmp_path)
 
     result = _run_subproc(tmp_path, FAKES_SC_ERROR)
     assert result.returncode == 1, (
@@ -78,11 +83,11 @@ def test_partial_run_via_source_collector_error_advances_state(
     )
 
     written = json.loads(state_path.read_text())
-    assert written["last_successful_run"]["head_sha"] == head_sha, (
-        "partial-via-source-collector-error must STILL advance "
-        "last_successful_run.head_sha per CCE-40 §7 row 4 — operator decides "
-        "on merge. Found: "
-        f"{written['last_successful_run']['head_sha']}, expected {head_sha}"
+    assert written["last_successful_run"]["head_sha"] == "old_sha_000", (
+        "a blind run (source-collector error) must NOT advance "
+        "last_successful_run.head_sha — the cursor is consume-once and a "
+        "skipped window is never re-read. Found: "
+        f"{written['last_successful_run']['head_sha']}, expected old_sha_000"
     )
     # CCE-40: persistent state.json must never carry current_run.
     assert "current_run" not in written, (

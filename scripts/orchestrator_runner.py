@@ -968,6 +968,26 @@ def _exit_code(state: dict) -> int:
     return 1 if (state.get("current_run") or {}).get("blind") else 0
 
 
+def _should_advance_watermark(state: dict) -> bool:
+    """CCE-144: a blind run must not move `last_successful_run`.
+
+    The cursor is consume-once — a window it skips is never re-read. On
+    2026-08-12 a blind run advanced it past three feature PRs whose content
+    was never authored, and that loss is permanent.
+
+    Re-processing a window is cheap and idempotent. Skipping one is not, so
+    the asymmetry decides: when in doubt, do not advance.
+
+    Read at the moment of the advance. Every blind reason except
+    `notifier_invalid` is recorded upstream of that point; the notifier's is
+    recorded near the end of `run`, where it sets the exit code but cannot
+    rewind a cursor that is already written — correctly, since a failed
+    digest means the operator was not told, while the authoring work itself
+    completed and its watermark is honest.
+    """
+    return not (state.get("current_run") or {}).get("blind")
+
+
 def dispatch_verified(
     name: str,
     inputs: dict,
@@ -2400,17 +2420,18 @@ def run(
             state["deferral_counts"] = _next_counts
         else:
             state.pop("deferral_counts", None)
-        state["last_successful_run"] = {
-            "head_sha": advance_sha,
-            "completed_at": now,
-        }
-        if time_truncated:
-            # CCE-43 guard support: record the window this truncated run
-            # covered so a same-hour re-dispatch is recognized as already
-            # processed (the cursor alone never equals HEAD).
-            state["last_successful_run"]["window_head_sha"] = state["current_run"][
-                "head_sha"
-            ]
+        if _should_advance_watermark(state):
+            state["last_successful_run"] = {
+                "head_sha": advance_sha,
+                "completed_at": now,
+            }
+            if time_truncated:
+                # CCE-43 guard support: record the window this truncated run
+                # covered so a same-hour re-dispatch is recognized as already
+                # processed (the cursor alone never equals HEAD).
+                state["last_successful_run"]["window_head_sha"] = state["current_run"][
+                    "head_sha"
+                ]
         state["current_run"]["pr_number"] = None
         save_persistent_state(state_path, state)
         save_current_run(state_path, state)

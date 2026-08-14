@@ -1,8 +1,14 @@
 # graphify semantic-extraction findings
 
 Why the document layer of this repo's knowledge graph is ~1 node per file, what
-was tried, and what would actually fix it. Recorded 2026-08-12 after four
-extraction passes over `docs/superpowers/{specs,plans}`.
+was tried, and what actually fixes it. Recorded 2026-08-12 after four extraction
+passes over `docs/superpowers/{specs,plans}`; updated 2026-08-13 once the cause
+was isolated.
+
+**Answer, for anyone who reads only this far: the extraction prompt is the
+ceiling, not the batching.** A document-genre instruction takes a spec from 1
+node to 6–8. Three batching experiments moved the number by less than 0.5. See
+"The prompt is the ceiling" below.
 
 Code references below point into the **graphify library**
 (`graphifyy`, installed as a uv tool), not into this repo.
@@ -52,6 +58,8 @@ The filter is well-designed in general. It is wrong for this document genre.
 | retry1   | 1     | 1     | 1.00           | 1.00       | 0.00        |
 | batch3   | 3     | 42    | 0.98           | not merged | —           |
 | refaware | 3+cit | 20    | 0.55           | not merged | —           |
+| control  | 1     | 1     | 1.00           | not merged | 0.00        |
+| DOC MODE | 1     | 2     | **7.00**       | not merged | 1.29        |
 
 The topoff pass at batch 2 suggested small batches were ~6x better. **It did
 not reproduce.** Batch 3 over the specs returned 0.98 nodes/file against a 1.02
@@ -67,11 +75,21 @@ That run is preserved at
 
 ## Secondary limits
 
-- **`graphify/llm.py:_FILE_CHAR_CAP`** is 20,000 characters and truncates every
-  file before the prompt is built. 23 of the 58 specs exceed it; the model saw
-  59% of the 1.42 MB corpus, and 16% of the 120.9 KB CCE-80 plan. Not the main
-  cause — the ratio is flat across file sizes — but it caps the ceiling for
-  large plans.
+- **`graphify/llm.py:_FILE_CHAR_CAP`** is 20,000 characters, and it is a _slice
+  width_, not a truncation cap. This entry originally said the cap "truncates
+  every file before the prompt is built" and that the model therefore saw only
+  59% of the 1.42 MB corpus and 16% of the 120.9 KB CCE-80 plan. **That is
+  wrong.** `graphify/llm.py:expand_oversized_files` replaces each oversized
+  splittable-text file with N `FileSlice` objects before chunking, so the model
+  sees all of it — spread across N requests. The 123.8 KB CCE-80 plan expands to
+  7 slices and therefore costs 7 requests, not 1, even at `chunk_size=1`.
+
+  The correction matters for budgeting, not for the node ratio: it explains the
+  daily-quota burn rate far better than file count does, and it means a large
+  plan silently costs ~7x its share of a 20-request allowance. The original
+  claim came from reading the constant at its definition site without reading
+  its caller — `_FILE_CHAR_CAP` genuinely looks like a truncation cap there.
+
 - **The Gemini free tier is 20 requests per _day_**, not per minute:
   `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, `quotaValue: 20`,
   model `gemini-3-flash`. Re-extracting all 58 files at batch 3 costs ~20
@@ -130,7 +148,8 @@ The correction this forces: rescuing a node and improving the metric it was
 rescued _for_ are different claims, and the original text let the first imply
 the second. Four passes now agree that a spec yields ~1 node about itself and
 that the number does not move under any batching change — which points at the
-extraction prompt, not the batching, as the ceiling. That remains untested.
+extraction prompt, not the batching, as the ceiling. **That was tested on
+2026-08-13 and confirmed; see the next section.**
 
 Rejected alternatives:
 
@@ -139,6 +158,97 @@ Rejected alternatives:
   dispatching document creates duplicate concepts.
 - _Raising the character cap._ Addresses truncation only, and the ratio is flat
   across file sizes, so it would not move the main number.
+
+## The prompt is the ceiling: tested 2026-08-13, confirmed
+
+Four passes agreed the ratio does not move under any batching change. It moves
+under a prompt change, by 6-8x.
+
+The test runs one file through the **same library path** — same parser, same
+chunker, same `graphify/llm.py:_out_of_scope` filter — varying only
+`graphify/llm.py:_extraction_system`. Every backend resolves that name as a
+module-level global at call time, so reassigning it changes the prompt without
+touching anything downstream. Only the prompt varies, so the difference is
+attributable to the prompt.
+
+| Run       | File                | Prompt          | Nodes for doc | Internal edges | Dropped out-of-scope |
+| --------- | ------------------- | --------------- | ------------- | -------------- | -------------------- |
+| control   | cce125 spec 8.1 KB  | stock           | **1**         | 0              | 6                    |
+| treatment | cce125 spec 8.1 KB  | + DOCUMENT MODE | **6**         | 3              | 4                    |
+| treatment | cce101 spec 10.9 KB | + DOCUMENT MODE | **8**         | 6              | 3                    |
+
+The control reproduced the 1.02 fleet baseline exactly on a single file, so this
+is an A/B and not a comparison against a fleet average. That distinction is the
+reason the control was worth a request: comparing one file's treatment against a
+58-file average would confound "this prompt is better" with "this file is
+richer."
+
+**The attribution clause is the load-bearing part, not the "emit more nodes"
+clause.** `_out_of_scope` drops on `source_file`, and `source_file` is a field
+the _model chooses_ — so a prompt instruction reaches the filter's input
+directly, while batching only ever reaches its comparison set. That asymmetry is
+why one added paragraph beat six requests' worth of batching work. Out-of-scope
+drops _fell_ (6 → 4, 3) rather than rising: the opposite of reference-aware
+batching, which rescued nodes by widening the scope and paid in crowding.
+
+This does not contradict "patching the out-of-scope filter is rejected" above.
+Nothing here patches the filter. It changes what the model attributes, so the
+unmodified filter keeps the nodes.
+
+The nodes are real concepts, not padding. The seven concepts extracted from the
+CCE-101 spec were Auto-merge by Default, Merge Eligibility Gate, Fact-checker
+Contradiction Block, Host CI Checks Grace Window, GITHUB_TOKEN Recursion
+Suppression Trap, Explicit Build Workflow Dispatch, and Human-edit Guard —
+the spec's named mechanisms, which is what you would want to traverse to, rather
+than its section headings.
+
+Cost was **+11% output tokens for 6x the nodes** (2,091 → 2,329 on cce125). The
+stock prompt was already spending that budget; it was spending it on nodes that
+`_out_of_scope` then discarded.
+
+### The instruction
+
+Appended to the stock system prompt, so the node-ID grammar, the
+`<untrusted_source>` guardrails, and the output schema all stay in force. It is
+recorded here in full because the driver lives in gitignored `graphify-out/` and
+will not survive a clean — the same failure mode that made this runbook
+necessary.
+
+```text
+DOCUMENT MODE: the source files below are prose design documents (specs, plans,
+runbooks), not code. Do not stop at a single node for the document itself.
+
+Emit one node per distinct CONCEPT the document introduces or decides: each named
+mechanism, invariant, failure mode, decision, rejected alternative, and trap. A
+document with N sections should typically yield several nodes.
+
+Attribution: set `source_file` on these concept nodes to the DOCUMENT's own path
+-- the file the concept is described in -- never to a code file the document
+merely mentions. Node IDs still follow {stem}_{entity} using the document's path
+stem. Use file_type "concept" for the concept nodes and "document" for the node
+representing the document as a whole.
+
+Connect the concept nodes to the document node and to each other with edges
+(references, conceptually_related_to), so the document does not land isolated.
+```
+
+### Limits of this result
+
+- **n = 2 treatment, 1 control, both specs of similar size.** The effect is large
+  enough (6x, 8x) that it is unlikely to be noise, but topoff's 2.45 reading also
+  looked convincing at n=20 and did not generalize. Treat 6-8 as "clearly much
+  more than 1," not as a calibrated expectation.
+- **A third run, on the 123.8 KB CCE-80 plan, is discarded — not a data point.**
+  Oversized files slice (see Secondary limits), so `chunk_size=1` became 7
+  requests; 5 hit the daily 429 and only 2 slices returned. Its 15 nodes are a
+  floor from partial coverage, measured under different conditions than the
+  single-chunk runs. It is recorded here so the number is not mistaken for a
+  comparable result later.
+- **Untested at scale.** Applying this to the full corpus costs the entire
+  20-request/day free-tier allowance across several days, and oversized plans
+  cost ~7 requests each. Whether the per-file gain survives multi-file chunks is
+  exactly the question crowding raised in the reference-aware pass, and it is
+  unanswered.
 
 ## Two measurement traps hit while diagnosing this
 
@@ -195,3 +305,9 @@ Records written under the older six-key schema — the `progress`, `retry`,
 `topup`, and `topoff` pass files — predate that capture and carry no failure
 evidence. A zero-node batch in those files is indistinguishable from a
 genuinely empty one.
+
+Two experiment drivers sit beside it: `graphify-out/reference_aware_extract.py`
+(companion batching, rejected) and `graphify-out/prompt_ceiling_test.py` (the
+control/treatment A/B above). All three live in a gitignored directory and do
+not survive a clean, which is why their _results_ and the DOCUMENT MODE prompt
+text are reproduced in this file rather than referenced from it.

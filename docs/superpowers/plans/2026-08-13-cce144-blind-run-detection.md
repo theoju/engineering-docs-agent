@@ -16,7 +16,16 @@
 - **Python interpreter is `/Users/theo/Projects/engineering-docs-agent/.venv/bin/python`.** The worktree has no `.venv`. Bare `python3` is Homebrew 3.14 with no pytest and will fail confusingly. Every command in this plan uses the full path; do not shorten it.
 - **TDD, strictly.** Write the failing test, run it, watch it fail for the stated reason, then implement. A test that passes before implementation is a broken test — fix the test, do not proceed.
 - **`tests/scripts/` must NOT contain `__init__.py`.** `scripts/` is a PEP 420 implicit namespace package. A `tests/scripts/__init__.py` registers as the top-level `scripts` package and shadows the real one, producing order-dependent `ModuleNotFoundError` in unrelated suites.
-- **Import scripts modules by dotted namespace path** (`from scripts import state_io`, `from scripts.lint import citation_exists`). Never `sys.path.insert` the scripts dir and import the module bare — that mutation poisons namespace resolution for the whole pytest session.
+- **The import convention is per-directory, and `orchestrator_runner` is NOT dotted-importable.** `scripts/state_io.py` and `scripts/verify_runner.py` each `sys.path.insert` their own directory, so `from scripts.state_io import add_partial` works — the root `conftest.py` puts the repo root on `sys.path`, which makes `scripts` resolve as a namespace package. `scripts/orchestrator_runner.py` has no such self-insert: `from scripts.orchestrator_runner import run` raises `ModuleNotFoundError: No module named 'gh_client'`, both before and after this change. Follow the directory you are writing in. `tests/state_io/` uses the dotted path. All 58 files in `tests/orchestrator/` use this preamble, and new orchestrator tests must match it:
+
+  ```python
+  _REPO_ROOT = Path(__file__).resolve().parents[2]
+  sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+
+  import orchestrator_runner as orun  # noqa: E402
+  ```
+
+  Never mix the two styles for the same module: `scripts.state_io` and bare `state_io` are two **distinct module objects**, so a monkeypatch applied to one has no effect on the other. CLAUDE.md's dotted-path rule exists to stop `tests/scripts/` shadowing the `scripts` namespace package, and it holds for `scripts.state_io` and `scripts.lint.*` — it does not make `orchestrator_runner` importable, and following it there breaks collection.
 - **`add_partial` is a shared-helper contract.** It is the single writer of `current_run.partial_reasons`, and becomes the single writer of `current_run.blind` and `current_run.blind_reasons`. Its callers are enumerated in this plan; changing its signature means updating all of them in the same commit.
 - **Docs cite code line-free:** `` `path/to/file.py` `` or `` `path/to/file.py:symbol` ``. Never `path:line`. This binds prose in commit messages, CLAUDE.md, and any doc page.
 - **PR title must contain `CCE-144`** — the Jira transition workflow reads the title only.
@@ -167,7 +176,11 @@ def test_degraded_only_run_never_creates_the_blind_key_as_true():
     assert state["current_run"].get("blind", False) is False
 
 
-@pytest.mark.parametrize("kwargs", [{}, {"degraded": True}, {"info_only": True}])
+@pytest.mark.parametrize(
+    "kwargs",
+    [{}, {"degraded": True}, {"info_only": True}],
+    ids=["default", "degraded", "info_only"],
+)
 def test_seeded_current_run_is_not_clobbered(kwargs):
     """add_partial must preserve pre-existing current_run keys."""
     state = {"current_run": {"partial": False, "partial_reasons": [], "head_sha": "abc"}}
@@ -182,9 +195,26 @@ Run:
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/state_io/test_add_partial_blind.py -v
 ```
-Expected: `test_degraded_flips_partial_but_not_blind`, `test_info_only_wins_over_degraded` and the parametrized `degraded` case ERROR with `TypeError: add_partial() got an unexpected keyword argument 'degraded'`. The remaining tests FAIL on `KeyError: 'blind'` or a missing `blind_reasons`.
+Expected: **12 cases — 9 red, 3 green.** The exact split, because three of these are deliberate regression guards on behavior that already works and they must NOT be "fixed":
 
-If any test PASSES at this step, the test is not discriminating — fix it before continuing.
+| Case | At this step |
+| ---- | ------------ |
+| `test_degraded_flips_partial_but_not_blind` | ERROR — `TypeError: add_partial() got an unexpected keyword argument 'degraded'` |
+| `test_info_only_wins_over_degraded` | ERROR — same `TypeError` |
+| `test_blind_reasons_is_a_subset_of_partial_reasons` | ERROR — same `TypeError` |
+| `test_a_degraded_run_that_later_goes_blind_stays_blind` | ERROR — same `TypeError` |
+| `test_degraded_only_run_never_creates_the_blind_key_as_true` | ERROR — same `TypeError` |
+| `test_seeded_current_run_is_not_clobbered[degraded]` | ERROR — same `TypeError` (this is why the parametrize carries explicit `ids=`) |
+| `test_blocking_reason_is_blind_by_default` | FAIL — `KeyError: 'blind'` |
+| `test_repeat_blind_reason_appends_once_to_each_list` | FAIL — `KeyError: 'blind_reasons'` |
+| `test_blind_reasons_are_redacted_identically` | FAIL — `KeyError: 'blind_reasons'` |
+| `test_info_only_flips_neither` | **PASS** — pins existing `info_only` behavior this change must not alter |
+| `test_seeded_current_run_is_not_clobbered[default]` | **PASS** — same, for the default path |
+| `test_seeded_current_run_is_not_clobbered[info_only]` | **PASS** — same |
+
+The Global Constraint "a test that passes before implementation is a broken test" applies to tests asserting **new** behavior. Those three assert **existing** behavior on purpose — they are the guard that Task 1 does not regress `info_only` or clobber a seeded `current_run`. Leave them exactly as they are.
+
+Any case *not* in this table that passes is genuinely non-discriminating — fix it before continuing.
 
 - [ ] **Step 3: Implement**
 
@@ -327,7 +357,15 @@ Create `tests/orchestrator/test_dispatch_reasons_classification.py`:
 
 from __future__ import annotations
 
-from scripts.orchestrator_runner import _record_dispatch_reasons
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+
+import orchestrator_runner as orun  # noqa: E402
+
+_record_dispatch_reasons = orun._record_dispatch_reasons
 
 
 def test_failed_dispatch_is_blind_by_default():
@@ -609,23 +647,35 @@ def test_every_add_partial_call_is_explicitly_classified(rel):
     )
 
 
-@pytest.mark.parametrize("rel", GUARDED_MODULES)
-def test_the_guard_actually_detects_a_bare_call(rel):
-    """Meta-test: prove the AST walk sees a bare call, so a green result above
-    means 'all classified', never 'the walk found nothing'."""
-    source = (
-        (REPO_ROOT / rel).read_text()
-        + "\n\ndef _probe(state):\n    add_partial(state, 'unclassified')\n"
+def test_the_guard_actually_detects_a_bare_call(tmp_path):
+    """Meta-test: exercise _add_partial_calls on an isolated probe, so a green
+    result above means "all sites classified" and never "the walk found
+    nothing".
+
+    Deliberately does NOT read the guarded modules: a probe appended to their
+    source would count every still-unclassified call alongside it, so the test
+    could only pass after the classification landed — failing at the TDD red
+    gate with a message blaming the walk, which is the one part that works.
+    Reading a fixture instead makes it order-independent and lets it exercise
+    the `.attr` branch, which no real call site currently covers.
+    """
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "def f(state):\n"
+        "    add_partial(state, 'bare')\n"
+        "    add_partial(state, 'degraded', degraded=True)\n"
+        "    add_partial(state, 'advisory', info_only=True)\n"
+        "    mod.add_partial(state, 'attribute-style')\n"
     )
-    tmp = ast.parse(source)
-    bare = [
-        n
-        for n in ast.walk(tmp)
-        if isinstance(n, ast.Call)
-        and (getattr(n.func, "id", None) == "add_partial")
-        and not ({"info_only", "degraded"} & {kw.arg for kw in n.keywords})
+    calls = list(_add_partial_calls(probe))
+    assert len(calls) == 4, f"walk found {len(calls)} calls, expected 4"
+    unclassified = [
+        fn for _lineno, fn, kwargs in calls if not ({"info_only", "degraded"} & kwargs)
     ]
-    assert len(bare) == 1, f"probe not detected in {rel}; the walk is broken"
+    assert len(unclassified) == 2, (
+        "the walk must flag the bare call AND the attribute-style call; "
+        f"it flagged {len(unclassified)}"
+    )
 
 
 def test_orchestrator_has_the_expected_call_site_population():
@@ -647,9 +697,14 @@ Run:
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_classification_coverage.py -v
 ```
-Expected: `test_every_add_partial_call_is_explicitly_classified` FAILS for **both** modules, listing 25 unclassified sites in `orchestrator_runner.py` and 3 in `verify_runner.py`. The two meta-tests PASS.
+Expected, precisely:
 
-If `test_orchestrator_has_the_expected_call_site_population` fails, the file has drifted since the audit — report the actual number and stop; do not silently update it.
+- `test_every_add_partial_call_is_explicitly_classified[scripts/orchestrator_runner.py]` FAILS, listing **25** unclassified sites.
+- `test_every_add_partial_call_is_explicitly_classified[scripts/verify_runner.py]` FAILS, listing **3**.
+- `test_the_guard_actually_detects_a_bare_call` PASSES — it reads a `tmp_path` fixture, not the guarded modules, so it is green at every point in the sequence.
+- `test_orchestrator_has_the_expected_call_site_population` PASSES (38 calls).
+
+If the population tripwire fails, the file has drifted since the audit — report the actual number and stop; do not silently update it.
 
 - [ ] **Step 3: Classify the orchestrator's 25 sites**
 
@@ -769,7 +824,13 @@ watermark advance (Task 5), auto-merge gate (Task 6)."""
 
 from __future__ import annotations
 
-from scripts.orchestrator_runner import _exit_code
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+
+import orchestrator_runner as orun  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -778,24 +839,24 @@ from scripts.orchestrator_runner import _exit_code
 
 
 def test_exit_code_is_1_when_blind():
-    assert _exit_code({"current_run": {"partial": True, "blind": True}}) == 1
+    assert orun._exit_code({"current_run": {"partial": True, "blind": True}}) == 1
 
 
 def test_exit_code_is_0_when_degraded_only():
-    assert _exit_code({"current_run": {"partial": True}}) == 0
+    assert orun._exit_code({"current_run": {"partial": True}}) == 0
 
 
 def test_exit_code_is_0_on_a_clean_run():
-    assert _exit_code({"current_run": {"partial": False}}) == 0
+    assert orun._exit_code({"current_run": {"partial": False}}) == 0
 
 
 def test_exit_code_is_0_when_current_run_is_absent():
     """Defensive: an early return before current_run exists must not crash."""
-    assert _exit_code({}) == 0
+    assert orun._exit_code({}) == 0
 
 
 def test_exit_code_treats_explicit_false_as_not_blind():
-    assert _exit_code({"current_run": {"blind": False}}) == 0
+    assert orun._exit_code({"current_run": {"blind": False}}) == 0
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -805,7 +866,7 @@ Run:
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_blind_run_interlocks.py -v
 ```
-Expected: collection ERROR — `ImportError: cannot import name '_exit_code' from 'scripts.orchestrator_runner'`.
+Expected: all five tests FAIL with `AttributeError: module 'orchestrator_runner' has no attribute '_exit_code'`. Collection itself succeeds — the module imports fine, the attribute simply does not exist yet.
 
 - [ ] **Step 3: Implement `_exit_code`**
 
@@ -941,9 +1002,7 @@ def _advance(state: dict, *, advance_sha: str, now: str, time_truncated: bool):
     run() is a ~1000-line function whose advance sits behind a full fixture
     dispatch; this pins the guard's logic in isolation.
     """
-    from scripts.orchestrator_runner import _should_advance_watermark
-
-    if _should_advance_watermark(state):
+    if orun._should_advance_watermark(state):
         state["last_successful_run"] = {"head_sha": advance_sha, "completed_at": now}
         if time_truncated:
             state["last_successful_run"]["window_head_sha"] = state["current_run"][
@@ -1000,9 +1059,7 @@ def test_clean_run_advances():
 
 
 def test_should_advance_is_true_when_current_run_is_absent():
-    from scripts.orchestrator_runner import _should_advance_watermark
-
-    assert _should_advance_watermark({}) is True
+    assert orun._should_advance_watermark({}) is True
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -1012,7 +1069,7 @@ Run:
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_blind_run_interlocks.py -v
 ```
-Expected: the Task 5 tests ERROR with `ImportError: cannot import name '_should_advance_watermark'`. Task 4's tests still PASS.
+Expected: the six Task 5 tests FAIL with `AttributeError: module 'orchestrator_runner' has no attribute '_should_advance_watermark'`. Task 4's five tests still PASS.
 
 - [ ] **Step 3: Implement the predicate and the guard**
 
@@ -1127,15 +1184,19 @@ Append to `tests/orchestrator/test_blind_run_interlocks.py`:
 
 import pytest
 
-from scripts.orchestrator_runner import _maybe_auto_merge
-
 
 class _ExplodingGh:
-    """Any gh call means the gate let the run through when it should not."""
+    """Any gh access means the gate let the run through when it should not.
 
-    def pr_view_commits(self, pr_number):  # pragma: no cover - must not run
+    __getattr__ rather than a single stub method: the gate must be proven to
+    return BEFORE it touches the client at all, and hard-coding one method
+    name would silently pass if the implementation reached for a different
+    one first.
+    """
+
+    def __getattr__(self, name):  # pragma: no cover - must not run
         raise AssertionError(
-            "reached the human-edit guard; the blind gate did not skip"
+            f"reached gh.{name}; the blind gate did not skip"
         )
 
 
@@ -1147,7 +1208,7 @@ _MERGE_SETTINGS = {
 
 
 def _call(*, blind, partial, cursor_backed, gh=None, reasons=()):
-    return _maybe_auto_merge(
+    return orun._maybe_auto_merge(
         gh if gh is not None else _ExplodingGh(),
         pr_number=1,
         partial=partial,
@@ -1193,6 +1254,10 @@ def test_degraded_and_cursor_backed_still_reaches_the_merge_path():
     guard expressed as a test."""
     with pytest.raises(AssertionError, match="the blind gate did not skip"):
         _call(blind=False, partial=True, cursor_backed=True)
+    # Sanity: the same call with blind=True must NOT raise, or the assertion
+    # above would pass for the wrong reason (e.g. a stub that always throws).
+    outcome, _ = _call(blind=True, partial=True, cursor_backed=True)
+    assert outcome["reason"] == "blind_run"
 
 
 def test_veto_still_wins_for_a_non_blind_run():
@@ -1206,7 +1271,7 @@ def test_veto_still_wins_for_a_non_blind_run():
 
 
 def test_manual_policy_is_unchanged_by_blind():
-    outcome, reasons = _maybe_auto_merge(
+    outcome, reasons = orun._maybe_auto_merge(
         _ExplodingGh(),
         pr_number=1,
         partial=True,
@@ -1509,5 +1574,14 @@ Spec sections with no task, deliberately: **Out of scope** — the Slack `curl` 
 **2. Placeholder scan.** No TBD/TODO. Every code step carries the actual code. Every test step carries the actual assertions. No "similar to Task N".
 
 **3. Type consistency.** Verified across tasks: `add_partial(state, reason, *, info_only: bool = False, degraded: bool = False) -> None` (Task 1) is called with `degraded=` in Tasks 2 and 3. `_record_dispatch_reasons(state, reasons, *, ok: bool, degraded: bool = False)` (Task 2) matches its 7 callsites. `_exit_code(state: dict) -> int` (Task 4) and `_should_advance_watermark(state: dict) -> bool` (Task 5) are both imported by name in `test_blind_run_interlocks.py`. `_maybe_auto_merge(..., blind: bool = False, ...)` (Task 6) matches the callsite kwarg and every test invocation. State keys are spelled `blind` and `blind_reasons` throughout.
+
+**4. The red-gate predictions were executed, not asserted.** Adversarial review of a first draft found three predictions wrong, each of which would have cost a task cycle: the dotted `from scripts.orchestrator_runner import …` that four tasks used does not work at all (the module has no self-insert, unlike `state_io.py` and `verify_runner.py`); a meta-test that counted every unclassified call alongside its probe, so it could only go green *after* the step it was meant to gate, failing with a message blaming the AST walk; and a blanket "9 tests fail first" claim that was wrong for 3 of 12 cases, where the step's own rule would have directed the implementer to break three deliberate regression guards.
+
+Both testable files were therefore extracted from this plan, written to the tree, and run before this plan was committed:
+
+- `tests/state_io/test_add_partial_blind.py` → **9 failed, 3 passed**, and the three passing are exactly `test_info_only_flips_neither`, `test_seeded_current_run_is_not_clobbered[default]`, and `[info_only]`.
+- `tests/orchestrator/test_classification_coverage.py` → **2 failed, 2 passed**; the failures list 25 sites in `orchestrator_runner.py` and 3 in `verify_runner.py`, and both meta-tests are green.
+
+Both files were then removed. Tasks 4–6's `AttributeError` predictions follow from the same verified import preamble but were not executed, since their subjects do not exist yet.
 
 **One residual risk, flagged rather than hidden.** Task 3's classification changes the exit code of existing fixture-driven tests, and Task 4 Step 5 is where that surfaces. The plan instructs the implementer to adjudicate each such test individually and to **stop and report** rather than adjust a test to match the code when the two disagree — a test asserting `rc == 0` on a run that is genuinely blind is a test encoding the bug. The number of affected tests is deliberately not predicted here: one verifier's estimate of "at least 18" was refuted as inflated roughly fifty-fold by counting unrelated assertions, and a fabricated number would be worse than none.

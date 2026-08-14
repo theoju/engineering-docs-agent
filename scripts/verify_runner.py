@@ -83,7 +83,9 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
                 cwd=repo_root,
             )
             for r in verify_reasons:
-                add_partial(state, r)
+                # CCE-144: blind. A failed publish-verifier dispatch means the
+                # run could not judge whether the pages went live.
+                add_partial(state, r, degraded=False)
             if verdict is None:
                 verdict = {
                     "verified": [],
@@ -97,7 +99,9 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
                 provider, cfg.get("publishing", {}), repo, pr_number
             )
             for r in poll_reasons:
-                add_partial(state, r)
+                # CCE-144: degraded. The CCE-63 CircleCI seam degrades on
+                # purpose and reports an informational line.
+                add_partial(state, r, degraded=True)
             digest_partial_reasons = poll_reasons
         digest = {
             "pr_url": f"https://github.com/{repo['owner']}/{repo['name']}/pull/{pr_number}",
@@ -122,7 +126,10 @@ def run(repo_root: Path, pr_number: int, *, dry_run_dir: Path | None = None) -> 
             cwd=repo_root,
         )
         for r in notifier_reasons:
-            add_partial(state, r)
+            # CCE-144: degraded. verify_runner's exit code is deliberately
+            # unchanged by CCE-144; only orchestrator_runner.run returns 1
+            # on blind. Classified so the coverage test is exhaustive.
+            add_partial(state, r, degraded=True)
 
         failed_urls = verdict.get("failed", [])
         build_status = verdict.get("build_status")

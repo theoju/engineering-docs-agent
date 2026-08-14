@@ -271,13 +271,19 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Print partial-run reasons
-        # CCE-73 (bundled in CCE-80 PR per CO-EDIT locked decision): echo
-        # state.json.current_run.partial_reasons to stdout so they show in
+        # CCE-73: echo the run's partial reasons to stdout so they show in
         # `gh run view --log` even when the run-summary block is collapsed.
+        # CCE-144: read current_run.json, NOT state.json. save_persistent_state
+        # strips _EPHEMERAL_KEYS = ("current_run",) before writing state.json,
+        # so this step read a key that is never there and printed nothing on
+        # every run since the ephemeral split — indistinguishable from a clean
+        # run. Blind reasons print under their own label: they are the subset
+        # that turns the run red.
         if: always()
         shell: bash
         run: |
-          state=".engineering-docs-agent/state.json"
-          if [ -f "$state" ]; then
-            jq -r '.current_run.partial_reasons[]? // empty' "$state" || true
+          run_file=".engineering-docs-agent/current_run.json"
+          if [ -f "$run_file" ]; then
+            jq -r '.current_run.partial_reasons[]? // empty' "$run_file" || true
+            jq -r '.current_run.blind_reasons[]? // empty | "BLIND: " + .' "$run_file" || true
           fi

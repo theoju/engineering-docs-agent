@@ -1,17 +1,10 @@
 # CCE-144 — Blind-run detection
 
-**Status:** design approved — **NOT IMPLEMENTED.** Archived 2026-08-14 under CCE-150; see the banner below.
+**Status:** approved — **implemented and merged 2026-08-14.**
 **Date:** 2026-08-13
-**Ticket:** CCE-144 (open)
+**Ticket:** CCE-144
+**Supersedes the CCE-150 archive.** PR #223 (merged 2026-08-14) stamped this document "NOT IMPLEMENTED — archived, branch deleted," on the premise that `feat/CCE-144-blind-run-detection` had been abandoned unpushed and its commits were unreachable. That premise was false: the branch was pushed at `5021f11` and landed under this ticket. Read every "the runner does X" statement below as **current behavior**, not as a proposal. CCE-150 is obsolete and its banner is removed here.
 **Distinct from CCE-128** (pre-checkout job death), which covers the opposite failure: the job dies before `actions/checkout`, so no repo tree exists for an `if: failure()` step to use. This spec covers a job in which _every step is green_ and the run is nonetheless useless.
-
-> ## Archived 2026-08-14 — the defect described here is still live
->
-> **No code in this repository implements this design.** Read every "the runner does X" statement below as _proposed_, not as current behavior. `orchestrator_runner.run` still returns `0` on the `no_pr` path, `state_io.add_partial` has no `blind` flag, and the auto-merge gate has no blind check. A fully rate-limited nightly is still a green check by construction.
->
-> An implementation branch (`feat/CCE-144-blind-run-detection`) reached 20 commits — all seven tasks, four new test suites, a green suite — but was never pushed and never opened as a PR. The operator abandoned it on 2026-08-14 and kept the design only. Its head was `5021f11`; **those commits became unreachable when the branch was deleted** and will be dropped at the next `git gc`, so treat that SHA as a historical marker, not a recovery path.
->
-> **CCE-144 stays open.** This document is the diagnosis, not the fix. Anyone picking it up starts from the code as it exists today, and must re-validate the **Classification** section against the current `orchestrator_runner.py` before trusting it — that table was written against a tree that no longer matches `main`.
 
 ## Problem
 
@@ -98,27 +91,27 @@ Audited 2026-08-13 by AST enumeration of every `add_partial` call. Twenty-five d
 
 **Blind** — no `degraded` kwarg, taking the fail-safe default:
 
-| Reason                                             | Loss mechanism                                                                         |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `source_collector_invalid` / `_error` / `_partial` | PRs never seen; the cursor crosses them regardless                                     |
-| `pr_summarizer_invalid` / `_error`                 | the PR yields no doc targets, never enters `deferred_pages_by_pr`, so is not held back |
-| `content_validator_invalid`                        | pages stay in `landed_batches` — counted as delivered, never validated                 |
-| `notifier_invalid`                                 | no content loss; no alarm either                                                       |
-| `app_token_unavailable`                            | CCE-127: a PR on the fallback token fires no host CI, so zero checks reads as green    |
+| Reason                                                     | Loss mechanism                                                                        |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `source_collector_invalid` / `_error` / `_partial`         | PRs never seen; the cursor crosses them regardless                                    |
+| `pr_summarizer_invalid` / `_error`                         | the PR yields no doc targets, never enters `deferred_pages_by_pr`, so is not held back |
+| `content_validator_invalid`                                | pages stay in `landed_batches` — counted as delivered, never validated                |
+| `notifier_invalid`                                         | no content loss; no alarm either                                                      |
+| `app_token_unavailable`                                    | CCE-127: a PR on the fallback token fires no host CI, so zero checks reads as green   |
 
 **Degraded** — `degraded=True`:
 
-| Reason                                       | Why it is safe                                                                   |
-| -------------------------------------------- | -------------------------------------------------------------------------------- |
-| `time_budget_exceeded` (4 sites)             | CCE-109 truncation; deferred PRs are held back and retried                       |
-| window-clip reasons                          | the collector returned PRs outside the requested window; rejecting loses nothing |
-| `unknown_lens`                               | judged: the target names no configured lens                                      |
-| `unsafe_page_path`, `lint_block_unsafe_path` | judged: a path guard doing its job                                               |
-| `page_author_invalid`                        | the batch does not land, so its PR is held back                                  |
-| `lint_block`                                 | the canonical judged-and-rejected case                                           |
-| `gap_detector_invalid`                       | advisory output only; excluded from the CCE-101 merge gate                       |
-| cursor-resolution failures (4 sites)         | these _prevent_ an advance; nothing is consumed                                  |
-| `deferral_skip`                              | CCE-140's bounded forgiveness, already recorded append-only in `skipped_prs`     |
+| Reason                                                    | Why it is safe                                                             |
+| --------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `time_budget_exceeded` (4 sites)                          | CCE-109 truncation; deferred PRs are held back and retried                 |
+| window-clip reasons                                       | the collector returned PRs outside the requested window; rejecting loses nothing |
+| `unknown_lens`                                            | judged: the target names no configured lens                                |
+| `unsafe_page_path`, `lint_block_unsafe_path`              | judged: a path guard doing its job                                         |
+| `page_author_invalid`                                     | the batch does not land, so its PR is held back                            |
+| `lint_block`                                              | the canonical judged-and-rejected case                                     |
+| `gap_detector_invalid`                                    | advisory output only; excluded from the CCE-101 merge gate                 |
+| cursor-resolution failures (4 sites)                      | these _prevent_ an advance; nothing is consumed                            |
+| `deferral_skip`                                           | CCE-140's bounded forgiveness, already recorded append-only in `skipped_prs` |
 
 The four `time_budget_exceeded` sites are the highest-stakes rows in this table. Classifying them blind would turn every truncated run red **and**, through the watermark interlock, freeze its advance — deleting the cursor-backed advance CCE-140 exists to produce, and reinstating the CCE-109 doom loop as a permanent state. They are degraded, and the auto-merge tests assert that a degraded cursor-backed run still merges.
 

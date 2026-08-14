@@ -1,8 +1,9 @@
 # tests/orchestrator/test_schema_invalid_soft_fail.py
 """End-to-end: when source-collector returns a schema-invalid response,
 the pipeline records a specific schema_invalid reason in partial_reasons,
-falls through to the empty-prs path, exits 0, and does NOT also append the
-generic source_collector_invalid: returned None reason."""
+falls through to the empty-prs path, exits 1 (schema_invalid is a blind
+blocking reason — CCE-144), and does NOT also append the generic
+source_collector_invalid: returned None reason."""
 
 from __future__ import annotations
 import json
@@ -36,8 +37,8 @@ def test_schema_invalid_source_collector_yields_specific_reason(tmp_path, init_h
         text=True,
         env=env,
     )
-    assert r.returncode == 0, (
-        f"pipeline should exit 0 on schema-invalid soft-fail; "
+    assert r.returncode == 1, (  # schema_invalid is blind (blocking reason)
+        f"pipeline should exit 1 on schema-invalid soft-fail; "
         f"got rc={r.returncode}\nstdout={r.stdout}\nstderr={r.stderr}"
     )
 

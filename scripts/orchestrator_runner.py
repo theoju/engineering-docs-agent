@@ -926,21 +926,70 @@ def dispatch_validated(
     return raw, dispatch_reasons
 
 
-def _record_dispatch_reasons(state: dict, reasons: list[str], *, ok: bool) -> None:
-    """Record dispatch_validated reasons onto the run state. (CCE-118)
+def _record_dispatch_reasons(
+    state: dict, reasons: list[str], *, ok: bool, degraded: bool = False
+) -> None:
+    """Record dispatch reasons, classified.
 
-    A dispatch that returned usable output (``ok=True``) can only carry benign
-    ``prose_contamination_rescued`` diagnostics — a schema failure forces the
-    dispatch output to None (see ``dispatch_validated`` above) — so its reasons
-    are recorded ``info_only`` and must NOT flip ``partial``. When the dispatch
-    failed (``ok=False``) the reasons explain dropped work and DO flip
-    ``partial``.
+    When the dispatch SUCCEEDED (``ok=True``) its reasons are retry/warning
+    noise: they are recorded ``info_only`` and must NOT flip ``partial``.
+    When the dispatch failed (``ok=False``) the reasons explain dropped work
+    and DO flip ``partial``.
 
     Advisory layers (fact-checker, deterministic generators) record
     ``info_only=True`` directly and do not route through this helper.
+
+    CCE-144: a failed dispatch is BLIND by default — the agent never answered,
+    so the pipeline was prevented from judging. Pass ``degraded=True`` at the
+    two callsites whose failure holds work back rather than consuming it
+    (page-author, whose unlanded batch keeps its PR out of the advance cursor;
+    gap-detector, whose output is advisory and outside the merge gate).
+    ``ok=True`` outranks ``degraded`` — an advisory reason is advisory.
     """
     for r in reasons:
-        add_partial(state, r, info_only=ok)
+        add_partial(state, r, info_only=ok, degraded=degraded)
+
+
+def _exit_code(state: dict) -> int:
+    """CCE-144: 1 when the run is blind, else 0.
+
+    Exit 1 is not a new code — `run` already returns 1 when the docs PR could
+    not be opened, which is the same class of signal ("this run failed, read
+    the reasons"). Blind joins that class rather than competing with it, so an
+    operator reading only the run status takes the same action for both.
+    Exit 2 stays with the config-error paths.
+
+    The exit code is the alarm channel because it is the only one requiring
+    zero provisioning: GitHub's native failure email and a red run-history
+    entry need no secret, no webhook, no config. It is also the only channel
+    that survives total quota exhaustion, since nothing in this path invokes
+    the Claude CLI — which is exactly the outage it must report.
+    """
+    return 1 if (state.get("current_run") or {}).get("blind") else 0
+
+
+def _should_advance_watermark(state: dict) -> bool:
+    """CCE-144: a blind run must not move `last_successful_run`.
+
+    The cursor is consume-once — a window it skips is never re-read. On
+    2026-08-12 a blind run advanced it past three feature PRs whose content
+    was never authored, and that loss is permanent.
+
+    Re-processing a window is cheap and idempotent. Skipping one is not, so
+    the asymmetry decides: when in doubt, do not advance.
+
+    Read at the moment of the advance. Two classes of blind reason are
+    recorded downstream of that point, both deliberately: `notifier_invalid`,
+    near the end of `run`, where it sets the exit code but cannot rewind a
+    cursor that is already written — correctly, since a failed digest means
+    the operator was not told while the authoring work itself completed and
+    its watermark is honest; and every non-`info_only` failure raised inside
+    `open_or_append_pr`, whose advance is honest for a different reason —
+    per CCE-40 §7 row 3 it is ephemeral working-tree state, since a failed
+    PR-open means nothing reaches `main` and the next nightly starts from a
+    fresh checkout.
+    """
+    return not (state.get("current_run") or {}).get("blind")
 
 
 def dispatch_verified(
@@ -1547,7 +1596,7 @@ def run(
                 f"processed in this hour.",
                 file=sys.stdout,
             )
-            return 0
+            return _exit_code(state)
 
         jira_payload = config.get("sources", {}).get("jira")
         sc_inputs = {
@@ -1564,13 +1613,17 @@ def run(
         _record_dispatch_reasons(state, reasons, ok=sources is not None)
         if sources is None:
             if not reasons:
-                add_partial(state, "source_collector_invalid: returned None")
+                add_partial(
+                    state, "source_collector_invalid: returned None", degraded=False
+                )
             sources = {"prs": [], "jira_issues": []}
         else:
             if sources.get("error"):
-                add_partial(state, f"source_collector_error: {sources['error']}")
+                add_partial(
+                    state, f"source_collector_error: {sources['error']}", degraded=False
+                )
             if sources.get("partial"):
-                add_partial(state, "source_collector_partial: true")
+                add_partial(state, "source_collector_partial: true", degraded=False)
 
         # CCE-19: orchestrator-side safety net. The source-collector agent's
         # prompt was observed in 3/5 CCE-16 baseline runs to return PRs whose
@@ -1588,7 +1641,7 @@ def run(
                 out_reasons=clip_reasons,
             )
         for r in clip_reasons:
-            add_partial(state, r)
+            add_partial(state, r, degraded=True)
 
         prs = sources.get("prs", [])
         prs = _order_prs_oldest_first(
@@ -1637,6 +1690,7 @@ def run(
                     f"time_budget_exceeded: admitted {i}/{len(prs)} PRs "
                     f"(budget {budget}s); deferring PR #{pr.get('number')} "
                     f"to next run",
+                    degraded=True,
                 )
                 # A deferred PR without a merge_sha can't be re-anchored by the
                 # next window — advancing past it would lose it forever, so the
@@ -1665,12 +1719,17 @@ def run(
             _record_dispatch_reasons(state, reasons, ok=summary is not None)
             if summary is None:
                 if not reasons:
-                    add_partial(state, f"pr_summarizer_invalid: pr={pr['number']}")
+                    add_partial(
+                        state,
+                        f"pr_summarizer_invalid: pr={pr['number']}",
+                        degraded=False,
+                    )
                 continue
             if summary.get("error"):
                 add_partial(
                     state,
                     f"pr_summarizer_error: pr={pr['number']}: {summary['error']}",
+                    degraded=False,
                 )
                 continue
             # Use the PR's actual number, not summary's echo (which is fixture-static in tests).
@@ -1737,6 +1796,7 @@ def run(
                     state,
                     f"time_budget_exceeded: authored {i}/{len(per_target)} "
                     f"page batches (budget {budget}s); deferring the rest",
+                    degraded=True,
                 )
                 # Track A: an authoring truncation is a truncation. Without
                 # this the advance block below falls through to
@@ -1752,16 +1812,16 @@ def run(
             try:
                 lens_path, _opts = resolve_lens(config, lens)
             except KeyError:
-                add_partial(state, f"unknown_lens: {lens}")
+                add_partial(state, f"unknown_lens: {lens}", degraded=True)
                 continue
             target_path = repo_root / lens_path / hint
             try:
                 rel = target_path.resolve().relative_to(repo_root.resolve())
             except ValueError:
-                add_partial(state, f"unsafe_page_path: {hint}")
+                add_partial(state, f"unsafe_page_path: {hint}", degraded=True)
                 continue
             if not _page_target_is_editable(str(rel), editable_globs):
-                add_partial(state, f"unsafe_page_path: {rel}")
+                add_partial(state, f"unsafe_page_path: {rel}", degraded=True)
                 continue
             target_path.parent.mkdir(parents=True, exist_ok=True)
             action = "edit" if target_path.exists() else "create"
@@ -1828,10 +1888,13 @@ def run(
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,
             )
-            _record_dispatch_reasons(state, reasons, ok=out is not None)
+            # CCE-144: degraded, not blind. An unlanded batch is folded into
+            # deferred_pages_by_pr by the complement writer below, holding its
+            # PR out of the advance cursor — the page is re-authored next run.
+            _record_dispatch_reasons(state, reasons, ok=out is not None, degraded=True)
             if out is None:
                 if not reasons:
-                    add_partial(state, f"page_author_invalid: {rel}")
+                    add_partial(state, f"page_author_invalid: {rel}", degraded=True)
                 continue
             if out.get("ok"):
                 authored.append(str(target_path))
@@ -1875,7 +1938,11 @@ def run(
             _record_dispatch_reasons(state, reasons, ok=validation is not None)
             if validation is None:
                 if not reasons:
-                    add_partial(state, "content_validator_invalid: returned None")
+                    add_partial(
+                        state,
+                        "content_validator_invalid: returned None",
+                        degraded=False,
+                    )
                 validation = {"failed": []}
             for fail in validation.get("failed", []):
                 if fail.get("severity") == "block":
@@ -1891,12 +1958,15 @@ def run(
                         add_partial(
                             state,
                             f"lint_block_unsafe_path: {fail['path']} (outside repo)",
+                            degraded=True,
                         )
                         continue
                     # Reject empty / "." paths that would cause git checkout HEAD -- .
                     # to restore the entire working tree.
                     if str(rel) in (".", ""):
-                        add_partial(state, "lint_block_unsafe_path: empty path")
+                        add_partial(
+                            state, "lint_block_unsafe_path: empty path", degraded=True
+                        )
                         continue
                     # If the file exists in HEAD, restore it (edit case).
                     # If not (create case), remove it.
@@ -1933,6 +2003,7 @@ def run(
                     add_partial(
                         state,
                         f"lint_block: {fail['path']} {fail['rule']}: {fail['message']}",
+                        degraded=True,
                     )
                     # CCE-140: the page was just reverted or deleted, so its
                     # batch did NOT land and its PRs are still owed a page.
@@ -1999,6 +2070,7 @@ def run(
                         f"time_budget_exceeded: fact-checked {i}/"
                         f"{len(fact_pages)} pages (budget {budget}s); "
                         f"skipping the rest",
+                        degraded=True,
                     )
                     break
                 page_path = Path(page)
@@ -2113,6 +2185,7 @@ def run(
                     state,
                     f"time_budget_exceeded: gap-checked {i}/{len(prs)} PRs "
                     f"(budget {budget}s); skipping the rest",
+                    degraded=True,
                 )
                 break
             pr_id = f"{repo['owner']}/{repo['name']}#{pr['number']}"
@@ -2137,10 +2210,17 @@ def run(
                 cwd=repo_root,
                 inject={"pr_id": pr_id},  # CCE-120: orchestrator-authoritative identity
             )
-            _record_dispatch_reasons(state, reasons, ok=verdict is not None)
+            # CCE-144: degraded, not blind. gap-detector output feeds only a
+            # PR note and is excluded from the CCE-101 auto-merge gate, so a
+            # failure here consumes no docs content.
+            _record_dispatch_reasons(
+                state, reasons, ok=verdict is not None, degraded=True
+            )
             if verdict is None:
                 if not reasons:
-                    add_partial(state, f"gap_detector_invalid: pr_id={pr_id}")
+                    add_partial(
+                        state, f"gap_detector_invalid: pr_id={pr_id}", degraded=True
+                    )
                 continue
             if verdict.get("needs_spec") is None:
                 # CCE-125: a validated null needs_spec is the agent's "couldn't
@@ -2233,6 +2313,7 @@ def run(
                     state,
                     "time_budget_no_advance_no_cursor: truncated run had no "
                     "admitted PR with a usable merge_sha; baseline unchanged",
+                    degraded=True,
                 )
             elif any(not (p.get("merge_sha") or "").strip() for p in still_deferred):
                 add_partial(
@@ -2240,12 +2321,14 @@ def run(
                     f"time_budget_no_advance_unanchored_deferred: a deferred "
                     f"PR has no merge_sha and would be stranded behind cursor "
                     f"{cursor[:8]}; baseline unchanged",
+                    degraded=True,
                 )
             elif full_cursor is None:
                 add_partial(
                     state,
                     f"time_budget_advance_out_of_window: cursor {cursor[:8]} "
                     f"unresolvable in repo ({window}); baseline unchanged",
+                    degraded=True,
                 )
             else:
                 ok, why = _sha_in_window(
@@ -2271,6 +2354,7 @@ def run(
                         state,
                         f"time_budget_advance_out_of_window: cursor "
                         f"{full_cursor[:8]} {why} ({window}); baseline unchanged",
+                        degraded=True,
                     )
         else:
             advance_sha = state["current_run"]["head_sha"]
@@ -2315,6 +2399,7 @@ def run(
                     f"{int(_deferral_counts.get(_k, 0))} consecutive deferrals "
                     f"(threshold {_threshold}); pages="
                     + (", ".join(_pages) if _pages else "(none authored)"),
+                    degraded=True,
                 )
             merge_skipped_pr_records(state, _records)
         # CCE-140: prune and increment on EVERY run, not only a truncated one.
@@ -2339,22 +2424,23 @@ def run(
             state["deferral_counts"] = _next_counts
         else:
             state.pop("deferral_counts", None)
-        state["last_successful_run"] = {
-            "head_sha": advance_sha,
-            "completed_at": now,
-        }
-        if time_truncated:
-            # CCE-43 guard support: record the window this truncated run
-            # covered so a same-hour re-dispatch is recognized as already
-            # processed (the cursor alone never equals HEAD).
-            state["last_successful_run"]["window_head_sha"] = state["current_run"][
-                "head_sha"
-            ]
+        if _should_advance_watermark(state):
+            state["last_successful_run"] = {
+                "head_sha": advance_sha,
+                "completed_at": now,
+            }
+            if time_truncated:
+                # CCE-43 guard support: record the window this truncated run
+                # covered so a same-hour re-dispatch is recognized as already
+                # processed (the cursor alone never equals HEAD).
+                state["last_successful_run"]["window_head_sha"] = state["current_run"][
+                    "head_sha"
+                ]
         state["current_run"]["pr_number"] = None
         save_persistent_state(state_path, state)
         save_current_run(state_path, state)
         if no_pr:
-            return 0
+            return _exit_code(state)
         branch = branch_name(now)
         gh = GhClient(repo_root)
         pr_number, pr_reasons = open_or_append_pr(
@@ -2409,6 +2495,7 @@ def run(
             deadline=deadline,
             clock=clock,
             advance_cursor_backed=advance_cursor_backed,
+            blind=bool(state["current_run"].get("blind")),
             partial_reasons=tuple(state["current_run"]["partial_reasons"]),
         )
         for reason, info_only in merge_reasons:
@@ -2451,10 +2538,10 @@ def run(
         _record_dispatch_reasons(state, reasons, ok=notifier_result is not None)
         if notifier_result is None:
             if not reasons:
-                add_partial(state, "notifier_invalid: returned None")
+                add_partial(state, "notifier_invalid: returned None", degraded=False)
             save_persistent_state(state_path, state)
             save_current_run(state_path, state)
-        return 0
+        return _exit_code(state)
     finally:
         try:
             _emit_shutdown_dump(state)
@@ -3177,6 +3264,7 @@ def _maybe_auto_merge(
     bot_author_names: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_NAMES,
     bot_author_emails: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_EMAILS,
     advance_cursor_backed: bool = False,
+    blind: bool = False,
     partial_reasons: tuple[str, ...] = (),
 ) -> tuple[dict, list[tuple[str, bool]]]:
     """CCE-101: squash-merge the docs-agent PR when the run earned it.
@@ -3195,6 +3283,21 @@ def _maybe_auto_merge(
     invariant: True only when advance_sha was assigned from a cursor that
     passed `_sha_in_window`, i.e. the baseline moves by exactly the PRs whose
     pages all landed.
+
+    CCE-144: `blind` skips unconditionally, ahead of the CCE-140 carve-out.
+    A cursor-backed advance proves the baseline is honest about what the run
+    SAW; a blind run did not see. The reachable case is a time-truncated run
+    (advance_cursor_backed=True) whose content-validator dispatch returned
+    None — blind, partial, and cursor-backed at once, matching no entry in
+    _MERGE_VETO_REASON_PREFIXES.
+
+    `blind` is read here before `notifier_invalid` is recorded, so a run
+    blind ONLY because its digest dispatch failed will already have merged
+    by the time that reason lands — deliberately, since a failed digest
+    means the operator was not told while the authoring work itself
+    completed, and the merge is honest. The alarm is not lost: `_exit_code`
+    reads `blind` at the end of `run`, so the run still exits 1 and still
+    goes red.
 
     Fact-checker warnings are NOT an eligibility input (CCE-140 / spec
     Decision 4). They ride the PR body, the digest, and the notification.
@@ -3220,6 +3323,13 @@ def _maybe_auto_merge(
     veto = merge_veto_reason(partial_reasons)
     if veto:
         return skip("merge_vetoed", veto)
+    if blind:
+        # CCE-144. Ahead of the CCE-140 carve-out below on purpose: a
+        # cursor-backed advance is not evidence for a run that was prevented
+        # from judging. Gating on the computed flag rather than extending
+        # _MERGE_VETO_REASON_PREFIXES closes the whole class of blind reasons
+        # instead of one hand-listed member of it.
+        return skip("blind_run")
     if partial and not advance_cursor_backed:
         # CCE-140 / spec Decision 2. A partial run whose advance came from the
         # CCE-109 cursor has, by construction, advanced only past PRs whose

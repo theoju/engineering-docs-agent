@@ -229,12 +229,32 @@ def save_current_run(path: Path, state: dict[str, Any]) -> None:
     target.write_text(json.dumps({"current_run": cr}, indent=2) + "\n")
 
 
-def add_partial(state: dict, reason: str, *, info_only: bool = False) -> None:
+def add_partial(
+    state: dict,
+    reason: str,
+    *,
+    info_only: bool = False,
+    degraded: bool = False,
+) -> None:
     """Append a partial reason to current_run.partial_reasons.
 
     When info_only is False (default), also flip current_run.partial to True.
     When info_only is True, leave current_run.partial unchanged — the reason
     is informational, not a degradation of the run's data quality.
+
+    CCE-144: a blocking reason is additionally classified blind or degraded.
+
+    - ``info_only=True``  -> advisory; touches neither ``partial`` nor
+      ``blind``. ``degraded`` is ignored.
+    - ``degraded=True``   -> the run JUDGED and rejected work; flips
+      ``partial`` only. Self-healing: the next run retries.
+    - neither             -> the run was PREVENTED from judging; flips
+      ``partial`` AND ``blind``, and records the reason in
+      ``blind_reasons``. This is the fail-safe default: a blocking failure
+      mode nobody classified turns the run red rather than passing silently.
+
+    ``blind_reasons`` is always a subset of ``partial_reasons`` — same
+    redaction, same idempotency rule. ``blind`` is monotonic within a run.
 
     Idempotent for state: a reason already present (after redaction) is not
     appended again.
@@ -255,6 +275,11 @@ def add_partial(state: dict, reason: str, *, info_only: bool = False) -> None:
         cr["partial_reasons"].append(safe_reason)
     if not info_only:
         cr["partial"] = True
+        if not degraded:
+            cr["blind"] = True
+            cr.setdefault("blind_reasons", [])
+            if safe_reason not in cr["blind_reasons"]:
+                cr["blind_reasons"].append(safe_reason)
     emit_stderr(safe_reason, info_only=info_only)
 
 

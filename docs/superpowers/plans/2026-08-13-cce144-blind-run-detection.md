@@ -1,17 +1,6 @@
 # CCE-144 Blind-Run Detection Implementation Plan
 
-> ## Archived 2026-08-14 — this plan was executed, then thrown away
->
-> **Do not read this as a record of what the code does.** All seven tasks were implemented on `feat/CCE-144-blind-run-detection` (20 commits, four new test suites, a green suite), but the branch was never pushed, never opened as a PR, and was deleted on 2026-08-14. **None of it is on `main`.** The blind/degraded split does not exist in `scripts/`.
->
-> Two specific traps for anyone reusing this text:
->
-> - **The completed checkboxes are historical.** They record that a task ran on a branch that no longer exists — not that the repository contains the result.
-> - **Task 7's CLAUDE.md bullet is written in the past tense** ("`add_partial` gains…", "Three consumers read the flag"). It was drafted to be pasted into CLAUDE.md _after_ the change landed. It never landed. Pasting it as-is would document behavior the code does not have.
->
-> The **Global Constraints** section below also pins a worktree path and a concurrent-session warning that were true only during the original run; both are now stale.
->
-> Kept for its diagnosis, task decomposition, and trap analysis — a re-attempt should re-derive the classification against today's `orchestrator_runner.py` rather than trusting this plan's tables. Spec: `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`. Archived under CCE-150; **CCE-144 remains open.**
+> **Executed and landed 2026-08-14.** All seven tasks shipped on `feat/CCE-144-blind-run-detection` and merged to `main` under CCE-144. The completed checkboxes below record work that is **on `main`**, not work stranded on a deleted branch. An earlier archive under CCE-150 (PR #223) claimed the opposite — that the branch was abandoned unpushed and none of this reached `main`. That claim was wrong and is superseded; CCE-150 is obsolete.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -39,7 +28,6 @@
   ```
 
   Never mix the two styles for the same module: `scripts.state_io` and bare `state_io` are two **distinct module objects**, so a monkeypatch applied to one has no effect on the other. CLAUDE.md's dotted-path rule exists to stop `tests/scripts/` shadowing the `scripts` namespace package, and it holds for `scripts.state_io` and `scripts.lint.*` — it does not make `orchestrator_runner` importable, and following it there breaks collection.
-
 - **`add_partial` is a shared-helper contract.** It is the single writer of `current_run.partial_reasons`, and becomes the single writer of `current_run.blind` and `current_run.blind_reasons`. Its callers are enumerated in this plan; changing its signature means updating all of them in the same commit.
 - **Docs cite code line-free:** `` `path/to/file.py` `` or `` `path/to/file.py:symbol` ``. Never `path:line`. This binds prose in commit messages, CLAUDE.md, and any doc page.
 - **PR title must contain `CCE-144`** — the Jira transition workflow reads the title only.
@@ -48,19 +36,19 @@
 
 ## File Structure
 
-| File                                                         | Responsibility in this change                                                                                                                                                                 |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/state_io.py`                                        | `add_partial` gains `degraded`; becomes the single writer of `blind` / `blind_reasons`. Task 1.                                                                                               |
-| `scripts/orchestrator_runner.py`                             | `_record_dispatch_reasons` passthrough (Task 2), classification kwargs (Task 3), `_exit_code` + return sites (Task 4), watermark interlock (Task 5), `_maybe_auto_merge` blind gate (Task 6). |
-| `scripts/verify_runner.py`                                   | Three blocking sites gain classification kwargs. Task 3. Its exit code is deliberately unchanged.                                                                                             |
-| `tests/state_io/test_add_partial_blind.py`                   | **new** — the `add_partial` semantics matrix. Task 1.                                                                                                                                         |
-| `tests/orchestrator/test_dispatch_reasons_classification.py` | **new** — `_record_dispatch_reasons` passthrough. Task 2.                                                                                                                                     |
-| `tests/orchestrator/test_classification_coverage.py`         | **new** — the anti-decay gate. Task 3.                                                                                                                                                        |
-| `tests/orchestrator/test_blind_run_interlocks.py`            | **new** — exit code (Task 4), watermark (Task 5), auto-merge (Task 6). One file, three task-scoped sections.                                                                                  |
-| `tests/orchestrator/test_deferral_skip.py`                   | **modify** — its monkeypatched `add_partial` spy TypeErrors once any callsite passes `degraded=`. Task 2.                                                                                     |
-| `.github/workflows/docs-agent-nightly.yml`                   | Print-step repair. Task 7.                                                                                                                                                                    |
-| `templates/workflow-run.yml`                                 | Same repair, kept in parity. Task 7.                                                                                                                                                          |
-| `CLAUDE.md`                                                  | CCE-127 bullet correction (Task 6) and the CCE-144 bullet (Task 7).                                                                                                                           |
+| File | Responsibility in this change |
+| ---- | ----------------------------- |
+| `scripts/state_io.py` | `add_partial` gains `degraded`; becomes the single writer of `blind` / `blind_reasons`. Task 1. |
+| `scripts/orchestrator_runner.py` | `_record_dispatch_reasons` passthrough (Task 2), classification kwargs (Task 3), `_exit_code` + return sites (Task 4), watermark interlock (Task 5), `_maybe_auto_merge` blind gate (Task 6). |
+| `scripts/verify_runner.py` | Three blocking sites gain classification kwargs. Task 3. Its exit code is deliberately unchanged. |
+| `tests/state_io/test_add_partial_blind.py` | **new** — the `add_partial` semantics matrix. Task 1. |
+| `tests/orchestrator/test_dispatch_reasons_classification.py` | **new** — `_record_dispatch_reasons` passthrough. Task 2. |
+| `tests/orchestrator/test_classification_coverage.py` | **new** — the anti-decay gate. Task 3. |
+| `tests/orchestrator/test_blind_run_interlocks.py` | **new** — exit code (Task 4), watermark (Task 5), auto-merge (Task 6). One file, three task-scoped sections. |
+| `tests/orchestrator/test_deferral_skip.py` | **modify** — its monkeypatched `add_partial` spy TypeErrors once any callsite passes `degraded=`. Task 2. |
+| `.github/workflows/docs-agent-nightly.yml` | Print-step repair. Task 7. |
+| `templates/workflow-run.yml` | Same repair, kept in parity. Task 7. |
+| `CLAUDE.md` | CCE-127 bullet correction (Task 6) and the CCE-144 bullet (Task 7). |
 
 `tests/orchestrator/test_blind_run_interlocks.py` deliberately holds three tasks' tests. They share one harness and splitting them would triplicate setup. Each task appends its own section and its own tests; a reviewer can still reject one task's tests without touching another's.
 
@@ -69,12 +57,10 @@
 ### Task 1: `add_partial` learns the blind/degraded distinction
 
 **Files:**
-
 - Modify: `scripts/state_io.py` — `add_partial`
 - Test: `tests/state_io/test_add_partial_blind.py` (create)
 
 **Interfaces:**
-
 - Consumes: nothing from earlier tasks.
 - Produces: `state_io.add_partial(state, reason, *, info_only: bool = False, degraded: bool = False) -> None`. Writes `state["current_run"]["blind"]: bool` and `state["current_run"]["blind_reasons"]: list[str]`. Every later task depends on these exact names.
 
@@ -207,32 +193,30 @@ def test_seeded_current_run_is_not_clobbered(kwargs):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/state_io/test_add_partial_blind.py -v
 ```
-
 Expected: **12 cases — 9 red, 3 green.** (pytest reports all 9 as `FAILED`, not `ERROR`: a `TypeError` raised inside a test body is an ordinary assertion-phase failure, not a fixture/collection error.) The exact split, because three of these are deliberate regression guards on behavior that already works and they must NOT be "fixed":
 
-| Case                                                         | At this step                                                                    |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| `test_degraded_flips_partial_but_not_blind`                  | FAIL — `TypeError: add_partial() got an unexpected keyword argument 'degraded'` |
-| `test_info_only_wins_over_degraded`                          | FAIL — same `TypeError`                                                         |
-| `test_blind_reasons_is_a_subset_of_partial_reasons`          | FAIL — same `TypeError`                                                         |
-| `test_a_degraded_run_that_later_goes_blind_stays_blind`      | FAIL — same `TypeError`                                                         |
-| `test_degraded_only_run_never_creates_the_blind_key_as_true` | FAIL — same `TypeError`                                                         |
-| `test_seeded_current_run_is_not_clobbered[degraded]`         | FAIL — same `TypeError` (this is why the parametrize carries explicit `ids=`)   |
-| `test_blocking_reason_is_blind_by_default`                   | FAIL — `KeyError: 'blind'`                                                      |
-| `test_repeat_blind_reason_appends_once_to_each_list`         | FAIL — `KeyError: 'blind_reasons'`                                              |
-| `test_blind_reasons_are_redacted_identically`                | FAIL — `KeyError: 'blind_reasons'`                                              |
-| `test_info_only_flips_neither`                               | **PASS** — pins existing `info_only` behavior this change must not alter        |
-| `test_seeded_current_run_is_not_clobbered[default]`          | **PASS** — same, for the default path                                           |
-| `test_seeded_current_run_is_not_clobbered[info_only]`        | **PASS** — same                                                                 |
+| Case | At this step |
+| ---- | ------------ |
+| `test_degraded_flips_partial_but_not_blind` | FAIL — `TypeError: add_partial() got an unexpected keyword argument 'degraded'` |
+| `test_info_only_wins_over_degraded` | FAIL — same `TypeError` |
+| `test_blind_reasons_is_a_subset_of_partial_reasons` | FAIL — same `TypeError` |
+| `test_a_degraded_run_that_later_goes_blind_stays_blind` | FAIL — same `TypeError` |
+| `test_degraded_only_run_never_creates_the_blind_key_as_true` | FAIL — same `TypeError` |
+| `test_seeded_current_run_is_not_clobbered[degraded]` | FAIL — same `TypeError` (this is why the parametrize carries explicit `ids=`) |
+| `test_blocking_reason_is_blind_by_default` | FAIL — `KeyError: 'blind'` |
+| `test_repeat_blind_reason_appends_once_to_each_list` | FAIL — `KeyError: 'blind_reasons'` |
+| `test_blind_reasons_are_redacted_identically` | FAIL — `KeyError: 'blind_reasons'` |
+| `test_info_only_flips_neither` | **PASS** — pins existing `info_only` behavior this change must not alter |
+| `test_seeded_current_run_is_not_clobbered[default]` | **PASS** — same, for the default path |
+| `test_seeded_current_run_is_not_clobbered[info_only]` | **PASS** — same |
 
 The Global Constraint "a test that passes before implementation is a broken test" applies to tests asserting **new** behavior. Those three assert **existing** behavior on purpose — they are the guard that Task 1 does not regress `info_only` or clobber a seeded `current_run`. Leave them exactly as they are.
 
-Any case _not_ in this table that passes is genuinely non-discriminating — fix it before continuing.
+Any case *not* in this table that passes is genuinely non-discriminating — fix it before continuing.
 
 - [ ] **Step 3: Implement**
 
@@ -298,12 +282,10 @@ Note what this deliberately does **not** do: it never writes `blind = False`. A 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/state_io/ -v
 ```
-
 Expected: all PASS, including the pre-existing `tests/state_io/` suite. `test_add_partial_stderr_emit.py` must stay green — it pins the CCE-74 emit-on-every-call behavior, which this change preserves.
 
 - [ ] **Step 5: Commit**
@@ -334,13 +316,11 @@ EOF
 ### Task 2: `_record_dispatch_reasons` passthrough and its seven callsites
 
 **Files:**
-
 - Modify: `scripts/orchestrator_runner.py` — `_record_dispatch_reasons` and its 7 callsites
 - Modify: `tests/orchestrator/test_deferral_skip.py` — the monkeypatched spy
 - Test: `tests/orchestrator/test_dispatch_reasons_classification.py` (create)
 
 **Interfaces:**
-
 - Consumes: `state_io.add_partial(state, reason, *, info_only=False, degraded=False)` from Task 1.
 - Produces: `_record_dispatch_reasons(state, reasons, *, ok: bool, degraded: bool = False) -> None`.
 
@@ -356,15 +336,15 @@ def _record_dispatch_reasons(state: dict, reasons: list[str], *, ok: bool) -> No
 
 The seven callsites, with the classification the operator signed off:
 
-| Callsite (search string)                                             | Agent             | `degraded=`         |
-| -------------------------------------------------------------------- | ----------------- | ------------------- |
-| `_record_dispatch_reasons(` immediately after the app-token env read | app-token         | omit (blind)        |
-| `ok=sources is not None`                                             | source-collector  | omit (blind)        |
-| `ok=summary is not None`                                             | pr-summarizer     | omit (blind)        |
-| `ok=out is not None`                                                 | page-author       | **`degraded=True`** |
-| `ok=validation is not None`                                          | content-validator | omit (blind)        |
-| `ok=verdict is not None`                                             | gap-detector      | **`degraded=True`** |
-| `ok=notifier_result is not None`                                     | notifier          | omit (blind)        |
+| Callsite (search string) | Agent | `degraded=` |
+| ------------------------ | ----- | ----------- |
+| `_record_dispatch_reasons(` immediately after the app-token env read | app-token | omit (blind) |
+| `ok=sources is not None` | source-collector | omit (blind) |
+| `ok=summary is not None` | pr-summarizer | omit (blind) |
+| `ok=out is not None` | page-author | **`degraded=True`** |
+| `ok=validation is not None` | content-validator | omit (blind) |
+| `ok=verdict is not None` | gap-detector | **`degraded=True`** |
+| `ok=notifier_result is not None` | notifier | omit (blind) |
 
 Why those two and not the others: a page-author batch that never lands is folded into `deferred_pages_by_pr` by the complement writer, holding its PR out of the advance cursor — the work is retried, nothing is consumed. A gap-detector failure produces only an advisory PR note that is explicitly excluded from the CCE-101 auto-merge gate. Both are covered in the spec's **Classification** section; do not re-derive.
 
@@ -426,12 +406,10 @@ def test_empty_reasons_touches_nothing():
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_dispatch_reasons_classification.py -v
 ```
-
 Expected: the two `degraded=`-passing tests FAIL with `TypeError: _record_dispatch_reasons() got an unexpected keyword argument 'degraded'`. `test_failed_dispatch_is_blind_by_default` and `test_empty_reasons_touches_nothing` should already PASS — they exercise Task 1's default through the unchanged helper. That is expected and correct.
 
 - [ ] **Step 3: Add the passthrough**
@@ -529,20 +507,16 @@ Replace with:
 - [ ] **Step 6: Run the tests**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_dispatch_reasons_classification.py tests/orchestrator/test_deferral_skip.py -v
 ```
-
 Expected: all PASS.
 
 Then confirm nothing else regressed:
-
 ```bash
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/ -q
 ```
-
 Expected: all PASS. If a test fails asserting a `0` return code, **stop and report it** — Task 4 renegotiates exit codes and this task must not.
 
 - [ ] **Step 7: Commit**
@@ -572,13 +546,11 @@ EOF
 ### Task 3: Classify every blocking call site, and a test that keeps it classified
 
 **Files:**
-
 - Modify: `scripts/orchestrator_runner.py` — 25 direct blocking `add_partial` calls
 - Modify: `scripts/verify_runner.py` — 3 direct blocking `add_partial` calls
 - Test: `tests/orchestrator/test_classification_coverage.py` (create)
 
 **Interfaces:**
-
 - Consumes: `add_partial(..., degraded=...)` from Task 1.
 - Produces: no new symbols. Produces the invariant every later task relies on — no blocking `add_partial` call may omit an explicit classification.
 
@@ -588,14 +560,13 @@ The rule instead:
 
 > Every `add_partial` call in `scripts/orchestrator_runner.py` and `scripts/verify_runner.py` must pass an explicit classification keyword — `info_only` or `degraded`. A call passing neither fails the test.
 
-The runtime default stays fail-safe (blind) to protect production if something slips through. The test forbids _relying_ on that default, so a newly added call site cannot silently inherit a classification nobody chose. Every site self-documents at the point of the call rather than in a distant table.
+The runtime default stays fail-safe (blind) to protect production if something slips through. The test forbids *relying* on that default, so a newly added call site cannot silently inherit a classification nobody chose. Every site self-documents at the point of the call rather than in a distant table.
 
 This means the seven blind sites carry an explicit `degraded=False`. That is verbose and intentional.
 
 **The classification.** From the spec's **Classification** section, which is authoritative:
 
 `degraded=False` (blind) — seven sites:
-
 - the three `source_collector_invalid` / `source_collector_error` / `source_collector_partial` reasons
 - the two `pr_summarizer_invalid` / `pr_summarizer_error` reasons
 - `content_validator_invalid: returned None`
@@ -724,12 +695,10 @@ def test_orchestrator_has_the_expected_call_site_population():
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_classification_coverage.py -v
 ```
-
 Expected, precisely:
 
 - `test_every_add_partial_call_is_explicitly_classified[scripts/orchestrator_runner.py]` FAILS, listing **25** unclassified sites.
@@ -744,7 +713,6 @@ If the population tripwire fails, the file has drifted since the audit — repor
 Work through the failure list from Step 2 top to bottom. For each site, add the kwarg from the classification above. Two worked examples:
 
 A blind site — the source-collector fallback:
-
 ```python
         if sources is None:
             if not reasons:
@@ -755,7 +723,6 @@ A blind site — the source-collector fallback:
 ```
 
 A degraded site — the canonical lint block:
-
 ```python
                     add_partial(
                         state,
@@ -767,7 +734,6 @@ A degraded site — the canonical lint block:
 Do not reformat, reorder, or otherwise touch surrounding code. The diff for this step should be additions of a single keyword argument plus whatever line wrapping that requires.
 
 Re-run after each cluster of edits to shrink the failure list:
-
 ```bash
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest "tests/orchestrator/test_classification_coverage.py::test_every_add_partial_call_is_explicitly_classified[scripts/orchestrator_runner.py]" -v
 ```
@@ -801,13 +767,11 @@ In `scripts/verify_runner.py`:
 - [ ] **Step 5: Run the tests**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_classification_coverage.py -v
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/ -q
 ```
-
 Expected: coverage test all PASS. The full suite must be green **except** for tests that assert a `0` return code on a run that now records a blind reason — those are Task 4's business. Record any such failure in the commit body and leave it; do not fix it here.
 
 - [ ] **Step 6: Commit**
@@ -841,18 +805,16 @@ EOF
 ### Task 4: `run` exits non-zero on a blind run
 
 **Files:**
-
 - Modify: `scripts/orchestrator_runner.py` — add `_exit_code`, change the three `return 0` sites in `run`
 - Test: `tests/orchestrator/test_blind_run_interlocks.py` (create)
 
 **Interfaces:**
-
 - Consumes: `state["current_run"]["blind"]` from Task 1.
 - Produces: `_exit_code(state: dict) -> int`. Tasks 5 and 6 append to the same test file.
 
 **Background the implementer needs.** `run` has seven returns: `return 2` at three config-error sites, `return 1` at one site (the docs PR could not be opened), and `return 0` at three. Exit `1` is therefore **not** a new code — it already means "this run failed, read the reasons," which is exactly what blind means. Blind joins that class rather than competing with it. `2` stays with config errors.
 
-All three `return 0` sites become `return _exit_code(state)`. The spec is explicit: _every existing `return 0` path keeps returning `0` unless the run is blind_. That includes the CCE-43 same-hour guard and the `no_pr` path — a blind run must not be able to escape through either.
+All three `return 0` sites become `return _exit_code(state)`. The spec is explicit: *every existing `return 0` path keeps returning `0` unless the run is blind*. That includes the CCE-43 same-hour guard and the `no_pr` path — a blind run must not be able to escape through either.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -902,12 +864,10 @@ def test_exit_code_treats_explicit_false_as_not_blind():
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_blind_run_interlocks.py -v
 ```
-
 Expected: all five tests FAIL with `AttributeError: module 'orchestrator_runner' has no attribute '_exit_code'`. Collection itself succeeds — the module imports fine, the attribute simply does not exist yet.
 
 - [ ] **Step 3: Implement `_exit_code`**
@@ -942,7 +902,6 @@ In `run`, there are exactly three bare `return 0` statements. Replace each with 
 3. The final return at the end of the `try` block, after the notifier.
 
 Verify you found all three and none remain:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python - <<'PY'
@@ -957,23 +916,19 @@ for n in ast.walk(fn):
         print(f"L{n.lineno}: return {ast.unparse(n.value)}")
 PY
 ```
-
 Expected: three `return 2`, one `return 1`, three `return _exit_code(state)`. No bare `return 0`.
 
 - [ ] **Step 5: Run the tests and adjudicate the fallout**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_blind_run_interlocks.py -v
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/ -q
 ```
-
 Expected: new tests PASS. For the full suite: any pre-existing test that drives a fixture run producing a **blind** reason and asserts `rc == 0` will now fail. That is the intended behavior change, not a regression.
 
 For each such failure, decide deliberately and record the decision in the commit body:
-
 - if the fixture's failure is genuinely blind → update the assertion to `rc == 1` and add a one-line comment naming the blind reason
 - if the fixture's failure should be degraded → **stop**, the classification in Task 3 is wrong; report it rather than adjusting the test to match the code
 
@@ -1006,12 +961,10 @@ EOF
 ### Task 5: A blind run cannot advance the watermark
 
 **Files:**
-
 - Modify: `scripts/orchestrator_runner.py` — the `last_successful_run` assignment in `run`
 - Test: `tests/orchestrator/test_blind_run_interlocks.py` (append)
 
 **Interfaces:**
-
 - Consumes: `state["current_run"]["blind"]` from Task 1.
 - Produces: `_should_advance_watermark(state: dict) -> bool`.
 
@@ -1114,12 +1067,10 @@ def test_should_advance_is_true_when_current_run_is_absent():
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_blind_run_interlocks.py -v
 ```
-
 Expected: the six Task 5 tests FAIL with `AttributeError: module 'orchestrator_runner' has no attribute '_should_advance_watermark'`. Task 4's five tests still PASS.
 
 - [ ] **Step 3: Implement the predicate and the guard**
@@ -1169,13 +1120,11 @@ Both statements inside the guard. The `if time_truncated:` block mutates `last_s
 - [ ] **Step 4: Run the tests**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_blind_run_interlocks.py -v
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/ -q
 ```
-
 Expected: all PASS. `tests/orchestrator/test_state_advancement_invariant.py` pins the CCE-40 advancement rules and must stay green — if it fails, read it before changing anything: it may be asserting a property this change deliberately narrows, which is a decision to report rather than to absorb.
 
 - [ ] **Step 5: Commit**
@@ -1205,13 +1154,11 @@ EOF
 ### Task 6: A blind run cannot auto-merge
 
 **Files:**
-
 - Modify: `scripts/orchestrator_runner.py` — `_maybe_auto_merge` and its caller in `run`
 - Modify: `CLAUDE.md` — the CCE-127 bullet's stale description of this gate
 - Test: `tests/orchestrator/test_blind_run_interlocks.py` (append)
 
 **Interfaces:**
-
 - Consumes: `state["current_run"]["blind"]` from Task 1.
 - Produces: `_maybe_auto_merge(..., blind: bool = False)`.
 
@@ -1222,7 +1169,7 @@ EOF
         return skip("partial_run")
 ```
 
-CCE-140's reasoning holds for a _degraded_ run: a cursor-backed advance moves the baseline only past PRs whose pages all landed, so merging promotes nothing unread. It does not transfer to a _blind_ run — the cursor proves the baseline is honest about what the run **saw**, and a blind run did not see.
+CCE-140's reasoning holds for a *degraded* run: a cursor-backed advance moves the baseline only past PRs whose pages all landed, so merging promotes nothing unread. It does not transfer to a *blind* run — the cursor proves the baseline is honest about what the run **saw**, and a blind run did not see.
 
 The gap is reachable, not theoretical. A run truncated by the CCE-109 time budget sets `advance_cursor_backed = True`. If its content-validator dispatch then returns `None`, the run is blind, partial, and cursor-backed at once. `_MERGE_VETO_REASON_PREFIXES` is `("app_token_unavailable",)`, which does not match `content_validator_invalid`, so no veto fires; `partial and not True` is false, so the gate opens. `merge_deadline` is also disabled on the cursor-backed path, removing the time-budget skip that might have caught it.
 
@@ -1346,12 +1293,10 @@ def test_manual_policy_is_unchanged_by_blind():
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_blind_run_interlocks.py -v -k "merge or blind_run or veto or manual"
 ```
-
 Expected: every Task 6 test that passes `blind=` FAILs with `TypeError: _maybe_auto_merge() got an unexpected keyword argument 'blind'`.
 
 - [ ] **Step 3: Add the gate**
@@ -1418,13 +1363,11 @@ Flipping `partial` reuses the existing `_maybe_auto_merge` interlock (since CCE-
 - [ ] **Step 6: Run the tests**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_blind_run_interlocks.py -v
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/ -q
 ```
-
 Expected: all PASS. Pay attention to any existing auto-merge suite — if a test asserts a partial cursor-backed run merges, confirm its fixture produces no blind reason. If it does produce one, the test now correctly does not merge and its assertion moves; record why in the commit body.
 
 - [ ] **Step 7: Commit**
@@ -1462,14 +1405,12 @@ EOF
 ### Task 7: Repair the workflow diagnostic, and document the change
 
 **Files:**
-
 - Modify: `.github/workflows/docs-agent-nightly.yml` — the `Print partial-run reasons` step
 - Modify: `templates/workflow-run.yml` — the same step
 - Modify: `CLAUDE.md` — add the CCE-144 bullet
 - Test: `tests/templates/` — parity suite must stay green; audit its divergence list
 
 **Interfaces:**
-
 - Consumes: `current_run.blind_reasons` from Task 1.
 - Produces: nothing consumed by later tasks. This is the final task.
 
@@ -1486,23 +1427,23 @@ The step was added when `partial_reasons` lived in `state.json`. The later ephem
 In `.github/workflows/docs-agent-nightly.yml`, replace the `Print partial-run reasons` step:
 
 ```yaml
-- name: Print partial-run reasons
-  # CCE-73: echo the run's partial reasons to stdout so they show in
-  # `gh run view --log` even when the run-summary block is collapsed.
-  # CCE-144: read current_run.json, NOT state.json. save_persistent_state
-  # strips _EPHEMERAL_KEYS = ("current_run",) before writing state.json,
-  # so this step read a key that is never there and printed nothing on
-  # every run since the ephemeral split — indistinguishable from a clean
-  # run. Blind reasons print under their own label: they are the subset
-  # that turns the run red.
-  if: always()
-  shell: bash
-  run: |
-    run_file=".engineering-docs-agent/current_run.json"
-    if [ -f "$run_file" ]; then
-      jq -r '.current_run.partial_reasons[]? // empty' "$run_file" || true
-      jq -r '.current_run.blind_reasons[]? // empty | "BLIND: " + .' "$run_file" || true
-    fi
+      - name: Print partial-run reasons
+        # CCE-73: echo the run's partial reasons to stdout so they show in
+        # `gh run view --log` even when the run-summary block is collapsed.
+        # CCE-144: read current_run.json, NOT state.json. save_persistent_state
+        # strips _EPHEMERAL_KEYS = ("current_run",) before writing state.json,
+        # so this step read a key that is never there and printed nothing on
+        # every run since the ephemeral split — indistinguishable from a clean
+        # run. Blind reasons print under their own label: they are the subset
+        # that turns the run red.
+        if: always()
+        shell: bash
+        run: |
+          run_file=".engineering-docs-agent/current_run.json"
+          if [ -f "$run_file" ]; then
+            jq -r '.current_run.partial_reasons[]? // empty' "$run_file" || true
+            jq -r '.current_run.blind_reasons[]? // empty | "BLIND: " + .' "$run_file" || true
+          fi
 ```
 
 `// empty` keeps it null-safe and `|| true` keeps a malformed file from failing the step — both preserved from the original.
@@ -1514,17 +1455,14 @@ Make the same change to the `Print partial-run reasons` step in `templates/workf
 - [ ] **Step 3: Lint both files**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 actionlint .github/workflows/docs-agent-nightly.yml
 actionlint templates/workflow-run.yml
 ```
-
 Expected: no output from either (actionlint is silent on success).
 
 If `actionlint` is not installed, report that and run the YAML parse check instead — do not skip verification silently:
-
 ```bash
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -c "
 import yaml, pathlib
@@ -1554,18 +1492,15 @@ jq -r '.current_run.blind_reasons[]? // empty | "BLIND: " + .' /tmp/cce144_probe
 echo "(no BLIND line above is correct)"
 rm -f /tmp/cce144_probe.json /tmp/cce144_probe2.json
 ```
-
 Expected: two reason lines then one `BLIND: source_collector_invalid: returned None`; then one reason line and no `BLIND:` line.
 
 - [ ] **Step 5: Audit the template-parity divergence list**
 
 Run:
-
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/templates/ -v
 ```
-
 Expected: all PASS.
 
 Then read `_TEMPLATE_ONLY_DIVERGENCES` in `tests/templates/test_workflow_run_parity.py` and check whether this change makes any entry stale. CCE-127's meta-lesson is that documenting a divergence converts an unexamined gap into an accepted one and stops anyone re-examining it; nothing detects staleness automatically, so it must be read by a person whenever a safety property lands on one side. Report what you found either way — "audited, no entry affected" is a valid and expected result.
@@ -1580,7 +1515,7 @@ Append to the plugin-conventions bullet list in `CLAUDE.md`:
 
 - [ ] **Step 7: Run the full integrated suite**
 
-Per CLAUDE.md, merge only on a green _integrated_ suite — never on GitHub's mergeable flag.
+Per CLAUDE.md, merge only on a green *integrated* suite — never on GitHub's mergeable flag.
 
 ```bash
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
@@ -1588,7 +1523,6 @@ git fetch origin
 git merge origin/main --no-edit
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest -q
 ```
-
 Expected: all PASS against the combined tree. `git fetch` first — `origin/main` goes stale after an API-side merge.
 
 - [ ] **Step 8: Commit**
@@ -1622,20 +1556,20 @@ EOF
 
 **1. Spec coverage.**
 
-| Spec section                                                  | Task |
-| ------------------------------------------------------------- | ---- |
-| Fail-safe by default (`add_partial` + `degraded`)             | 1    |
-| New state fields (`blind`, `blind_reasons`)                   | 1    |
-| `_record_dispatch_reasons` passthrough + 2 degraded callsites | 2    |
-| Classification (7 blind / 21 degraded incl. `verify_runner`)  | 3    |
-| Classification-coverage test                                  | 3    |
-| Exit code                                                     | 4    |
-| Watermark interlock                                           | 5    |
-| Auto-merge interlock                                          | 6    |
-| Workflow repair, both files, explicit actionlint              | 7    |
-| Template-parity divergence audit                              | 7    |
-| CLAUDE.md CCE-127 correction                                  | 6    |
-| CLAUDE.md CCE-144 bullet                                      | 7    |
+| Spec section | Task |
+| ------------ | ---- |
+| Fail-safe by default (`add_partial` + `degraded`) | 1 |
+| New state fields (`blind`, `blind_reasons`) | 1 |
+| `_record_dispatch_reasons` passthrough + 2 degraded callsites | 2 |
+| Classification (7 blind / 21 degraded incl. `verify_runner`) | 3 |
+| Classification-coverage test | 3 |
+| Exit code | 4 |
+| Watermark interlock | 5 |
+| Auto-merge interlock | 6 |
+| Workflow repair, both files, explicit actionlint | 7 |
+| Template-parity divergence audit | 7 |
+| CLAUDE.md CCE-127 correction | 6 |
+| CLAUDE.md CCE-144 bullet | 7 |
 
 Spec sections with no task, deliberately: **Out of scope** — the Slack `curl` alarm, moving the cron, enabling notifications, and recovering the three lost PRs. All four are named in the spec as excluded, and three require operator action no code change can perform. `templates/state.schema.json` is untouched by design: the new fields live on `current_run`, which `save_persistent_state` strips, so they never reach `state.json`.
 
@@ -1643,7 +1577,7 @@ Spec sections with no task, deliberately: **Out of scope** — the Slack `curl` 
 
 **3. Type consistency.** Verified across tasks: `add_partial(state, reason, *, info_only: bool = False, degraded: bool = False) -> None` (Task 1) is called with `degraded=` in Tasks 2 and 3. `_record_dispatch_reasons(state, reasons, *, ok: bool, degraded: bool = False)` (Task 2) matches its 7 callsites. `_exit_code(state: dict) -> int` (Task 4) and `_should_advance_watermark(state: dict) -> bool` (Task 5) are both imported by name in `test_blind_run_interlocks.py`. `_maybe_auto_merge(..., blind: bool = False, ...)` (Task 6) matches the callsite kwarg and every test invocation. State keys are spelled `blind` and `blind_reasons` throughout.
 
-**4. The red-gate predictions were executed, not asserted.** Adversarial review of a first draft found three predictions wrong, each of which would have cost a task cycle: the dotted `from scripts.orchestrator_runner import …` that four tasks used does not work at all (the module has no self-insert, unlike `state_io.py` and `verify_runner.py`); a meta-test that counted every unclassified call alongside its probe, so it could only go green _after_ the step it was meant to gate, failing with a message blaming the AST walk; and a blanket "9 tests fail first" claim that was wrong for 3 of 12 cases, where the step's own rule would have directed the implementer to break three deliberate regression guards.
+**4. The red-gate predictions were executed, not asserted.** Adversarial review of a first draft found three predictions wrong, each of which would have cost a task cycle: the dotted `from scripts.orchestrator_runner import …` that four tasks used does not work at all (the module has no self-insert, unlike `state_io.py` and `verify_runner.py`); a meta-test that counted every unclassified call alongside its probe, so it could only go green *after* the step it was meant to gate, failing with a message blaming the AST walk; and a blanket "9 tests fail first" claim that was wrong for 3 of 12 cases, where the step's own rule would have directed the implementer to break three deliberate regression guards.
 
 Both testable files were therefore extracted from this plan, written to the tree, and run before this plan was committed:
 

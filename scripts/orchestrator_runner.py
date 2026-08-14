@@ -2495,6 +2495,7 @@ def run(
             deadline=deadline,
             clock=clock,
             advance_cursor_backed=advance_cursor_backed,
+            blind=bool(state["current_run"].get("blind")),
             partial_reasons=tuple(state["current_run"]["partial_reasons"]),
         )
         for reason, info_only in merge_reasons:
@@ -3263,6 +3264,7 @@ def _maybe_auto_merge(
     bot_author_names: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_NAMES,
     bot_author_emails: tuple[str, ...] = _DOCS_AGENT_BOT_AUTHOR_EMAILS,
     advance_cursor_backed: bool = False,
+    blind: bool = False,
     partial_reasons: tuple[str, ...] = (),
 ) -> tuple[dict, list[tuple[str, bool]]]:
     """CCE-101: squash-merge the docs-agent PR when the run earned it.
@@ -3281,6 +3283,13 @@ def _maybe_auto_merge(
     invariant: True only when advance_sha was assigned from a cursor that
     passed `_sha_in_window`, i.e. the baseline moves by exactly the PRs whose
     pages all landed.
+
+    CCE-144: `blind` skips unconditionally, ahead of the CCE-140 carve-out.
+    A cursor-backed advance proves the baseline is honest about what the run
+    SAW; a blind run did not see. The reachable case is a time-truncated run
+    (advance_cursor_backed=True) whose content-validator dispatch returned
+    None — blind, partial, and cursor-backed at once, matching no entry in
+    _MERGE_VETO_REASON_PREFIXES.
 
     Fact-checker warnings are NOT an eligibility input (CCE-140 / spec
     Decision 4). They ride the PR body, the digest, and the notification.
@@ -3306,6 +3315,13 @@ def _maybe_auto_merge(
     veto = merge_veto_reason(partial_reasons)
     if veto:
         return skip("merge_vetoed", veto)
+    if blind:
+        # CCE-144. Ahead of the CCE-140 carve-out below on purpose: a
+        # cursor-backed advance is not evidence for a run that was prevented
+        # from judging. Gating on the computed flag rather than extending
+        # _MERGE_VETO_REASON_PREFIXES closes the whole class of blind reasons
+        # instead of one hand-listed member of it.
+        return skip("blind_run")
     if partial and not advance_cursor_backed:
         # CCE-140 / spec Decision 2. A partial run whose advance came from the
         # CCE-109 cursor has, by construction, advanced only past PRs whose

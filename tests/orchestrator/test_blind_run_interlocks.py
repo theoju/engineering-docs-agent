@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
@@ -228,3 +230,109 @@ def test_blind_and_truncated_run_through_real_run_does_not_advance_or_write_wind
     cr = read_current_run(state_path)
     assert cr.get("blind") is True, cr
     assert any("source_collector_error" in r for r in cr.get("blind_reasons", [])), cr
+
+
+# --------------------------------------------------------------------------
+# Task 6 — auto-merge interlock
+# --------------------------------------------------------------------------
+
+
+class _ExplodingGh:
+    """Any gh access means the gate let the run through when it should not.
+
+    __getattr__ rather than a single stub method: the gate must be proven to
+    return BEFORE it touches the client at all, and hard-coding one method
+    name would silently pass if the implementation reached for a different
+    one first.
+    """
+
+    def __getattr__(self, name):  # pragma: no cover - must not run
+        raise AssertionError(f"reached gh.{name}; the blind gate did not skip")
+
+
+_MERGE_SETTINGS = {
+    "policy": "auto",
+    "checks_grace_seconds": 1,
+    "checks_timeout_seconds": 1,
+}
+
+
+def _call(*, blind, partial, cursor_backed, gh=None, reasons=()):
+    return orun._maybe_auto_merge(
+        gh if gh is not None else _ExplodingGh(),
+        pr_number=1,
+        partial=partial,
+        blind=blind,
+        fact_warnings=[],
+        merge_settings=dict(_MERGE_SETTINGS),
+        build_workflow=None,
+        deadline=None,
+        clock=lambda: 0.0,
+        sleep=lambda _s: None,
+        advance_cursor_backed=cursor_backed,
+        partial_reasons=tuple(reasons),
+    )
+
+
+def test_blind_and_cursor_backed_does_not_merge():
+    """The case current code merges. This is the regression test for CCE-144's
+    auto-merge interlock: blind + time-truncated + cursor-backed passes the
+    CCE-140 gate and reaches the merge path today."""
+    outcome, reasons = _call(blind=True, partial=True, cursor_backed=True)
+    assert outcome["merged"] is False
+    assert outcome["reason"] == "blind_run"
+    assert any("auto_merge_skipped: blind_run" in r for r, _info in reasons)
+
+
+def test_blind_without_cursor_backing_skips_as_blind_not_partial():
+    """Both gates would stop this run. Asserting the REASON is the point: if
+    the blind gate is removed, partial_run silently covers for it and a
+    weaker assertion would still pass."""
+    outcome, _reasons = _call(blind=True, partial=True, cursor_backed=False)
+    assert outcome["reason"] == "blind_run"
+
+
+def test_blind_gate_precedes_the_cce140_carve_out():
+    """A blind run that is somehow not marked partial must still be stopped."""
+    outcome, _reasons = _call(blind=True, partial=False, cursor_backed=True)
+    assert outcome["reason"] == "blind_run"
+
+
+def test_degraded_and_cursor_backed_still_reaches_the_merge_path():
+    """CCE-140 must survive CCE-144. If the blind classification over-reaches
+    into the time-budget reasons, this fails — which is the alarm-fatigue
+    guard expressed as a test."""
+    with pytest.raises(AssertionError, match="the blind gate did not skip"):
+        _call(blind=False, partial=True, cursor_backed=True)
+    # Sanity: the same call with blind=True must NOT raise, or the assertion
+    # above would pass for the wrong reason (e.g. a stub that always throws).
+    outcome, _ = _call(blind=True, partial=True, cursor_backed=True)
+    assert outcome["reason"] == "blind_run"
+
+
+def test_veto_still_wins_for_a_non_blind_run():
+    outcome, _reasons = _call(
+        blind=False,
+        partial=True,
+        cursor_backed=True,
+        reasons=("app_token_unavailable: mint failed",),
+    )
+    assert outcome["reason"] == "merge_vetoed"
+
+
+def test_manual_policy_is_unchanged_by_blind():
+    outcome, reasons = orun._maybe_auto_merge(
+        _ExplodingGh(),
+        pr_number=1,
+        partial=True,
+        blind=True,
+        fact_warnings=[],
+        merge_settings={"policy": "manual"},
+        build_workflow=None,
+        deadline=None,
+        clock=lambda: 0.0,
+        advance_cursor_backed=True,
+        partial_reasons=(),
+    )
+    assert outcome["reason"] == "policy_manual"
+    assert reasons == []

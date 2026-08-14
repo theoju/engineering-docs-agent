@@ -73,6 +73,49 @@ This is the same idea the repo already reached twice, one level down. CCE-118 sp
 
 **"Produced nothing" is explicitly rejected as the predicate.** A run with no new PRs since the watermark legitimately produces nothing and must stay green; a blind run can still author pages. Output volume does not separate the cases — provenance of the emptiness does.
 
+### The criterion
+
+"Prevented from judging" and "self-healing" usually agree. Where they diverge, the operational question decides:
+
+> **Blind** — the run _consumed_ input it could not process.
+> **Degraded** — the run _held back_ what it could not process.
+
+The complement writer in `scripts/orchestrator_runner.py` is what determines which. Any batch that did not land folds its PR into `deferred_pages_by_pr`, holding that PR out of the advance cursor's prefix. It is written as a complement rather than an enumeration of failure sites on purpose, so a failure path added later is covered without anyone remembering to.
+
+That is why `page_author_invalid` is degraded and `content_validator_invalid` is blind, though both are agent failures one pipeline step apart. A page that fails authoring never lands, so its PR is held back and re-authored next run. A page that fails validation is already in `landed_batches` — the run counts it as delivered and the cursor walks past it.
+
+### Classification
+
+Audited 2026-08-13 by AST enumeration of every `add_partial` call. Twenty-five direct blocking sites in `scripts/orchestrator_runner.py`, plus the seven dispatch paths through `_record_dispatch_reasons`. Ten `info_only=True` sites are advisory and unaffected.
+
+**Blind** — no `degraded` kwarg, taking the fail-safe default:
+
+| Reason                                                     | Loss mechanism                                                                        |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `source_collector_invalid` / `_error` / `_partial`         | PRs never seen; the cursor crosses them regardless                                    |
+| `pr_summarizer_invalid` / `_error`                         | the PR yields no doc targets, never enters `deferred_pages_by_pr`, so is not held back |
+| `content_validator_invalid`                                | pages stay in `landed_batches` — counted as delivered, never validated                |
+| `notifier_invalid`                                         | no content loss; no alarm either                                                      |
+| `app_token_unavailable`                                    | CCE-127: a PR on the fallback token fires no host CI, so zero checks reads as green   |
+
+**Degraded** — `degraded=True`:
+
+| Reason                                                    | Why it is safe                                                             |
+| --------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `time_budget_exceeded` (4 sites)                          | CCE-109 truncation; deferred PRs are held back and retried                 |
+| window-clip reasons                                       | the collector returned PRs outside the requested window; rejecting loses nothing |
+| `unknown_lens`                                            | judged: the target names no configured lens                                |
+| `unsafe_page_path`, `lint_block_unsafe_path`              | judged: a path guard doing its job                                         |
+| `page_author_invalid`                                     | the batch does not land, so its PR is held back                            |
+| `lint_block`                                              | the canonical judged-and-rejected case                                     |
+| `gap_detector_invalid`                                    | advisory output only; excluded from the CCE-101 merge gate                 |
+| cursor-resolution failures (4 sites)                      | these _prevent_ an advance; nothing is consumed                            |
+| `deferral_skip`                                           | CCE-140's bounded forgiveness, already recorded append-only in `skipped_prs` |
+
+The four `time_budget_exceeded` sites are the highest-stakes rows in this table. Classifying them blind would turn every truncated run red **and**, through the watermark interlock, freeze its advance — deleting the cursor-backed advance CCE-140 exists to produce, and reinstating the CCE-109 doom loop as a permanent state. They are degraded, and the auto-merge tests assert that a degraded cursor-backed run still merges.
+
+`scripts/verify_runner.py` carries three further blocking sites — publish-verifier dispatch (blind), the CCE-63 CircleCI degrade (degraded), and notifier (degraded). They are classified so the coverage test is exhaustive, but `verify_runner` is a separate entry point and **this change does not alter its exit code.** Only `orchestrator_runner.run` returns `1` on blind.
+
 ### Fail-safe by default
 
 `state_io.add_partial` gains a `degraded` keyword:
@@ -97,7 +140,21 @@ The default is deliberately the loud one. A blocking failure mode that nobody cl
 
 `state_io.add_partial` remains the single writer of `current_run.partial_reasons` and becomes the single writer of the two new fields.
 
-The highest-traffic path needs no change and is correct by default. `_record_dispatch_reasons(state, reasons, *, ok)` already calls `add_partial(state, r, info_only=ok)`; when `ok` is false — the dispatch produced no usable output — the reason now lands as blind, which is exactly the intended semantics. The `ok` boolean has always been the blind discriminator; it was simply collapsed into `partial` by the time it reached the exit code.
+`_record_dispatch_reasons(state, reasons, *, ok)` is the single path every agent dispatch failure takes. All seven dispatch sites route through it, and it calls `add_partial(state, r, info_only=ok)`. When `ok` is false the reason lands as blind by default. The `ok` boolean has always been the blind discriminator; it was simply collapsed into `partial` by the time it reached the exit code.
+
+That default is right for five of the seven and wrong for two. `page-author` and `gap-detector` dispatch failures are **degraded** — see the classification below — so the helper gains a matching passthrough:
+
+```python
+def _record_dispatch_reasons(
+    state: dict, reasons: list[str], *, ok: bool, degraded: bool = False
+) -> None:
+    for r in reasons:
+        add_partial(state, r, info_only=ok, degraded=degraded)
+```
+
+and those two callsites pass `degraded=True`. This is a shared-helper signature change; per CLAUDE.md its callers are enumerated in the classification table and updated in the same change.
+
+Each agent has **two** paths to a reason: the helper, carrying whatever the dispatch reported, and a direct `add_partial` fallback for when the dispatch returned nothing to report (`source_collector_invalid: returned None` and its siblings). Both must carry the same classification, or an agent's failure changes colour depending on whether it managed to explain itself.
 
 ### New state fields
 
@@ -119,6 +176,8 @@ The exit code is the channel because it is the only one requiring **zero provisi
 ### Watermark interlock
 
 The `last_successful_run` advance is skipped when the run is blind. The cursor stays where it was; the next run re-reads the same window. Re-processing a window is cheap and idempotent. Skipping one is not.
+
+The interlock reads `blind` **at the moment of the advance**. Every blind reason except one is recorded upstream of that point, so this is normally the whole story. The exception is `notifier_invalid`, recorded near the end of `run`: it sets the exit code but cannot retroactively rewind a cursor already written. That is the correct behavior, not a gap — a failed digest means the operator was not told, while the authoring work itself completed and its watermark is honest. The alarm is what needs to fire, not the rollback.
 
 ### Auto-merge interlock
 

@@ -195,16 +195,16 @@ Run:
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/state_io/test_add_partial_blind.py -v
 ```
-Expected: **12 cases — 9 red, 3 green.** The exact split, because three of these are deliberate regression guards on behavior that already works and they must NOT be "fixed":
+Expected: **12 cases — 9 red, 3 green.** (pytest reports all 9 as `FAILED`, not `ERROR`: a `TypeError` raised inside a test body is an ordinary assertion-phase failure, not a fixture/collection error.) The exact split, because three of these are deliberate regression guards on behavior that already works and they must NOT be "fixed":
 
 | Case | At this step |
 | ---- | ------------ |
-| `test_degraded_flips_partial_but_not_blind` | ERROR — `TypeError: add_partial() got an unexpected keyword argument 'degraded'` |
-| `test_info_only_wins_over_degraded` | ERROR — same `TypeError` |
-| `test_blind_reasons_is_a_subset_of_partial_reasons` | ERROR — same `TypeError` |
-| `test_a_degraded_run_that_later_goes_blind_stays_blind` | ERROR — same `TypeError` |
-| `test_degraded_only_run_never_creates_the_blind_key_as_true` | ERROR — same `TypeError` |
-| `test_seeded_current_run_is_not_clobbered[degraded]` | ERROR — same `TypeError` (this is why the parametrize carries explicit `ids=`) |
+| `test_degraded_flips_partial_but_not_blind` | FAIL — `TypeError: add_partial() got an unexpected keyword argument 'degraded'` |
+| `test_info_only_wins_over_degraded` | FAIL — same `TypeError` |
+| `test_blind_reasons_is_a_subset_of_partial_reasons` | FAIL — same `TypeError` |
+| `test_a_degraded_run_that_later_goes_blind_stays_blind` | FAIL — same `TypeError` |
+| `test_degraded_only_run_never_creates_the_blind_key_as_true` | FAIL — same `TypeError` |
+| `test_seeded_current_run_is_not_clobbered[degraded]` | FAIL — same `TypeError` (this is why the parametrize carries explicit `ids=`) |
 | `test_blocking_reason_is_blind_by_default` | FAIL — `KeyError: 'blind'` |
 | `test_repeat_blind_reason_appends_once_to_each_list` | FAIL — `KeyError: 'blind_reasons'` |
 | `test_blind_reasons_are_redacted_identically` | FAIL — `KeyError: 'blind_reasons'` |
@@ -408,7 +408,7 @@ Run:
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_dispatch_reasons_classification.py -v
 ```
-Expected: the two `degraded=`-passing tests ERROR with `TypeError: _record_dispatch_reasons() got an unexpected keyword argument 'degraded'`. `test_failed_dispatch_is_blind_by_default` and `test_empty_reasons_touches_nothing` should already PASS — they exercise Task 1's default through the unchanged helper. That is expected and correct.
+Expected: the two `degraded=`-passing tests FAIL with `TypeError: _record_dispatch_reasons() got an unexpected keyword argument 'degraded'`. `test_failed_dispatch_is_blind_by_default` and `test_empty_reasons_touches_nothing` should already PASS — they exercise Task 1's default through the unchanged helper. That is expected and correct.
 
 - [ ] **Step 3: Add the passthrough**
 
@@ -1295,7 +1295,7 @@ Run:
 cd /private/tmp/claude-501/-Users-theo-Projects-engineering-docs-agent/68c365a3-5685-4cb8-90de-3caac1bd51ad/scratchpad/cce144
 /Users/theo/Projects/engineering-docs-agent/.venv/bin/python -m pytest tests/orchestrator/test_blind_run_interlocks.py -v -k "merge or blind_run or veto or manual"
 ```
-Expected: every Task 6 test that passes `blind=` ERRORs with `TypeError: _maybe_auto_merge() got an unexpected keyword argument 'blind'`.
+Expected: every Task 6 test that passes `blind=` FAILs with `TypeError: _maybe_auto_merge() got an unexpected keyword argument 'blind'`.
 
 - [ ] **Step 3: Add the gate**
 

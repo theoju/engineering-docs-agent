@@ -299,9 +299,12 @@ def test_blind_gate_precedes_the_cce140_carve_out():
 
 
 def test_degraded_and_cursor_backed_still_reaches_the_merge_path():
-    """CCE-140 must survive CCE-144. If the blind classification over-reaches
-    into the time-budget reasons, this fails — which is the alarm-fatigue
-    guard expressed as a test."""
+    """CCE-140 must survive CCE-144: given `blind=False`, a partial
+    cursor-backed run still reaches the merge path in `_maybe_auto_merge`
+    rather than stopping at the new blind gate. `blind` is passed in
+    directly here, so this pins the gate's own precedence, not the upstream
+    classification that computes the flag — that guard lives in
+    `tests/orchestrator/test_classification_coverage.py`."""
     with pytest.raises(AssertionError, match="the blind gate did not skip"):
         _call(blind=False, partial=True, cursor_backed=True)
     # Sanity: the same call with blind=True must NOT raise, or the assertion

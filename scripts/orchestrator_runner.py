@@ -3291,6 +3291,14 @@ def _maybe_auto_merge(
     None — blind, partial, and cursor-backed at once, matching no entry in
     _MERGE_VETO_REASON_PREFIXES.
 
+    `blind` is read here before `notifier_invalid` is recorded, so a run
+    blind ONLY because its digest dispatch failed will already have merged
+    by the time that reason lands — deliberately, since a failed digest
+    means the operator was not told while the authoring work itself
+    completed, and the merge is honest. The alarm is not lost: `_exit_code`
+    reads `blind` at the end of `run`, so the run still exits 1 and still
+    goes red.
+
     Fact-checker warnings are NOT an eligibility input (CCE-140 / spec
     Decision 4). They ride the PR body, the digest, and the notification.
     `fact_warnings` is retained in the signature only so the caller's kwargs

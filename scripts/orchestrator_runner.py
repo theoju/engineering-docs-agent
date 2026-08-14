@@ -978,17 +978,16 @@ def _should_advance_watermark(state: dict) -> bool:
     Re-processing a window is cheap and idempotent. Skipping one is not, so
     the asymmetry decides: when in doubt, do not advance.
 
-    Read at the moment of the advance. Two blind reasons are recorded
-    downstream of that point, both deliberately: `notifier_invalid`, near
-    the end of `run`, where it sets the exit code but cannot rewind a
+    Read at the moment of the advance. Two classes of blind reason are
+    recorded downstream of that point, both deliberately: `notifier_invalid`,
+    near the end of `run`, where it sets the exit code but cannot rewind a
     cursor that is already written — correctly, since a failed digest means
     the operator was not told while the authoring work itself completed and
-    its watermark is honest; and the PR-open/append failures raised inside
-    `open_or_append_pr` (`checkout_failed`, `git_add_failed`,
-    `push_failed_unknown`, `push_refs_failed`), whose advance is honest for
-    a different reason — per CCE-40 §7 row 3 it is ephemeral working-tree
-    state, since a failed PR-open means nothing reaches `main` and the next
-    nightly starts from a fresh checkout.
+    its watermark is honest; and every non-`info_only` failure raised inside
+    `open_or_append_pr`, whose advance is honest for a different reason —
+    per CCE-40 §7 row 3 it is ephemeral working-tree state, since a failed
+    PR-open means nothing reaches `main` and the next nightly starts from a
+    fresh checkout.
     """
     return not (state.get("current_run") or {}).get("blind")
 

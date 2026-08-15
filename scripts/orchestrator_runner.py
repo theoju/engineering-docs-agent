@@ -313,6 +313,13 @@ DEFAULT_TIME_BUDGET_SECONDS = 2700  # 45 min; below the 60-min job hard limit
 
 DEFAULT_DEFERRAL_SKIP_THRESHOLD = 3
 
+# CCE-152: how far past the soft budget the authoring loop may run in order to
+# finish the PR it is in the middle of. 1.15 puts a 2100s host at ~2415s, which
+# still leaves room for the merge poll (`merge.checks_timeout_seconds`, 900s)
+# inside the GitHub App installation token's 1h TTL — the real ceiling on a
+# run, well under the workflow's own `timeout-minutes`.
+DEFAULT_AUTHORING_HARD_CAP_RATIO = 1.15
+
 DEFAULT_MERGE_POLICY = "auto"
 DEFAULT_CHECKS_GRACE_SECONDS = 120
 DEFAULT_CHECKS_TIMEOUT_SECONDS = 900
@@ -377,6 +384,31 @@ def resolve_deferral_threshold(config: dict) -> int:
     if val is None:
         return DEFAULT_DEFERRAL_SKIP_THRESHOLD
     return int(val)
+
+
+def resolve_authoring_hard_cap(config: dict, budget: int) -> int:
+    """Resolve the ceiling (seconds) the authoring loop may never cross (CCE-152).
+
+    The soft deadline is checked at PR-group boundaries so a run always finishes
+    the oldest PR's pages and the cursor can advance. That deferral is unbounded
+    on its own — one PR fanning out to twenty pages would hold the run open past
+    the GitHub App installation token's 1h TTL and fail it outright. This cap
+    bounds the overrun: past it the loop cuts wherever it stands, which costs the
+    advance but never costs the run.
+
+    Precedence: `run.authoring_hard_cap_seconds` > budget *
+    DEFAULT_AUTHORING_HARD_CAP_RATIO. Never below `budget` — a cap under the soft
+    deadline would cut BEFORE the deadline it exists to extend, restoring the
+    batch-boundary starvation CCE-152 fixes.
+    """
+    run_cfg = config.get("run")
+    if not isinstance(run_cfg, dict):
+        run_cfg = {}
+    val = run_cfg.get("authoring_hard_cap_seconds")
+    cap = (
+        int(val) if val is not None else int(budget * DEFAULT_AUTHORING_HARD_CAP_RATIO)
+    )
+    return max(cap, budget)
 
 
 def _order_prs_oldest_first(
@@ -1516,6 +1548,13 @@ def run(
     clock = now_monotonic or time.monotonic
     budget = resolve_time_budget(config, time_budget_seconds)
     deadline = clock() + budget if budget > 0 else None
+    # CCE-152: derived from `deadline` rather than a second clock() call. The
+    # time-budget tests drive a fake clock through a counted value sequence, so
+    # an extra call here would shift every gate after it.
+    authoring_hard_cap = resolve_authoring_hard_cap(config, budget)
+    authoring_hard_deadline = (
+        deadline + (authoring_hard_cap - budget) if deadline is not None else None
+    )
     voice_samples = load_voice_samples(repo_root, config)
     try:
         state = load_state_validated(state_path)
@@ -1784,31 +1823,78 @@ def run(
         import description_quality as _description_quality
 
         _desc_min_words = _description_quality.resolve_min_words(config)
+        # CCE-152: the oldest PR referencing the batch authored one step back.
+        # `per_target` is built by walking `prs` oldest-first and `setdefault`
+        # never re-positions an existing key, so a batch's FIRST summary is its
+        # oldest PR and the batch list is already grouped by owner, oldest group
+        # first. That makes a group boundary detectable with one comparison.
+        _prev_owner = None
         for i, ((lens, hint), batch_summaries) in enumerate(per_target.items()):
+            _owner = batch_summaries[0].get("pr_number") if batch_summaries else None
             # CCE-114: the authoring fan-out is the most expensive phase (one
             # dispatch per batch), so it must respect the CCE-109 deadline —
             # admission alone happens too early to bound the run (all PRs are
             # admitted minutes in; run 27263616736 then authored straight
             # through the deadline into the workflow's 60-min hard kill).
             # Same at-least-one-progress guarantee as PR admission (i > 0).
-            if deadline is not None and i > 0 and clock() > deadline:
-                add_partial(
-                    state,
-                    f"time_budget_exceeded: authored {i}/{len(per_target)} "
-                    f"page batches (budget {budget}s); deferring the rest",
-                    degraded=True,
+            #
+            # CCE-152: WHERE it may cut is the fix. Cutting at an arbitrary
+            # batch index leaves the PR whose group was split owing a page, so a
+            # run whose OLDEST PR fans out to more pages than the budget can
+            # author splits group(PR1) every time: no PR ever completes,
+            # `advance_cursor_list` breaks at index 0, and the baseline can
+            # never move. ADIS sat on one baseline for 20.6 days on exactly
+            # that — PR #646 restructured CLAUDE.md into ~6 pages against a
+            # 1-5 page-per-run budget, and four nightlies in a row re-authored
+            # the same leading pages and reported `no_advance_no_cursor`.
+            #
+            # So the soft deadline may only cut at a PR boundary, which always
+            # leaves a COMPLETE prefix of PRs behind it. `authoring_hard_cap`
+            # bounds how far finishing the current group may push the run.
+            if deadline is not None and i > 0:
+                _now = clock()
+                _past_hard = (
+                    authoring_hard_deadline is not None
+                    and _now > authoring_hard_deadline
                 )
-                # Track A: an authoring truncation is a truncation. Without
-                # this the advance block below falls through to
-                # current_run.head_sha and the run persists a baseline
-                # covering PRs whose pages it never wrote.
-                #
-                # CCE-140: an admitted PR whose page batch was never written
-                # is NOT done. The deferred tail is not recorded here — the
-                # complement pass after the lint block covers it, along with
-                # every other way a batch can fail to land.
-                time_truncated = True
-                break
+                _at_boundary = _owner != _prev_owner
+                if _now > deadline and (_at_boundary or _past_hard):
+                    if _past_hard and not _at_boundary:
+                        # Bounded, and honest about the cost: this run does not
+                        # earn an advance. Same standstill as before CCE-152 —
+                        # never worse, and it keeps the run inside its token.
+                        add_partial(
+                            state,
+                            f"time_budget_exceeded: authored {i}/{len(per_target)} "
+                            f"page batches (hard cap {authoring_hard_cap}s over "
+                            f"budget {budget}s); cut inside PR #{_owner}, whose "
+                            f"pages are now incomplete, so the baseline cannot "
+                            f"advance to it",
+                            degraded=True,
+                        )
+                    else:
+                        add_partial(
+                            state,
+                            f"time_budget_exceeded: authored {i}/{len(per_target)} "
+                            f"page batches (budget {budget}s); deferring the rest",
+                            degraded=True,
+                        )
+                    # Track A: an authoring truncation is a truncation. Without
+                    # this the advance block below falls through to
+                    # current_run.head_sha and the run persists a baseline
+                    # covering PRs whose pages it never wrote.
+                    #
+                    # CCE-140: an admitted PR whose page batch was never written
+                    # is NOT done. The deferred tail is not recorded here — the
+                    # complement pass after the lint block covers it, along with
+                    # every other way a batch can fail to land.
+                    time_truncated = True
+                    break
+            # Advance the owner BEFORE the `continue` paths below (unknown_lens,
+            # unsafe_page_path). Leaving it until the end of the body would let a
+            # skipped batch strand `_prev_owner` on an older PR, inventing a
+            # boundary that is not there — or hiding one that is.
+            _prev_owner = _owner
             try:
                 lens_path, _opts = resolve_lens(config, lens)
             except KeyError:

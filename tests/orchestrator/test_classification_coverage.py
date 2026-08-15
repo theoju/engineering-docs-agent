@@ -101,7 +101,12 @@ def test_orchestrator_has_the_expected_call_site_population():
     against the spec's Classification section and update the number here in
     the same commit that adds them."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 38, (
-        f"expected 38 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 39, (
+        f"expected 39 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
+    # 38 -> 39: CCE-152 split the authoring truncation into two reasons — a
+    # deferral to the next PR boundary, and a hard-cap cut inside a PR's group.
+    # Both are degraded=True. The run CONSUMED PRs whose pages it could not
+    # finish writing, which is the blind-to-its-own-input case the sibling
+    # truncation site already records, not a self-healing skip.

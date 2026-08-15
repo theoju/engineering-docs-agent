@@ -10,6 +10,7 @@ _Operations: deployment workflows, configuration guides, and runbooks._
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **`.graphifyignore`: excluding tracked fixtures from the knowledge graph** — `tests/fixtures/diagrams/render/mermaid.min.js` is a vendored, minified bundle
 - **actionlint Required-Check Fix** — **PR #76 · CCE-52 / CCE-55 · 2026-05-29**
 - **Subagent Forensic Capture in CI** — When a nightly run fails and the runner tears down, there is nothing left to examine. PR #55 fixes that by enabling `DOCS_AGENT_DEBUG_DIR` in `.github/workflows/docs-agent-nightly.yml` and uploading the resulting per-subagent files as a GitHub Actions artifact.
 - **actionlint CI gate** — The `.github/workflows/actionlint.yml` workflow runs `actionlint` as a required pre-merge check on every pull request targeting `main`. It catches a class of GitHub Actions bugs that YAML schema validation cannot: context-scoping violations, illegal expression references, and expression syntax errors that only surface at dispatch time.
@@ -42,5 +43,5 @@ _Operations: deployment workflows, configuration guides, and runbooks._
 - **Step summary observability** — When a nightly run encounters a partial or hard-failed subagent, the runner writes a formatted digest to GitHub Actions' built-in step summary. You can read this digest directly in the workflow run UI without downloading any forensics artifact.
 - **The nightly workflow** — Every onboarded host runs `docs-agent-nightly` — rendered from `templates/workflow-run.yml` at scaffold time into `.github/workflows/docs-agent-nightly.yml` — on a schedule, plus two extra triggers. `scripts/scaffold_workflow.py` rewrites the cron minute per host so 100 onboarded repos don't all fire at the same instant; the template default is a `7 7 * * *` off-minute cron, and setup picks a deterministic minute in `[5, 55]` for each new host.
 
-_31 pages · regenerated nightly_
+_32 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

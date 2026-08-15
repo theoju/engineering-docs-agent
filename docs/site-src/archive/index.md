@@ -10,7 +10,9 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **CCE-144: Blind-Run Detection (2026-08-14)** — Two nightly runs — `31472240064` on 2026-08-11 and `31579090583` on 2026-08-12 — both reported `conclusion: success` while every subagent was rate-limited and made zero tool calls. Nothing alarmed. `run()` in `scripts/orchestrator_runner.py` had no exit path for a run whose agents never answered: it returned `2` on a config error, `1` when the docs PR could not be opened, and `0` on every other path, including the `no_pr` path a fully rate-limited run takes.
 - **Graphify Semantic-Extraction Findings (2026-08-13)** — **PR:** #216
+- **Reference-Aware Batching: Rejected (2026-08-13)** — **PR:** #219
 - **CCE-134: Citation Exempt Token, Not Example Prefix** — Nightly run 31275900434 went `partial`. `citation_exists` (Tier-1, block)
 - **CCE-127: A Failed App-Token Mint Degrades the Nightly to `partial`, It No Longer Kills the Job** — The dogfood nightly in `theoju/engineering-docs-agent` failed 15 nights running, from
 - **CCE-130: Stale Branch Archive and Prune (2026-08-08)** — **PR:** #199
@@ -50,9 +52,9 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **Auth-tier migration: drop explicit API key threading** — **PR #91 · merged 2026-06-09 · non-breaking**
 - **Measurements archive** — _Auto-generated; 7 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **Nightly partial-run banner now matches the actual `partial` flag** — PR #177 fixes a display bug: a clean, auto-merge-eligible nightly run could still
-- **Plans archive** — _Auto-generated; 74 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Plans archive** — _Auto-generated; 75 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
-- **Specs archive** — _Auto-generated; 68 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Specs archive** — _Auto-generated; 69 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_43 pages · regenerated nightly_
+_45 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

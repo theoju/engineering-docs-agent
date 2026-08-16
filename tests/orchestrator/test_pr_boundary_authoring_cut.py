@@ -443,8 +443,12 @@ def test_a_clamped_override_is_announced_not_silent():
         == 2500
     )
     assert quiet == []
-    # And the ratio path is not an override, so a clamped default stays quiet
-    # too — there is no operator value to reconcile against.
+    # The ratio path announces too, and says so differently. It was gated on an
+    # explicit override on the reasoning that a default has no operator value to
+    # reconcile against — but the ceiling moves with AUTHORING_TTL_SAFETY_SECONDS
+    # and with this host's own poll, so a default that fit yesterday is narrowed
+    # today with nothing said. The message must not claim a key the operator
+    # never wrote, which is what the source clause distinguishes.
     ratio: list[str] = []
     assert (
         runner.resolve_authoring_hard_cap(
@@ -452,7 +456,14 @@ def test_a_clamped_override_is_announced_not_silent():
         )
         == ceiling
     )
-    assert ratio == []
+    assert len(ratio) == 1, ratio
+    assert ratio[0].startswith("authoring_hard_cap_clamped:"), ratio[0]
+    assert "default ratio" in ratio[0], ratio[0]
+    assert "2700s" in ratio[0], ratio[0]
+    assert f"{ceiling}s" in ratio[0], ratio[0]
+    # It is not the override message: nothing here asks the operator to lower a
+    # key they did not set.
+    assert "Lower run.authoring_hard_cap_seconds to the value" not in ratio[0]
 
 
 def test_a_manual_merge_host_is_not_charged_for_a_poll_it_never_runs():

@@ -309,7 +309,12 @@ def _summarize_tool_use(events: list[dict]) -> dict:
     }
 
 
-DEFAULT_TIME_BUDGET_SECONDS = 2700  # 45 min; below the 60-min job hard limit
+# 45 min. Not a safe sizing, and the 60-min job limit it was once justified
+# against is gone (both workflow files carry `timeout-minutes: 90` since
+# CCE-140). See AUTHORING_TTL_SAFETY_SECONDS: at the default 900s merge poll this
+# budget is squeezed flat by the App-token TTL, so a stock host gets no authoring
+# overrun and is bounded by this number alone.
+DEFAULT_TIME_BUDGET_SECONDS = 2700
 
 DEFAULT_DEFERRAL_SKIP_THRESHOLD = 3
 
@@ -321,9 +326,11 @@ DEFAULT_DEFERRAL_SKIP_THRESHOLD = 3
 #
 # The ratio alone is NOT that guarantee, and its earlier wording claimed it was:
 # it holds for a 2100s host (2415 + 900 = 3315 < 3600) and fails outright for
-# the 2700s default (3105 + 900 = 4005 > 3600). `resolve_authoring_hard_cap`
-# clamps the product against GITHUB_APP_TOKEN_TTL_SECONDS so the bound is
-# computed rather than asserted.
+# the 2700s default (3104 + 900 = 4004 > 3600; `int()` floors, and `2700 * 1.15`
+# is 3104.9999999999995). `resolve_authoring_hard_cap` clamps the product against
+# GITHUB_APP_TOKEN_TTL_SECONDS so the bound is computed rather than asserted —
+# for the overrun. A host whose ceiling is already at or below its budget is not
+# clamped at all; see `resolve_authoring_hard_cap` for what that leaves unbounded.
 DEFAULT_AUTHORING_HARD_CAP_RATIO = 1.15
 
 # CCE-152: the GitHub App installation token the nightly workflow mints mid-job
@@ -456,10 +463,12 @@ def resolve_authoring_hard_cap(
     starvation they were trying to configure away.
 
     **The TTL clamp is the structural half.** `budget * ratio` is a ratio, not a
-    bound: at DEFAULT_TIME_BUDGET_SECONDS it yields 3105s, and 3105 plus the 900s
-    merge poll is 4005s against a 3600s token. Post-CCE-140 that poll runs on the
-    common path (a cursor-backed run passes `merge_deadline=None`), so the
-    overrun is reachable rather than theoretical. The ceiling is therefore
+    bound: at DEFAULT_TIME_BUDGET_SECONDS it yields 3104s (`int()` floors, and
+    `2700 * 1.15` is 3104.9999999999995 in binary floating point — 3104 is what
+    the digest prints), and 3104 plus the 900s merge poll is 4004s against a
+    3600s token. Post-CCE-140 that poll runs on the common path (a cursor-backed
+    run passes `merge_deadline=None`), so the overrun is reachable rather than
+    theoretical. The ceiling is therefore
     computed: TTL - the merge poll this host will actually run - the tail
     reserve. The clamp applies to an explicit override too — the TTL is physics,
     and it does not care where the number came from.
@@ -479,13 +488,30 @@ def resolve_authoring_hard_cap(
     nobody in this process controls, and refusing to run is strictly worse than
     running with the old cut behaviour.
 
-    **The third state is an explicit override the clamp narrows** — legal (it is
-    above the budget), not squeezed (the host keeps real overrun), but smaller
-    than what the operator wrote. It is neither refused nor degraded, so it is
-    reported: an `authoring_hard_cap_clamped` advisory naming the configured
-    value, the ceiling, and the poll term that produced it. The number the
-    operator reads back in the digest is then the one the run used, which is the
-    whole reason the squeeze is loud too.
+    **The third state is a cap the clamp narrows** — legal (it is above the
+    budget), not squeezed (the host keeps real overrun), but smaller than the
+    number the cap resolved to. It is neither refused nor degraded, so it is
+    reported: an `authoring_hard_cap_clamped` advisory naming the resolved cap,
+    the ceiling, and the poll term that produced it. The number the operator
+    reads back in the digest is then the one the run used, which is the whole
+    reason the squeeze is loud too.
+
+    The advisory fires on the ratio path too, not only on an explicit override,
+    and says which one it is. There is no operator value to reconcile against on
+    the ratio path, which is why it was silent originally — but the ceiling moves
+    with `AUTHORING_TTL_SAFETY_SECONDS` and with this host's own merge poll, so a
+    default that fit yesterday can be narrowed today with nothing said about it.
+    An advisory line is a cheaper way to learn that than re-deriving the lattice.
+
+    **The clamp bounds the overrun, not the budget, and only on these paths.**
+    Neither the normal path nor the clamped path can return a cap that outlives
+    the token. The squeeze path can: it returns `budget` with no ceiling applied,
+    so a squeezed host is bounded by its own `run.time_budget_seconds` and
+    nothing else, and `budget + poll` reaches the TTL exactly at the stock
+    default and passes it as the budget grows. Bounding it here would mean
+    truncating or refusing a run whose budget is otherwise serviceable, which
+    design decision D2 forbids — degrade, never worse, never silent. The
+    squeeze reason is the whole mitigation, and sizing is the operator's.
     """
     run_cfg = _run_cfg(config)
     val = run_cfg.get("authoring_hard_cap_seconds")
@@ -531,21 +557,42 @@ def resolve_authoring_hard_cap(
                 f"run.time_budget_seconds or merge.checks_timeout_seconds."
             )
         return budget
-    if val is not None and cap > ceiling and out_reasons is not None:
+    if cap > ceiling and out_reasons is not None:
         # The third state, and the only one that was silent. A squeeze is loud
-        # and a rejection aborts; an explicit override narrowed by the TTL used
-        # to return a number the operator never wrote with nothing said about it,
-        # which reads as "my config was ignored". Advisory rather than blocking:
-        # like the squeeze it describes the host's configuration, not this run's
-        # work, and the run itself is correctly bounded.
+        # and a rejection aborts; a cap narrowed by the TTL used to return a
+        # number nobody wrote with nothing said about it, which reads as "my
+        # config was ignored". Advisory rather than blocking: like the squeeze it
+        # describes the host's configuration, not this run's work, and the run
+        # itself is correctly bounded.
+        #
+        # Not gated on an explicit override. The gate was there because a ratio
+        # default has no operator value to reconcile against, but the ceiling is
+        # computed from AUTHORING_TTL_SAFETY_SECONDS and this host's own merge
+        # poll — raising the reserve to 285 narrowed the ratio default harder for
+        # every budget in 2101..2414 and took the overrun away silently. The
+        # source clause is what keeps the message actionable in both cases: one
+        # names a key to lower, the other a number nobody chose.
+        _source = (
+            "set in run.authoring_hard_cap_seconds"
+            if val is not None
+            else f"the {DEFAULT_AUTHORING_HARD_CAP_RATIO} default ratio applied "
+            f"to run.time_budget_seconds {budget}s"
+        )
+        _remedy = (
+            "Lower run.authoring_hard_cap_seconds to the value you will "
+            "actually get, or lower merge.checks_timeout_seconds to earn more."
+            if val is not None
+            else "Lower merge.checks_timeout_seconds to earn more overrun, or "
+            "set run.authoring_hard_cap_seconds explicitly to stop the "
+            "difference moving under you."
+        )
         out_reasons.append(
-            f"authoring_hard_cap_clamped: run.authoring_hard_cap_seconds "
-            f"({cap}s) is above the {ceiling}s the GitHub App token's "
+            f"authoring_hard_cap_clamped: the authoring hard cap resolves to "
+            f"{cap}s ({_source}), which is above the {ceiling}s the App token's "
             f"{GITHUB_APP_TOKEN_TTL_SECONDS}s TTL leaves once the merge poll "
             f"({poll}s) and the {AUTHORING_TTL_SAFETY_SECONDS}s post-run tail "
             f"are held back, so the authoring hard cap is {ceiling}s for this "
-            f"run. Lower run.authoring_hard_cap_seconds to the value you will "
-            f"actually get, or lower merge.checks_timeout_seconds to earn more."
+            f"run. {_remedy}"
         )
     return min(cap, ceiling)
 
@@ -1751,15 +1798,17 @@ def run(
             except ValueError:
                 pass
 
-    # CCE-152: the hard cap resolved above may have been squeezed flat against
-    # the App token's TTL. Recorded here, not at the resolve call, for the same
-    # reason the CCE-127 block below sits here: `current_run` did not exist yet
-    # at the resolve, and the dict literal above would have overwritten any stub
-    # add_partial created. `info_only` because the squeeze describes the host's
-    # configuration, not this run's work — it costs a run its overrun, so it must
-    # reach the digest, but flipping `partial` on a default-budget host every
-    # night would cost it auto-merge (CCE-140 gates on `partial and not
-    # advance_cursor_backed`) for a condition that predates this ticket.
+    # CCE-152: the hard cap resolved above may have been squeezed flat, or
+    # narrowed, against the App token's TTL — this list drains both
+    # `authoring_hard_cap_squeezed` and `authoring_hard_cap_clamped`. Recorded
+    # here, not at the resolve call, for the same reason the CCE-127 block below
+    # sits here: `current_run` did not exist yet at the resolve, and the dict
+    # literal above would have overwritten any stub add_partial created.
+    # `info_only` because both describe the host's configuration, not this run's
+    # work — they cost a run overrun, so they must reach the digest, but flipping
+    # `partial` on a default-budget host every night would cost it auto-merge
+    # (CCE-140 gates on `partial and not advance_cursor_backed`) for a condition
+    # that predates this ticket.
     for _r in hard_cap_reasons:
         add_partial(state, _r, info_only=True)
 

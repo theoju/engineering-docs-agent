@@ -28,9 +28,17 @@
 # Raising this back toward 2700 no longer merely eats that headroom: the TTL
 # ceiling (3600 - 900 - 285 = 2415) would land at or below the budget, so the
 # cap is squeezed flat onto it, every run records an advisory
-# `authoring_hard_cap_squeezed` reason, and mid-group cuts come back. Lower
-# `merge.checks_timeout_seconds` first if you want the budget back; the cap and
-# the poll together are what have to clear the token.
+# `authoring_hard_cap_squeezed` reason, and mid-group cuts come back. Note what
+# the clamp does NOT do there: it bounds the overrun above this budget, and a
+# squeezed host has none, so nothing bounds such a run against the token but
+# this number itself. Lower `merge.checks_timeout_seconds` first if you want the
+# budget back; the cap and the poll together are what have to clear the token.
+#
+# Between those two states the cap is narrowed rather than held flat, and says
+# so: an advisory `authoring_hard_cap_clamped` reason names the cap that was
+# resolved (from `run.authoring_hard_cap_seconds` or from the ratio), the
+# ceiling it was cut to, and the poll term spending the difference. At 2100 this
+# host sits exactly on the ceiling and stays silent.
 run:
   time_budget_seconds: 2100
 

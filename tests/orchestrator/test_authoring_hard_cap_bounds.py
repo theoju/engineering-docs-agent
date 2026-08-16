@@ -71,8 +71,11 @@ def test_the_documented_override_survives_the_real_loader(tmp_path, base_config_
     assert loaded["run"]["authoring_hard_cap_seconds"] == 2415
     budget = runner.resolve_time_budget(loaded, None)
     assert budget == 2100
-    # Not the 1.15 default (which is also 2415 at this budget — so use a
-    # budget/cap pair the ratio cannot produce).
+    # What this pins is reachability, not precedence: the key survives the
+    # loader and still arrives at the resolver. 2415 is deliberately a value the
+    # 1.15 ratio also produces at this budget, so it cannot distinguish the two
+    # paths — precedence is pinned in test_a_loaded_override_beats_the_ratio,
+    # which uses 2200 for exactly that reason.
     assert runner.resolve_authoring_hard_cap(loaded, budget) == 2415
 
 
@@ -318,8 +321,13 @@ def test_a_ceiling_one_second_above_the_budget_does_not_squeeze():
     """One second of headroom is headroom: the cap clamps, quietly.
 
     This is what stops the squeeze predicate drifting to `ceiling <= budget + N`
-    "for safety" — that would start emitting an advisory, and holding the cap
-    flat, for hosts that do have room.
+    "for safety" — that would hold the cap flat, and report a squeeze, for hosts
+    that do have room.
+
+    "Quietly" is only about the squeeze. One second of overrun is still less
+    overrun than the ratio asked for, so the clamp advisory does fire here — what
+    must not fire is the squeeze, because this host is not squeezed and its cap
+    is not its budget.
     """
     poll = (
         runner.GITHUB_APP_TOKEN_TTL_SECONDS - runner.AUTHORING_TTL_SAFETY_SECONDS - 2101
@@ -330,7 +338,51 @@ def test_a_ceiling_one_second_above_the_budget_does_not_squeeze():
         {"merge": {"checks_timeout_seconds": poll}}, 2100, out_reasons=reasons
     )
     assert cap == 2101
-    assert reasons == []
+    assert cap > 2100
+    assert len(reasons) == 1, reasons
+    assert reasons[0].startswith("authoring_hard_cap_clamped:"), reasons[0]
+    assert "authoring_hard_cap_squeezed" not in reasons[0], reasons[0]
+
+
+def test_a_ratio_default_narrowed_by_the_ceiling_is_announced_too():
+    """The band the reserve created, and it is a computed-path band.
+
+    Raising AUTHORING_TTL_SAFETY_SECONDS to 285 moved the default-poll ceiling
+    from 2580 to 2415, so every budget in 2101..2414 is now narrowed harder than
+    it was — 2200 used to clamp to 2580 and clamps to 2415 today. Gating the
+    advisory on an explicit override left that whole band silent: the host asked
+    for nothing, so nothing was said, and the overrun it used to get went away
+    without a line anywhere.
+
+    The message must not name a key the operator did not write, which is the
+    only reason the gate existed. It names the ratio and the budget instead.
+    """
+    ceiling = (
+        runner.GITHUB_APP_TOKEN_TTL_SECONDS
+        - runner.DEFAULT_CHECKS_TIMEOUT_SECONDS
+        - runner.AUTHORING_TTL_SAFETY_SECONDS
+    )
+    assert ceiling == 2415
+    reasons: list[str] = []
+    # Squarely inside the band: above 2100 (which lands exactly on the ceiling)
+    # and below 2415 (where the host flips to squeezed).
+    assert runner.resolve_authoring_hard_cap({}, 2200, out_reasons=reasons) == ceiling
+    assert int(2200 * runner.DEFAULT_AUTHORING_HARD_CAP_RATIO) > ceiling
+    assert len(reasons) == 1, reasons
+    assert reasons[0].startswith("authoring_hard_cap_clamped:"), reasons[0]
+    assert "default ratio" in reasons[0], reasons[0]
+    assert "2200s" in reasons[0], reasons[0]
+    # Both ends of the band, so a later ceiling move cannot quietly re-silence
+    # part of it.
+    for budget in (2101, 2414):
+        band: list[str] = []
+        assert (
+            runner.resolve_authoring_hard_cap({}, budget, out_reasons=band) == ceiling
+        )
+        assert len(band) == 1 and band[0].startswith("authoring_hard_cap_clamped:"), (
+            budget,
+            band,
+        )
 
 
 def test_an_explicit_override_is_squeezed_too_and_the_reason_names_it():

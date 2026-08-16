@@ -33,7 +33,7 @@ On a successful run you get the forensic bundle as confirmation. On a failure it
 
 Enabling `DOCS_AGENT_DEBUG_DIR` is not free. The switch to `stream-json` mode adds 3–6 seconds per subagent invocation, with outliers reaching ~74 seconds. A pipeline with 6–8 subagents accumulates several minutes of overhead.
 
-The 60-minute job timeout has headroom for this. The spec explicitly accepts the cost for a once-daily cron: the diagnostic value outweighs a fixed per-run overhead.
+The 90-minute job timeout has headroom for this (it was 60 when this was written; CCE-140 raised it). The spec explicitly accepts the cost for a once-daily cron: the diagnostic value outweighs a fixed per-run overhead. Note that since CCE-152 the job timeout is no longer the binding ceiling on a run — the GitHub App installation token's 1h TTL is, and this overhead is spent inside it. See [Orchestrator](../architecture/orchestrator.md).
 
 If the latency becomes a concern at higher subagent counts, the most targeted fix is scoping `DOCS_AGENT_DEBUG_DIR` to failure-only paths rather than unconditional capture. That is deferred until SP-1 produces CI evidence to scope it against.
 

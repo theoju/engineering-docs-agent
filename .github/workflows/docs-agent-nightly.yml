@@ -43,10 +43,11 @@ jobs:
     # CCE-140: 60 -> 90. A cursor-backed truncated run now continues into the
     # merge epilogue, which is bounded by merge.checks_timeout_seconds (900s)
     # measured from the merge attempt rather than by the run's spent time
-    # budget. Job total is setup (~6m) + authoring (35m, see
+    # budget. Job total is setup (~6m) + the authoring HARD CAP (~40m, i.e.
+    # 2415s, not the 2100s budget — see the CCE-152 note below and
     # .engineering-docs-agent/config.yml) + the post-deadline tail (the
     # in-flight page batch, site generators, push, PR create; ~5m) + 15m of
-    # check-polling = ~61m, which 60 cannot hold. A kill here lands BEFORE
+    # check-polling = ~66m, which 60 cannot hold. A kill here lands BEFORE
     # run()'s notifier dispatch, so it would be a SILENT failure — the one
     # outcome worse than forfeiting the merge. Matches the ADIS host's 90.
     #
@@ -58,7 +59,11 @@ jobs:
     # authoring loop may run to budget * 1.15 (2415s here) to finish the PR
     # group it is mid-way through. 2415 + 900 = 3315s leaves ~285s of the hour
     # for the tail, and `resolve_authoring_hard_cap` clamps the cap against the
-    # TTL so this cannot silently stop holding.
+    # TTL so this cannot silently stop holding. That clamp bounds the OVERRUN,
+    # not the budget: raise run.time_budget_seconds past 2415 and the host is
+    # squeezed flat instead — no cap above the budget at all, bounded by the
+    # budget alone, and budget + 900 can then exceed the token outright. The
+    # squeeze is advisory-loud, never silent, but it is not a bound.
     timeout-minutes: 90
     env:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -81,8 +86,13 @@ jobs:
         # CCE-45: see GH_TOKEN comment above. The App
         # (engineering-docs-agent-bot, installed on this repo) carries
         # contents:write + pull-requests:write scopes matching the workflow's
-        # permissions block. Token expires after 1h; the job timeout is 60min
-        # so the token is always valid for the full run.
+        # permissions block. Token expires 1h after THIS step, and no
+        # timeout-minutes extends it — the job timeout (90m) is deliberately the
+        # slacker of the two bounds, so the token, not the timeout, is what the
+        # run must clear. `resolve_authoring_hard_cap` sizes the authoring loop
+        # against this TTL; see the timeout-minutes comment above for the sum,
+        # and README "Nightly authoring run" for the setup gap between this step
+        # and run() entry, which nothing in the process can measure.
         #
         # CCE-127: "installed on this repo" is a live precondition, not a
         # setup-time fact. On 2026-07-23 this App was transferred from theoju

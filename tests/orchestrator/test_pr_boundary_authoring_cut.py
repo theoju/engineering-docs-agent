@@ -188,6 +188,72 @@ def test_cut_defers_to_the_pr_boundary_so_the_baseline_advances(
     ]
 
 
+# PR #1 fans out to its own page plus one it SHARES with PR #2, so the shared
+# batch's summary list holds both PRs — `[s(PR1), s(PR2)]`. It is the only
+# fixture in this package that builds a multi-PR batch, and it is what makes
+# "a batch is owned by its OLDEST PR" observable at all.
+TARGETS_WITH_A_SHARED_BATCH = {
+    1: ["connectors/one_a.md", "connectors/shared.md"],
+    2: ["connectors/shared.md"],
+    3: ["connectors/three.md"],
+}
+
+
+def test_a_batch_two_prs_share_is_owned_by_the_older_of_them(
+    tmp_path, init_host, read_current_run
+):
+    """The invariant every boundary comparison rests on, pinned end to end.
+
+    ``per_target.setdefault(key, []).append(s)`` walks ``prs`` oldest-first, so
+    a page hint referenced by two PRs yields a list carrying both summaries and
+    the FIRST element is the older PR. The loop reads exactly that
+    (``batch_summaries[0]``) to decide which group a batch belongs to.
+
+    Reading the LAST element instead — which looks like an equivalent way to
+    pick "the batch's PR" — reports the shared batch as PR #2's, inventing a
+    group boundary in the middle of group(PR #1). The soft deadline then cuts
+    there, PR #1 is left owing ``shared.md``, and the run reports the exact
+    starvation CCE-152 exists to remove. No other fixture here builds a shared
+    batch, so ``[0]`` and ``[-1]`` were indistinguishable to the suite.
+
+    Clock: deadline=100, hard cap 115. Batch 0 (``one_a``) is unconditional.
+    Batch 1 is the shared batch at 105 — past the soft deadline, under the hard
+    cap, and INSIDE group(PR #1), so it must be authored. Batch 2 (``three``)
+    at 106 is the first true boundary.
+    """
+    repo = tmp_path
+    state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
+    base, (c1, c2, c3, _c4) = _seed_window(repo, state_path, 4)
+    fakes = _fakes(
+        tmp_path.parent / f"cce152_sharedbatch_{tmp_path.name}",
+        [_pr(1, c1), _pr(2, c2), _pr(3, c3)],
+        TARGETS_WITH_A_SHARED_BATCH,
+    )
+    rc = runner.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=_fake_clock([0, 10, 20, 105, 106]),
+    )
+    assert rc == 0
+    core = repo / "docs" / "site-src" / "core" / "connectors"
+    assert (core / "one_a.md").exists()
+    # THE assertion: the shared batch belongs to PR #1, so the past-deadline
+    # gate does not read it as a boundary and the group finishes.
+    cr = read_current_run(state_path)
+    assert (core / "shared.md").exists(), cr["partial_reasons"]
+    # And the cut still lands on the real boundary, no further.
+    assert not (core / "three.md").exists()
+    # Both PR #1 and PR #2 are owed nothing now, so the prefix closes past the
+    # shared batch rather than stopping short of it.
+    written = json.loads(state_path.read_text())
+    assert written["last_successful_run"]["head_sha"] == c2, written[
+        "last_successful_run"
+    ]
+    assert written["last_successful_run"]["head_sha"] != base
+
+
 def test_hard_cap_cuts_inside_a_group_and_says_the_baseline_cannot_advance(
     tmp_path, init_host, read_current_run
 ):
@@ -224,7 +290,15 @@ def test_hard_cap_cuts_inside_a_group_and_says_the_baseline_cannot_advance(
     # Precondition: the cut landed INSIDE group(PR1), not at its boundary.
     assert not (core / "one_b.md").exists()
     cr = read_current_run(state_path)
-    assert any("hard cap" in r for r in cr["partial_reasons"]), cr["partial_reasons"]
+    cut = [r for r in cr["partial_reasons"] if "page batches" in r]
+    assert len(cut) == 1, cr["partial_reasons"]
+    assert "hard cap" in cut[0], cut[0]
+    # The consequence clause this test is named for. Its squeezed twin is
+    # asserted in test_a_squeezed_hosts_cut_reason_does_not_read_as_a
+    # _contradiction; the un-squeezed branch carries the same clause and was
+    # pinned nowhere, so deleting it from the reason left the suite green.
+    assert "cut inside PR #1" in cut[0], cut[0]
+    assert "the baseline cannot advance to it" in cut[0], cut[0]
     # PR #1 owes a page, so no prefix closes and the baseline must hold.
     assert any(
         "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]

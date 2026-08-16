@@ -157,6 +157,24 @@ def test_a_cap_one_second_above_the_budget_is_accepted_unchanged():
     )
 
 
+@pytest.mark.parametrize("budget", [1, 2, 3, 4, 5, 6])
+def test_a_tiny_budget_still_gets_a_cap_above_it_on_the_computed_path(budget):
+    """The computed path must not land on the state the explicit path refuses.
+
+    ``int()`` floors, and ``int(budget * 1.15) == budget`` for every budget in
+    1..6, so the ratio alone would return ``cap == budget`` — the collapsed
+    ``authoring_hard_deadline == deadline`` state the explicit override is
+    rejected for. ``max(cap, budget + 1)`` is what stops the two paths
+    disagreeing about whether that state is legal.
+
+    No other test enters this band (the smallest budget any of them hands the
+    resolver is 100, where the ratio has room), so deleting the guard left the
+    whole suite byte-identical to baseline.
+    """
+    assert int(budget * runner.DEFAULT_AUTHORING_HARD_CAP_RATIO) == budget
+    assert runner.resolve_authoring_hard_cap({}, budget) == budget + 1
+
+
 def test_a_cli_budget_override_participates_in_the_rejection():
     """Characterisation, and an operator-visible trap worth having written down.
 

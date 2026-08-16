@@ -1,8 +1,9 @@
 ---
-description: "Documents architecture orchestrator: the CCE-109/CCE-114 soft time-budget check bounds every expensive loop in the nightly run, CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages, CCE-125 makes a gap-detector 'couldn't judge' verdict an info-only advisory outcome, and CCE-127 degrades a failed GitHub App token mint to a blocking partial reason instead of killing the job."
+description: "Documents architecture orchestrator: the CCE-109/CCE-114 soft time-budget check bounds every expensive loop in the nightly run, CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages, CCE-125 makes a gap-detector 'couldn't judge' verdict an info-only advisory outcome, CCE-127 degrades a failed GitHub App token mint to a blocking partial reason instead of killing the job, and CCE-144 splits `partial` into `blind` (a blocking subagent was prevented from producing output) and `degraded` (the pipeline ran and deliberately held back work), which gates the exit code, the watermark advance, and auto-merge."
 source_files:
   - CHANGELOG.md
   - scripts/orchestrator_runner.py
+  - scripts/state_io.py
   - agents/page-author.md
   - agents/gap-detector.md
   - agents/schemas/gap_detector.schema.json
@@ -11,8 +12,12 @@ source_files:
   - tests/orchestrator/test_enforce_agent_frontmatter.py
   - tests/orchestrator/test_agent_authored_create_frontmatter.py
   - tests/orchestrator/test_gap_detector_unjudged.py
+  - tests/orchestrator/test_blind_run_interlocks.py
+  - tests/orchestrator/test_classification_coverage.py
+  - tests/orchestrator/test_cursor_backed_merge.py
+  - tests/state_io/test_add_partial_blind.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-08-08"
+last_reviewed: "2026-08-16"
 status: draft
 doc_kind: architecture
 ---
@@ -30,7 +35,53 @@ doc_kind: architecture
 7. **gap-detector loop** — one dispatch per admitted PR (`scripts/orchestrator_runner.py`).
 8. What's New composition and `last_successful_run.head_sha` promotion.
 
-Each stage that dispatches a subagent accumulates `partial_reasons` on failure via `add_partial`; a run with any non-`info_only` reason is marked `partial: true` and — per CCE-101 — never auto-merges.
+Each stage that dispatches a subagent accumulates `partial_reasons` on failure via `add_partial`. A non-`info_only` reason always flips `partial: true`; since CCE-144 (see below) it also decides — by how the call site classifies the failure — whether the run additionally goes `blind`, which is the flag the exit code, the watermark advance, and auto-merge actually gate on.
+
+## Blind vs. degraded: two meanings of `partial` (CCE-144)
+
+`partial` used to mean one thing: "something didn't go perfectly." That conflated two failure modes with opposite operational consequences. A run that authored 8 of 10 page batches before the CCE-114 time-budget check tripped is fine to retry next night — the two unauthored batches stay in-window and get picked up again. A run where every subagent came back empty because the account was rate-limited is not fine to treat the same way, because `run()` still returned `conclusion: success`: nothing downstream knew to distrust it.
+
+That is exactly what happened on 2026-08-11 and 2026-08-12. Both nightlies reported success while every subagent dispatch was rate-limited and produced zero output. The second run advanced `last_successful_run.head_sha` straight past three merged feature PRs (#211–#213) whose content the docs pipeline had never actually authored. Because the cursor is consume-once, that window is gone — nothing re-reads a baseline the run already walked past.
+
+CCE-144 splits the old single meaning into two:
+
+- **blind** — a blocking subagent was *prevented* from producing output at all (rate-limited, crashed, returned unparseable JSON). The pipeline could not judge the content it was handed.
+- **degraded** — the pipeline ran and *deliberately* rejected or deferred some content (a CCE-114 time-budget cut, a lint block, an unknown lens). The pipeline judged and said no.
+
+`add_partial` (`scripts/state_io.py:add_partial`) carries the split as a keyword:
+
+```python
+def add_partial(state, reason, *, info_only=False, degraded=False):
+    ...
+```
+
+- `info_only=True` — advisory noise; touches neither `partial` nor `blind`.
+- `degraded=True` — the run judged and rejected work; flips `partial` only. Self-healing — the next run retries whatever was held back.
+- neither — the fail-safe default. Flips **both** `partial` and `blind`, and records the reason in `blind_reasons` too. An unclassified blocking failure mode is loud by construction rather than passing silently.
+
+Classification is by **call site**, never by matching the reason string. The same `schema_invalid:` prefix is emitted by three different call sites with two different classifications: source-collector defaults to blind (it consumed input it couldn't process), while page-author and gap-detector pass `degraded=True` (an unlanded page-author batch just holds its PR out of the advance cursor; gap-detector's output is advisory and outside the merge gate anyway). `_record_dispatch_reasons` (`scripts/orchestrator_runner.py:_record_dispatch_reasons`) threads a `degraded` kwarg through for exactly this reason.
+
+Three consumers read `blind`:
+
+- **`_exit_code`** (`scripts/orchestrator_runner.py:_exit_code`) returns `1` when the run is blind, `0` otherwise. This is not a new exit path — `run()` already returned `1` when the docs PR couldn't be opened — blind joins that class rather than competing with it, so an operator reading only the run status takes the same action for both.
+- **`_should_advance_watermark`** (`scripts/orchestrator_runner.py:_should_advance_watermark`) refuses to move `last_successful_run` when the run is blind. Re-processing a window the pipeline already saw is cheap and idempotent; skipping one it never saw is not, which is the asymmetry the guard is built on.
+- **`_maybe_auto_merge`** (`scripts/orchestrator_runner.py:_maybe_auto_merge`) skips unconditionally with an `auto_merge_skipped: blind_run` reason, checked *ahead of* the CCE-140 cursor-backed carve-out:
+
+```python
+if blind:
+    # CCE-144. Ahead of the CCE-140 carve-out below on purpose: a
+    # cursor-backed advance is not evidence for a run that was prevented
+    # from judging.
+    return skip("blind_run")
+if partial and not advance_cursor_backed:
+    return skip("partial_run")
+```
+
+That ordering closes a real gap: before CCE-144, a blind run that also happened to be time-truncated and cursor-backed (`advance_cursor_backed=True`) could reach the CCE-140 carve-out and auto-merge unreviewed content, because `advance_cursor_backed` alone said nothing about whether the run had actually seen anything.
+
+CCE-144 also fixed a second, unrelated failure in the same incident: the nightly workflow's "Print partial-run reasons" step (`templates/workflow-run.yml`) was grepping `.engineering-docs-agent/state.json`, which never carries `current_run` — `save_persistent_state` strips ephemeral keys before writing state to disk. The step had silently printed nothing since the ephemeral/persistent state split was introduced. It now reads the sibling `current_run.json` and prints `blind_reasons` under their own `BLIND:` label so a blind run is visible in `gh run view --log` even with the run-summary block collapsed.
+
+CCE-144 supersedes and reverses CCE-150 — an abandonment ticket/PR that was itself reversed nine minutes before CCE-144 merged.
 
 ## Soft time budget
 

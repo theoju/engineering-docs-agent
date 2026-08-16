@@ -1,11 +1,12 @@
 # Specs archive
 
-_Auto-generated; 68 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 69 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
 ## 2026-08
 
 | Title | Status | Summary |
 |---|---|---|
+| [CCE-144 — Blind-run detection](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md) | — | **Status:** approved — **implemented and merged 2026-08-14.** |
 | [CCE-131 — `citation_exists` false-positive closure](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-08-08-cce131-citation-exists-false-positive-closure-design.md) | — | **Status:** approved, ready for planning |
 | [CCE-127 — App-token failure degrades to a partial run instead of killing the nightly](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-08-07-cce127-app-token-degrade-partial-design.md) | approved | The dogfood nightly in `theoju/engineering-docs-agent` failed 15 nights running, from |
 

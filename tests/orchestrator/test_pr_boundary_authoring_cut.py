@@ -342,7 +342,7 @@ def test_a_ttl_squeeze_holds_the_cap_at_budget_and_says_so_loudly():
 
 
 def test_a_squeezed_run_records_an_advisory_reason_without_going_partial(
-    tmp_path, init_host, read_current_run, base_config_yaml
+    tmp_path, init_host, read_current_run, base_config_yaml, monkeypatch
 ):
     """The squeeze reaches the digest but must not flip ``partial``.
 
@@ -351,7 +351,15 @@ def test_a_squeezed_run_records_an_advisory_reason_without_going_partial(
     therefore cost every default-budget host auto-merge permanently, for a
     condition that predates this ticket — the design's "degrades to pre-CCE-152,
     never worse" only holds if the reason is advisory.
+
+    Advisory is not the same as quiet, though, and the design asks for LOUD.
+    So the step summary is asserted as well: an operator whose host silently
+    lost its overrun has no way to find out from `partial` alone, and the
+    squeeze names the two keys to lower.
     """
+    summary = tmp_path.parent / f"cce152_summary_{tmp_path.name}.md"
+    summary.write_text("## existing\n")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     squeezed = base_config_yaml.replace(
         "time_budget_seconds: 2100",
         f"time_budget_seconds: {runner.DEFAULT_TIME_BUDGET_SECONDS}",
@@ -378,10 +386,69 @@ def test_a_squeezed_run_records_an_advisory_reason_without_going_partial(
     # Nothing else went wrong, so the squeeze is the only thing that could have
     # flipped `partial` — and it must not have.
     assert cr["partial"] is False, cr
+    # ...and it is still reported where the operator looks, under the INFO
+    # header rather than the "Partial run" warning.
+    written_summary = summary.read_text()
+    assert "authoring_hard_cap_squeezed:" in written_summary, written_summary
+    assert "INFO — advisory notices (run not partial)" in written_summary
+    assert "WARNING — Partial run" not in written_summary
+
+
+def test_a_configured_hard_cap_loads_and_governs_the_cut(
+    tmp_path, init_host, read_current_run, base_config_yaml
+):
+    """The documented override, end to end through the host's own config file.
+
+    This is the defect the schema fix closes, seen from the operator's side:
+    `run.authoring_hard_cap_seconds` was documented and read by the resolver
+    while the schema's `additionalProperties: false` rejected it, so a host
+    that followed the documentation exited 2 at config load every night —
+    before authoring, before the digest. Every existing test missed it by
+    handing the resolver a raw dict the schema never saw.
+
+    Both halves are asserted. The run completes (rc 0), and the cut it makes
+    names 150s, which is the configured value — the 1.15 default would have
+    said 115s and cut at the same batch, so only the wording separates "the
+    config was honoured" from "the config was ignored".
+
+    Clock: budget 100 from config, hard deadline 150. Batch 1's gate sees 900,
+    past both, inside group(PR #1).
+    """
+    configured = base_config_yaml.replace(
+        "time_budget_seconds: 2100",
+        "time_budget_seconds: 100\n  authoring_hard_cap_seconds: 150",
+    )
+    repo = tmp_path
+    state_path = init_host(
+        {"version": "1", "last_successful_run": {"head_sha": "s"}},
+        config_yaml=configured,
+    )
+    _base, (c1, c2, c3, _c4) = _seed_window(repo, state_path, 4)
+    fakes = _fakes(
+        tmp_path.parent / f"cce152_configured_{tmp_path.name}",
+        [_pr(1, c1), _pr(2, c2), _pr(3, c3)],
+        TARGETS_BY_PR,
+    )
+    # No CLI budget override: both numbers come from the config file.
+    rc = runner.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        now_monotonic=_fake_clock([0, 10, 20, 900]),
+    )
+    assert rc == 0
+    cr = read_current_run(state_path)
+    assert any("hard cap 150s over budget 100s" in r for r in cr["partial_reasons"]), (
+        cr["partial_reasons"]
+    )
+    # And the ratio default did not answer instead.
+    assert not any("hard cap 115s" in r for r in cr["partial_reasons"]), cr[
+        "partial_reasons"
+    ]
 
 
 def test_a_hard_cap_below_the_budget_fails_the_run_cleanly_not_with_a_traceback(
-    tmp_path, init_host, base_config_yaml
+    tmp_path, init_host, base_config_yaml, capsys
 ):
     """The rejection above must not escape ``run()``.
 
@@ -390,6 +457,11 @@ def test_a_hard_cap_below_the_budget_fails_the_run_cleanly_not_with_a_traceback(
     the one failure shape the README names as strictly worse than every
     alternative: no digest, no partial reasons, no alarm. Exit 2 with a logged
     reason is the contract every other config rejection already meets.
+
+    The emitted message is asserted too, not just the exit code: ``run()``
+    returns 2 for several unrelated config rejections, so an rc-only assertion
+    would still pass if this config were refused for some other reason and the
+    hard-cap guard never ran at all.
     """
     bad = base_config_yaml.replace(
         "time_budget_seconds: 2100",
@@ -399,6 +471,9 @@ def test_a_hard_cap_below_the_budget_fails_the_run_cleanly_not_with_a_traceback(
         {"version": "1", "last_successful_run": {"head_sha": "s"}}, config_yaml=bad
     )
     assert runner.run(tmp_path, dry_run_dir=FAKES_MULTI, no_pr=True) == 2
+    err = capsys.readouterr().err
+    assert "config invalid" in err, err
+    assert "run.authoring_hard_cap_seconds (1800)" in err, err
 
 
 # PR #1's first target names a lens the host does not define, so its batch hits

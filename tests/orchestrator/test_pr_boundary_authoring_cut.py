@@ -235,8 +235,13 @@ def test_hard_cap_cuts_inside_a_group_and_says_the_baseline_cannot_advance(
     ]
 
 
-def test_hard_cap_resolves_from_config_and_never_undercuts_the_soft_budget():
-    """Unit-level contract for the resolver."""
+def test_hard_cap_resolves_from_config_and_defaults_to_the_ratio():
+    """Unit-level contract for the resolver.
+
+    (Renamed: "never undercuts the soft budget" described the old
+    ``max(cap, budget)`` normalisation, which the at-or-below-budget rejection
+    replaced — nothing here has undercut anything since.)
+    """
     assert runner.resolve_authoring_hard_cap({}, 2100) == int(
         2100 * runner.DEFAULT_AUTHORING_HARD_CAP_RATIO
     )
@@ -288,17 +293,92 @@ def test_hard_cap_is_clamped_against_the_app_token_ttl():
     assert int(2400 * runner.DEFAULT_AUTHORING_HARD_CAP_RATIO) > ceiling
     assert runner.resolve_authoring_hard_cap({}, 2400) == ceiling
     # An explicit override is clamped by the same ceiling — the token does not
-    # care where the number came from.
+    # care where the number came from — and the narrowing is announced rather
+    # than silent (see test_a_clamped_override_is_announced_not_silent).
+    narrowed: list[str] = []
     assert (
         runner.resolve_authoring_hard_cap(
-            {"run": {"authoring_hard_cap_seconds": 3400}}, 2400
+            {"run": {"authoring_hard_cap_seconds": 3400}}, 2400, out_reasons=narrowed
         )
         == ceiling
     )
-    # The two hosts in this repo's orbit sit under it and keep their full
-    # overrun, which is what fixes AUTHORING_TTL_SAFETY_SECONDS at 120.
+    assert len(narrowed) == 1 and narrowed[0].startswith("authoring_hard_cap_clamped:")
+    # The two hosts in this repo's orbit sit exactly ON it and keep their full
+    # overrun, which is what fixes AUTHORING_TTL_SAFETY_SECONDS at 285: it is the
+    # largest reserve for which this still holds (2415 <= 3600 - 900 - S solves
+    # to S <= 285), so this pair of assertions is the constant's whole criterion.
     assert runner.resolve_authoring_hard_cap({}, 2100) == 2415
     assert 2415 <= ceiling
+    assert runner.AUTHORING_TTL_SAFETY_SECONDS == 285
+    assert (
+        runner.GITHUB_APP_TOKEN_TTL_SECONDS
+        - runner.DEFAULT_CHECKS_TIMEOUT_SECONDS
+        - (runner.AUTHORING_TTL_SAFETY_SECONDS + 1)
+        < 2415
+    )
+
+
+def test_a_clamped_override_is_announced_not_silent():
+    """The third state of the resolver, and the one that used to say nothing.
+
+    A squeeze is loud and an at-or-below-budget cap aborts, but an explicit
+    override that is merely narrowed by the TTL returned a number the operator
+    never wrote with nothing in ``out_reasons`` and nothing logged — the digest
+    then reports a cap the config does not contain, which reads as "my config was
+    ignored" rather than "your config does not fit in the token".
+
+    The advisory has to carry all three numbers, because the operator's next
+    action is arithmetic: what they asked for, what they got, and the poll term
+    that is spending the difference.
+    """
+    reasons: list[str] = []
+    cap = runner.resolve_authoring_hard_cap(
+        {
+            "run": {"authoring_hard_cap_seconds": 3400},
+            "merge": {"checks_timeout_seconds": 600},
+        },
+        2400,
+        out_reasons=reasons,
+    )
+    ceiling = (
+        runner.GITHUB_APP_TOKEN_TTL_SECONDS - 600 - runner.AUTHORING_TTL_SAFETY_SECONDS
+    )
+    assert cap == ceiling
+    assert len(reasons) == 1, reasons
+    msg = reasons[0]
+    assert msg.startswith("authoring_hard_cap_clamped:"), msg
+    assert "run.authoring_hard_cap_seconds" in msg
+    assert "3400s" in msg, msg
+    assert f"{ceiling}s" in msg, msg
+    assert "600s" in msg, msg
+    # It is advisory, not a squeeze: this host keeps real overrun above its
+    # budget, so it must not borrow the squeezed host's key.
+    assert "authoring_hard_cap_squeezed" not in msg
+    assert cap > 2400
+    # A cap that already fits is not narrowed, so nothing is said about it.
+    quiet: list[str] = []
+    assert (
+        runner.resolve_authoring_hard_cap(
+            {
+                "run": {"authoring_hard_cap_seconds": 2500},
+                "merge": {"checks_timeout_seconds": 600},
+            },
+            2400,
+            out_reasons=quiet,
+        )
+        == 2500
+    )
+    assert quiet == []
+    # And the ratio path is not an override, so a clamped default stays quiet
+    # too — there is no operator value to reconcile against.
+    ratio: list[str] = []
+    assert (
+        runner.resolve_authoring_hard_cap(
+            {"merge": {"checks_timeout_seconds": 600}}, 2700, out_reasons=ratio
+        )
+        == ceiling
+    )
+    assert ratio == []
 
 
 def test_a_manual_merge_host_is_not_charged_for_a_poll_it_never_runs():
@@ -325,6 +405,10 @@ def test_a_ttl_squeeze_holds_the_cap_at_budget_and_says_so_loudly():
     is held at the budget (behaviour degrades to pre-CCE-152: cuts may land
     mid-group and such a run earns no advance) and the squeeze is reported.
     """
+    # Pinned because the test's whole point is that the STOCK default is the
+    # squeezed case: if the default ever drops below the ceiling this test would
+    # keep passing while silently exercising the un-squeezed path instead.
+    assert runner.DEFAULT_TIME_BUDGET_SECONDS == 2700
     reasons: list[str] = []
     cap = runner.resolve_authoring_hard_cap(
         {}, runner.DEFAULT_TIME_BUDGET_SECONDS, out_reasons=reasons
@@ -394,6 +478,63 @@ def test_a_squeezed_run_records_an_advisory_reason_without_going_partial(
     assert "WARNING — Partial run" not in written_summary
 
 
+def test_a_squeezed_hosts_cut_reason_does_not_read_as_a_contradiction(
+    tmp_path, init_host, read_current_run, base_config_yaml
+):
+    """The wording of the cut on a host whose cap was squeezed flat.
+
+    On a squeezed host the resolver returns ``budget`` itself, so
+    ``authoring_hard_cap == budget`` and the ordinary hard-cap phrasing renders
+    as "hard cap 2500s over budget 2500s" — a number that is over itself. That is
+    the stock default's own configuration (2700 + 900 fills the token), so it is
+    the phrasing most operators would actually meet, and it hides the one fact
+    that explains the run: the overrun was never granted, because the App token's
+    TTL took it.
+
+    Nothing pinned the wording before, so this asserts both directions — the
+    honest phrasing is present AND the self-contradictory one is absent.
+
+    Clock: budget 2500 from config, hard deadline 2500 (squeezed). Batch 1's
+    gate sees 3000, past both, inside group(PR #1).
+    """
+    squeezed = base_config_yaml.replace(
+        "time_budget_seconds: 2100", "time_budget_seconds: 2500"
+    )
+    repo = tmp_path
+    state_path = init_host(
+        {"version": "1", "last_successful_run": {"head_sha": "s"}},
+        config_yaml=squeezed,
+    )
+    _base, (c1, c2, c3, _c4) = _seed_window(repo, state_path, 4)
+    fakes = _fakes(
+        tmp_path.parent / f"cce152_squeezed_cut_{tmp_path.name}",
+        [_pr(1, c1), _pr(2, c2), _pr(3, c3)],
+        TARGETS_BY_PR,
+    )
+    rc = runner.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        now_monotonic=_fake_clock([0, 10, 20, 3000]),
+    )
+    assert rc == 0
+    # Precondition: the run really was squeezed, and really was cut mid-group.
+    cr = read_current_run(state_path)
+    assert any(
+        r.startswith("authoring_hard_cap_squeezed:") for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+    core = repo / "docs" / "site-src" / "core" / "connectors"
+    assert (core / "one_a.md").exists()
+    assert not (core / "one_b.md").exists()
+    cut = [r for r in cr["partial_reasons"] if "page batches" in r]
+    assert len(cut) == 1, cr["partial_reasons"]
+    assert "hard cap held at budget 2500s by the App-token TTL" in cut[0], cut[0]
+    assert "over budget" not in cut[0], cut[0]
+    # The consequence still has to be stated — this is a mid-group cut, and it
+    # costs the advance exactly as an un-squeezed one does.
+    assert "the baseline cannot advance to it" in cut[0], cut[0]
+
+
 def test_a_configured_hard_cap_loads_and_governs_the_cut(
     tmp_path, init_host, read_current_run, base_config_yaml
 ):
@@ -452,11 +593,14 @@ def test_a_hard_cap_below_the_budget_fails_the_run_cleanly_not_with_a_traceback(
 ):
     """The rejection above must not escape ``run()``.
 
-    ``main()`` has no ConfigError handler, so an uncaught raise from the
-    resolver would terminate the process before ``run()``'s notifier dispatch —
-    the one failure shape the README names as strictly worse than every
-    alternative: no digest, no partial reasons, no alarm. Exit 2 with a logged
-    reason is the contract every other config rejection already meets.
+    ``main()`` has no ConfigError handler, so an uncaught raise from the resolver
+    would terminate the process with a traceback. Exit 2 with a logged reason is
+    the contract the two config rejections above it already meet — a missing
+    config file and a schema-invalid one — and the hard cap is a third config
+    rejection, not a new failure class. (Neither path notifies: the notifier
+    dispatch is at the end of ``run()``, far below this return, so a config
+    rejection never reaches the digest either way. What the guard buys is a
+    legible reason instead of a stack trace.)
 
     The emitted message is asserted too, not just the exit code: ``run()``
     returns 2 for several unrelated config rejections, so an rc-only assertion

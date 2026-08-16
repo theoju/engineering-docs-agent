@@ -204,8 +204,8 @@ def test_the_ceiling_is_computed_from_this_hosts_own_merge_poll():
     """The poll term is read from config, not from the default constant.
 
     At budget 2800 the two paths diverge completely: on the default 900s poll
-    the ceiling (2580) is below the budget and the host is squeezed flat, while
-    on a 300s poll the ceiling is 3180 and the host keeps a real (clamped)
+    the ceiling (2415) is below the budget and the host is squeezed flat, while
+    on a 300s poll the ceiling is 3015 and the host keeps a real (clamped)
     overrun. A ceiling hardcoded to DEFAULT_CHECKS_TIMEOUT_SECONDS would give
     the second host the first host's answer.
     """
@@ -213,7 +213,7 @@ def test_the_ceiling_is_computed_from_this_hosts_own_merge_poll():
     ceiling = (
         runner.GITHUB_APP_TOKEN_TTL_SECONDS - 300 - runner.AUTHORING_TTL_SAFETY_SECONDS
     )
-    assert ceiling == 3180
+    assert ceiling == 3015
     # The ratio product (3219) is above the ceiling, so the clamp is what answers.
     assert int(2800 * runner.DEFAULT_AUTHORING_HARD_CAP_RATIO) > ceiling
     assert runner.resolve_authoring_hard_cap(fast_poll, 2800) == ceiling
@@ -236,7 +236,7 @@ def test_a_manual_host_is_still_bounded_by_the_token():
         "run": {"authoring_hard_cap_seconds": 5000},
     }
     expected = runner.GITHUB_APP_TOKEN_TTL_SECONDS - runner.AUTHORING_TTL_SAFETY_SECONDS
-    assert expected == 3480
+    assert expected == 3315
     assert runner.resolve_authoring_hard_cap(manual_big, 2700) == expected
 
 
@@ -244,9 +244,17 @@ def test_a_malformed_merge_block_is_charged_the_poll_it_will_run():
     """`merge: nonsense` resolves to the auto default, so it pays for the poll.
 
     ``resolve_merge_settings`` treats a non-dict block as auto (default-ON), and
-    the ceiling has to agree with it — reading a malformed block as "not auto"
+    the ceiling has to agree with it: reading a malformed block as "not auto"
     would hand the host the manual ceiling while it goes on running the poll,
-    which is the one direction of this arithmetic that outlives the token.
+    the one direction of this arithmetic that outlives the token.
+
+    Defence in depth, not a live hazard. ``merge`` is
+    ``{"type": "object", "additionalProperties": false}`` in
+    ``templates/config.schema.json`` and every resolver runs after
+    ``load_config_validated``, so a host that writes ``merge: nonsense`` exits 2
+    at load and never reaches here. What this pins is the agreement between the
+    two functions for the callers that bypass the schema — this suite, and any
+    future one — so a refactor cannot make them disagree unnoticed.
     """
     reasons: list[str] = []
     assert (
@@ -270,7 +278,7 @@ def test_a_malformed_merge_block_is_charged_the_poll_it_will_run():
 def test_a_ceiling_exactly_at_the_budget_squeezes():
     """The `<=` in the squeeze test, pinned at the value that distinguishes it.
 
-    A 1380s poll puts the ceiling at exactly 2100 for a 2100s host. Equal is a
+    A 1215s poll puts the ceiling at exactly 2100 for a 2100s host. Equal is a
     squeeze: the cap would be held at the budget either way, but a `<` here
     would take the ``min(cap, ceiling)`` path instead and return the same 2100
     with NO reason attached — the silent version of the degradation, which is
@@ -279,7 +287,7 @@ def test_a_ceiling_exactly_at_the_budget_squeezes():
     poll = (
         runner.GITHUB_APP_TOKEN_TTL_SECONDS - runner.AUTHORING_TTL_SAFETY_SECONDS - 2100
     )
-    assert poll == 1380
+    assert poll == 1215
     reasons: list[str] = []
     cap = runner.resolve_authoring_hard_cap(
         {"merge": {"checks_timeout_seconds": poll}}, 2100, out_reasons=reasons
@@ -298,7 +306,7 @@ def test_a_ceiling_one_second_above_the_budget_does_not_squeeze():
     poll = (
         runner.GITHUB_APP_TOKEN_TTL_SECONDS - runner.AUTHORING_TTL_SAFETY_SECONDS - 2101
     )
-    assert poll == 1379
+    assert poll == 1214
     reasons: list[str] = []
     cap = runner.resolve_authoring_hard_cap(
         {"merge": {"checks_timeout_seconds": poll}}, 2100, out_reasons=reasons
@@ -371,12 +379,19 @@ def test_every_run_resolver_survives_a_malformed_run_block(malformed):
     """One accessor, one behaviour: a non-dict `run:` resolves to defaults.
 
     ``resolve_time_budget`` used ``config.get("run") or {}``, which is a dict
-    only by luck: any truthy non-mapping reached ``.get`` and raised
-    AttributeError out of the resolver — uncaught, before the notifier, so the
-    nightly died with a traceback and no digest. Its two siblings already
-    treated the same block as absent. The extracted ``_run_cfg`` makes all
-    three agree; this pins the agreement rather than the extraction, so an
-    inlining later cannot regress one of them alone.
+    only by luck: any truthy non-mapping reaches ``.get`` and raises
+    AttributeError out of the resolver, while its two siblings already treated
+    the same block as absent. The extracted ``_run_cfg`` makes all three agree;
+    this pins the agreement rather than the extraction, so an inlining later
+    cannot regress one of them alone.
+
+    Defence in depth, not a live hazard: ``run`` is
+    ``{"type": "object", "additionalProperties": false}`` in
+    ``templates/config.schema.json`` and all three resolvers run after
+    ``load_config_validated``, so a host that writes ``run: nonsense`` exits 2 at
+    load and never reaches a resolver. The callers that can reach it with a raw
+    dict are unit tests — including every other test in this module — which is
+    reason enough for the three to behave the same.
     """
     cfg = {"run": malformed}
     assert runner.resolve_time_budget(cfg, None) == runner.DEFAULT_TIME_BUDGET_SECONDS

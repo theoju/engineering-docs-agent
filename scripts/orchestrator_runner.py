@@ -339,14 +339,20 @@ GITHUB_APP_TOKEN_TTL_SECONDS = 3600
 # create/append, and the notifier dispatch.
 #
 # Chosen deliberately, and it is a tail reserve rather than a safety factor,
-# because the ceiling it trims is already binding on a default-budget host.
-# 120s is the tail the dogfood workflow's own timeout arithmetic budgets
-# (`.github/workflows/docs-agent-nightly.yml`: "the post-deadline tail ...
-# ~5m" covers the batch too), and it is the largest value that still leaves a
-# 2100s host its full 1.15 overrun: 2100 * 1.15 = 2415 <= 3600 - 900 - 120.
-# Larger, and the two hosts in this repo's orbit would lose overrun they
-# demonstrably have room for; smaller, and the push/PR/notify tail is unfunded.
-AUTHORING_TTL_SAFETY_SECONDS = 120
+# because the ceiling it trims is already binding on a default-budget host. It
+# has more to cover than the name suggests: the cut test is evaluated at the TOP
+# of each authoring iteration, BEFORE that iteration dispatches, so the last
+# admitted batch runs entirely past `authoring_hard_deadline`. The reserve has to
+# absorb a whole page-author dispatch on top of the site generators, the push and
+# the PR create.
+#
+# The criterion is maximality under the one constraint that binds: 285 is the
+# LARGEST value that still leaves a 2100s host its full 1.15 overrun, since
+# 2100 * 1.15 = 2415 <= 3600 - 900 - S solves to S <= 285. Larger, and the two
+# hosts in this repo's orbit lose overrun they demonstrably have room for.
+# Smaller buys nothing — no host in this repo's orbit gets a larger cap out of
+# it — while leaving the tail funded for less work than it actually does.
+AUTHORING_TTL_SAFETY_SECONDS = 285
 
 DEFAULT_MERGE_POLICY = "auto"
 DEFAULT_CHECKS_GRACE_SECONDS = 120
@@ -386,9 +392,11 @@ def _run_cfg(config: dict) -> dict:
 
     CCE-152: one accessor for all three `run.*` resolvers. `resolve_time_budget`
     used `config.get("run") or {}`, which raises AttributeError on
-    `run: "nonsense"` and kills the process, while its two siblings resolved the
-    same malformed block to defaults. The resolvers are also called with RAW
-    dicts by their unit tests, so the schema cannot be relied on here.
+    `run: "nonsense"`, while its two siblings resolved the same malformed block
+    to defaults. The schema (`run` is `type: object`) rejects such a block at
+    `load_config_validated`, so no host reaches a resolver with one — this is the
+    inner layer, and it exists because the resolvers are also called with RAW
+    dicts by their unit tests, where the schema is not in the path at all.
     """
     run_cfg = config.get("run")
     return run_cfg if isinstance(run_cfg, dict) else {}
@@ -470,6 +478,14 @@ def resolve_authoring_hard_cap(
     a typo, correctable at the source. A TTL squeeze is arithmetic on a token
     nobody in this process controls, and refusing to run is strictly worse than
     running with the old cut behaviour.
+
+    **The third state is an explicit override the clamp narrows** — legal (it is
+    above the budget), not squeezed (the host keeps real overrun), but smaller
+    than what the operator wrote. It is neither refused nor degraded, so it is
+    reported: an `authoring_hard_cap_clamped` advisory naming the configured
+    value, the ceiling, and the poll term that produced it. The number the
+    operator reads back in the digest is then the one the run used, which is the
+    whole reason the squeeze is loud too.
     """
     run_cfg = _run_cfg(config)
     val = run_cfg.get("authoring_hard_cap_seconds")
@@ -483,7 +499,15 @@ def resolve_authoring_hard_cap(
                 f"page authoring mid-PR-group and blocks the baseline advance"
             )
     else:
+        # `int()` floors, and `int(budget * 1.15) == budget` for every budget in
+        # 1..6 — the computed path would land on exactly the collapsed state
+        # (`cap == budget`) the explicit path above refuses. Only reachable from
+        # small test fixtures, never from a real host, but the two paths must not
+        # disagree about whether that state is legal. `budget <= 0` is the
+        # unlimited host: no deadline, so no cap to raise off it.
         cap = int(budget * DEFAULT_AUTHORING_HARD_CAP_RATIO)
+        if budget > 0:
+            cap = max(cap, budget + 1)
 
     merge_settings = resolve_merge_settings(config)
     # Only an auto-merge host runs the checks poll; subtracting it from a
@@ -507,6 +531,22 @@ def resolve_authoring_hard_cap(
                 f"run.time_budget_seconds or merge.checks_timeout_seconds."
             )
         return budget
+    if val is not None and cap > ceiling and out_reasons is not None:
+        # The third state, and the only one that was silent. A squeeze is loud
+        # and a rejection aborts; an explicit override narrowed by the TTL used
+        # to return a number the operator never wrote with nothing said about it,
+        # which reads as "my config was ignored". Advisory rather than blocking:
+        # like the squeeze it describes the host's configuration, not this run's
+        # work, and the run itself is correctly bounded.
+        out_reasons.append(
+            f"authoring_hard_cap_clamped: run.authoring_hard_cap_seconds "
+            f"({cap}s) is above the {ceiling}s the GitHub App token's "
+            f"{GITHUB_APP_TOKEN_TTL_SECONDS}s TTL leaves once the merge poll "
+            f"({poll}s) and the {AUTHORING_TTL_SAFETY_SECONDS}s post-run tail "
+            f"are held back, so the authoring hard cap is {ceiling}s for this "
+            f"run. Lower run.authoring_hard_cap_seconds to the value you will "
+            f"actually get, or lower merge.checks_timeout_seconds to earn more."
+        )
     return min(cap, ceiling)
 
 
@@ -1645,12 +1685,14 @@ def run(
         emit_log(f"config invalid: {e}")
         return 2
     clock = now_monotonic or time.monotonic
-    # CCE-152: both resolvers can reject the config (an out-of-range hard cap),
-    # so they run inside the same guard as the load above. Outside it a
-    # ConfigError would escape run() entirely — main() has no handler — and kill
-    # the process before the notifier dispatch at the end of run(), which is the
-    # one failure shape strictly worse than every alternative: no digest, no
-    # partial reasons, no alarm.
+    # CCE-152: `resolve_authoring_hard_cap` can reject the config (an
+    # out-of-range hard cap), so it runs inside the same guard as the load above
+    # and fails the run on the same terms as the two config rejections before it:
+    # exit 2 with the reason on stderr. Outside the guard a ConfigError would
+    # escape run() entirely — main() has no handler — and the operator would get
+    # an unhandled traceback instead. Neither path notifies: the notifier
+    # dispatch is at the very end of run(), far below this return, so a config
+    # rejection here is silent to the digest either way.
     hard_cap_reasons: list[str] = []
     try:
         budget = resolve_time_budget(config, time_budget_seconds)
@@ -1988,21 +2030,37 @@ def run(
                 )
                 _at_boundary = _owner != _prev_owner
                 if _now > deadline and (_at_boundary or _past_hard):
-                    # Two reasons, one emission. `merge_veto_reason` and the
-                    # digest key on the shared `time_budget_exceeded: authored
-                    # i/N page batches ` prefix; only the parenthetical and the
-                    # trailing clause distinguish a boundary deferral from a
-                    # hard-cap cut. The hard-cap wording is bounded and honest
-                    # about the cost — that run does not earn an advance, the
-                    # same standstill as before CCE-152, never worse, and it
-                    # keeps the run inside its token.
+                    # Two reasons, one emission. Both are operator- and
+                    # digest-facing prose with no structural consumer — nothing
+                    # parses the `time_budget_exceeded: ` prefix
+                    # (`_MERGE_VETO_REASON_PREFIXES` keys on
+                    # `app_token_unavailable` only) — so the shared prefix is
+                    # kept stable for greppability across historical runs rather
+                    # than for a parser. Only the parenthetical and the trailing
+                    # clause distinguish a boundary deferral from a hard-cap cut.
+                    # The hard-cap wording is bounded and honest about the cost —
+                    # that run does not earn an advance, the same standstill as
+                    # before CCE-152, never worse, and it keeps the run inside
+                    # its token.
                     if _past_hard and not _at_boundary:
-                        _cut_detail = (
-                            f"(hard cap {authoring_hard_cap}s over budget "
-                            f"{budget}s); cut inside PR #{_owner}, whose pages "
-                            f"are now incomplete, so the baseline cannot "
-                            f"advance to it"
-                        )
+                        if authoring_hard_cap == budget:
+                            # A TTL-squeezed host (the stock default is one):
+                            # the cap was held AT the budget, so "hard cap 2700s
+                            # over budget 2700s" would read as a contradiction
+                            # and hide the reason the overrun is missing.
+                            _cut_detail = (
+                                f"(hard cap held at budget {budget}s by the "
+                                f"App-token TTL); cut inside PR #{_owner}, "
+                                f"whose pages are now incomplete, so the "
+                                f"baseline cannot advance to it"
+                            )
+                        else:
+                            _cut_detail = (
+                                f"(hard cap {authoring_hard_cap}s over budget "
+                                f"{budget}s); cut inside PR #{_owner}, whose "
+                                f"pages are now incomplete, so the baseline "
+                                f"cannot advance to it"
+                            )
                     else:
                         _cut_detail = f"(budget {budget}s); deferring the rest"
                     add_partial(

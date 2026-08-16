@@ -3,8 +3,9 @@
 still leaves a COMPLETE prefix of PRs and the baseline can advance.
 
 The bug this pins is a starvation, not a mis-ordering. ``per_target`` is a
-dict built by iterating ``prs`` oldest-first (orchestrator_runner.py:1686),
-and ``setdefault`` never re-positions an existing key, so the batch list is
+dict built by iterating the ``_order_prs_oldest_first`` output and calling
+``setdefault`` per doc target (``scripts/orchestrator_runner.py:run``), and
+``setdefault`` never re-positions an existing key, so the batch list is
 already grouped by the oldest PR that references each page — group(PR1)
 first, then group(PR2), and so on.
 
@@ -25,9 +26,12 @@ the whole window is one group and a boundary can never occur.
 
 from __future__ import annotations
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
@@ -76,28 +80,37 @@ def _pr(n: int, sha: str) -> dict:
     }
 
 
-def _fakes(dst: Path, prs: list[dict], targets_by_pr: dict[int, list[str]]) -> Path:
+def _fakes(dst: Path, prs: list[dict], targets_by_pr: dict[int, list]) -> Path:
     """Copy fakes_multi, override the collector's PRs, and give each PR its OWN
     summarizer fixture so the PRs emit different doc targets.
 
-    ``targets_by_pr`` maps a PR number to the page hints it should claim. Every
-    hint becomes one (lens, page_hint) batch; a hint listed under two PRs is one
-    shared batch owned by the older of them.
+    ``targets_by_pr`` maps a PR number to the page hints it should claim, each
+    either a bare hint string (lens ``core``) or an explicit ``(lens, hint)``
+    pair. Every entry becomes one (lens, page_hint) batch; a hint listed under
+    two PRs is one shared batch owned by the older of them.
+
+    ``dst`` deliberately sits OUTSIDE ``tmp_path``: ``tmp_path`` is the host repo
+    under test, and ``_stage_docs_run_changes`` runs ``git add -A .`` on it, so
+    fixtures placed inside would be committed onto the docs-agent branch. The
+    sibling-of-tmp_path placement is the convention across this package
+    (test_authoring_truncation_advance.py, test_deferral_skip.py,
+    test_blind_run_interlocks.py) and still lands under pytest's session
+    basetemp, which pytest garbage-collects.
     """
-    dst.mkdir(parents=True, exist_ok=True)
-    for f in FAKES_MULTI.iterdir():
-        (dst / f.name).write_text(f.read_text())
+    # copytree rather than a per-file write_text loop: the loop assumed
+    # fakes_multi stays flat and UTF-8, and would raise IsADirectoryError on the
+    # first subdirectory added to it.
+    shutil.copytree(FAKES_MULTI, dst, dirs_exist_ok=True)
     sc = json.loads((FAKES_MULTI / "fake_source_collector.json").read_text())
     sc["prs"] = prs
     (dst / "fake_source_collector.json").write_text(json.dumps(sc))
     base_summary = json.loads((FAKES_MULTI / "fake_pr_summarizer.json").read_text())
     for number, hints in targets_by_pr.items():
-        summ = {
-            **base_summary,
-            "doc_targets": [
-                {"lens": "core", "action": "create", "page_hint": h} for h in hints
-            ],
-        }
+        targets = []
+        for h in hints:
+            lens, hint = ("core", h) if isinstance(h, str) else h
+            targets.append({"lens": lens, "action": "create", "page_hint": hint})
+        summ = {**base_summary, "doc_targets": targets}
         (dst / f"fake_pr_summarizer__pr{number}.json").write_text(json.dumps(summ))
     return dst
 
@@ -223,12 +236,7 @@ def test_hard_cap_cuts_inside_a_group_and_says_the_baseline_cannot_advance(
 
 
 def test_hard_cap_resolves_from_config_and_never_undercuts_the_soft_budget():
-    """Unit-level contract for the new resolver.
-
-    The clamp is the load-bearing part: a cap below the soft budget would cut
-    the loop BEFORE the deadline it exists to extend, quietly re-introducing
-    the batch-boundary starvation this ticket fixes.
-    """
+    """Unit-level contract for the resolver."""
     assert runner.resolve_authoring_hard_cap({}, 2100) == int(
         2100 * runner.DEFAULT_AUTHORING_HARD_CAP_RATIO
     )
@@ -238,14 +246,274 @@ def test_hard_cap_resolves_from_config_and_never_undercuts_the_soft_budget():
         )
         == 2400
     )
-    # Below the soft budget → clamped up to it.
-    assert (
-        runner.resolve_authoring_hard_cap(
-            {"run": {"authoring_hard_cap_seconds": 60}}, 2100
-        )
-        == 2100
-    )
     # A malformed run block resolves like an absent one.
     assert runner.resolve_authoring_hard_cap({"run": "nonsense"}, 100) == int(
         100 * runner.DEFAULT_AUTHORING_HARD_CAP_RATIO
     )
+
+
+@pytest.mark.parametrize("cap", [60, 2100])
+def test_hard_cap_at_or_below_the_budget_is_rejected_not_clamped_up(cap):
+    """An explicit override that does not exceed the budget is a config error.
+
+    The earlier resolver returned ``max(cap, budget)``, which turned both of
+    these into ``cap == budget``. That is not a harmless normalisation: it
+    collapses ``authoring_hard_deadline`` onto ``deadline``, which makes the
+    ``_past_hard`` test equivalent to ``now > deadline`` and restores the
+    arbitrary mid-PR-group cut CCE-152 exists to remove — silently, in the exact
+    place the operator was trying to configure it away.
+
+    ``cap == budget`` is included on purpose: equal is as broken as under.
+    """
+    with pytest.raises(runner.ConfigError) as excinfo:
+        runner.resolve_authoring_hard_cap(
+            {"run": {"authoring_hard_cap_seconds": cap}}, 2100
+        )
+    assert "authoring_hard_cap_seconds" in str(excinfo.value)
+
+
+def test_hard_cap_is_clamped_against_the_app_token_ttl():
+    """The structural half of the bound (the ratio alone is not one).
+
+    ``budget * 1.15`` is a ratio, not a ceiling. The binding ceiling is the
+    GitHub App installation token, which no ``timeout-minutes`` extends, minus
+    the merge poll the run may still spend and the post-run tail.
+    """
+    ceiling = (
+        runner.GITHUB_APP_TOKEN_TTL_SECONDS
+        - runner.DEFAULT_CHECKS_TIMEOUT_SECONDS
+        - runner.AUTHORING_TTL_SAFETY_SECONDS
+    )
+    # 2400 * 1.15 = 2760, which would put budget + poll past the token.
+    assert int(2400 * runner.DEFAULT_AUTHORING_HARD_CAP_RATIO) > ceiling
+    assert runner.resolve_authoring_hard_cap({}, 2400) == ceiling
+    # An explicit override is clamped by the same ceiling — the token does not
+    # care where the number came from.
+    assert (
+        runner.resolve_authoring_hard_cap(
+            {"run": {"authoring_hard_cap_seconds": 3400}}, 2400
+        )
+        == ceiling
+    )
+    # The two hosts in this repo's orbit sit under it and keep their full
+    # overrun, which is what fixes AUTHORING_TTL_SAFETY_SECONDS at 120.
+    assert runner.resolve_authoring_hard_cap({}, 2100) == 2415
+    assert 2415 <= ceiling
+
+
+def test_a_manual_merge_host_is_not_charged_for_a_poll_it_never_runs():
+    """The checks poll is subtracted only from an auto-merge host's ceiling."""
+    manual = {"merge": {"policy": "manual"}}
+    ceiling = runner.GITHUB_APP_TOKEN_TTL_SECONDS - runner.AUTHORING_TTL_SAFETY_SECONDS
+    assert runner.resolve_authoring_hard_cap(manual, 2700) == int(
+        2700 * runner.DEFAULT_AUTHORING_HARD_CAP_RATIO
+    )
+    assert int(2700 * runner.DEFAULT_AUTHORING_HARD_CAP_RATIO) <= ceiling
+    # Same budget on the default auto policy has no headroom left at all.
+    reasons: list[str] = []
+    assert runner.resolve_authoring_hard_cap({}, 2700, out_reasons=reasons) == 2700
+    assert reasons
+
+
+def test_a_ttl_squeeze_holds_the_cap_at_budget_and_says_so_loudly():
+    """The edge case, and it is the DEFAULT one.
+
+    DEFAULT_TIME_BUDGET_SECONDS (2700) plus the default 900s merge poll is the
+    entire 3600s token with nothing left for the tail, so a host on defaults has
+    no overrun to grant. That is not a config error and must not abort — the
+    budget may be perfectly serviceable, it just leaves no room on top. The cap
+    is held at the budget (behaviour degrades to pre-CCE-152: cuts may land
+    mid-group and such a run earns no advance) and the squeeze is reported.
+    """
+    reasons: list[str] = []
+    cap = runner.resolve_authoring_hard_cap(
+        {}, runner.DEFAULT_TIME_BUDGET_SECONDS, out_reasons=reasons
+    )
+    assert cap == runner.DEFAULT_TIME_BUDGET_SECONDS
+    assert len(reasons) == 1
+    assert reasons[0].startswith("authoring_hard_cap_squeezed:")
+    # It has to name the squeeze concretely enough to act on.
+    assert "run.time_budget_seconds" in reasons[0]
+    assert "merge.checks_timeout_seconds" in reasons[0]
+    # A correctly-sized host stays silent.
+    quiet: list[str] = []
+    assert runner.resolve_authoring_hard_cap({}, 2100, out_reasons=quiet) == 2415
+    assert quiet == []
+
+
+def test_a_squeezed_run_records_an_advisory_reason_without_going_partial(
+    tmp_path, init_host, read_current_run, base_config_yaml
+):
+    """The squeeze reaches the digest but must not flip ``partial``.
+
+    CCE-140 gates auto-merge on ``partial and not advance_cursor_backed``, and a
+    non-truncated run is never cursor-backed. A blocking reason here would
+    therefore cost every default-budget host auto-merge permanently, for a
+    condition that predates this ticket — the design's "degrades to pre-CCE-152,
+    never worse" only holds if the reason is advisory.
+    """
+    squeezed = base_config_yaml.replace(
+        "time_budget_seconds: 2100",
+        f"time_budget_seconds: {runner.DEFAULT_TIME_BUDGET_SECONDS}",
+    )
+    repo = tmp_path
+    state_path = init_host(
+        {"version": "1", "last_successful_run": {"head_sha": "s"}},
+        config_yaml=squeezed,
+    )
+    _base, (c1, _c2) = _seed_window(repo, state_path, 2)
+    fakes = _fakes(
+        tmp_path.parent / f"cce152_squeeze_{tmp_path.name}",
+        [_pr(1, c1)],
+        {1: ["connectors/one_a.md"]},
+    )
+    # No time_budget_seconds override: the run resolves the squeezed budget
+    # from config, exactly as a default-configured host does.
+    rc = runner.run(repo, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0
+    cr = read_current_run(state_path)
+    assert any(
+        r.startswith("authoring_hard_cap_squeezed:") for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+    # Nothing else went wrong, so the squeeze is the only thing that could have
+    # flipped `partial` — and it must not have.
+    assert cr["partial"] is False, cr
+
+
+def test_a_hard_cap_below_the_budget_fails_the_run_cleanly_not_with_a_traceback(
+    tmp_path, init_host, base_config_yaml
+):
+    """The rejection above must not escape ``run()``.
+
+    ``main()`` has no ConfigError handler, so an uncaught raise from the
+    resolver would terminate the process before ``run()``'s notifier dispatch —
+    the one failure shape the README names as strictly worse than every
+    alternative: no digest, no partial reasons, no alarm. Exit 2 with a logged
+    reason is the contract every other config rejection already meets.
+    """
+    bad = base_config_yaml.replace(
+        "time_budget_seconds: 2100",
+        "time_budget_seconds: 2100\n  authoring_hard_cap_seconds: 1800",
+    )
+    init_host(
+        {"version": "1", "last_successful_run": {"head_sha": "s"}}, config_yaml=bad
+    )
+    assert runner.run(tmp_path, dry_run_dir=FAKES_MULTI, no_pr=True) == 2
+
+
+# PR #1's first target names a lens the host does not define, so its batch hits
+# the `unknown_lens` continue path before anything is authored. PR #1's second
+# target is a normal page, and PR #2's is the boundary after it.
+TARGETS_WITH_A_SKIPPED_BATCH = {
+    1: [("ghost", "connectors/ghost.md"), "connectors/one_b.md"],
+    2: ["connectors/two.md"],
+}
+
+
+def test_a_skipped_batch_still_advances_the_boundary_owner(
+    tmp_path, init_host, read_current_run
+):
+    """``_prev_owner`` must advance on the `continue` paths, not only on the
+    paths that author.
+
+    The loop's `unknown_lens` and `unsafe_page_path` branches `continue` before
+    the end of the body, so moving ``_prev_owner = _owner`` down to the end —
+    which reads like ordinary tidying, and which the comment above it warns
+    against — leaves ``_prev_owner`` stranded on the previous PR. The next batch
+    then compares its owner against a stale value and reports a PR boundary that
+    is not there, cutting the run inside group(PR #1) at the first
+    past-the-deadline gate.
+
+    Nothing else in this package covers it: ``TARGETS_BY_PR`` only yields
+    batches that resolve and author cleanly, so every existing test is green
+    under that mutation.
+
+    Clock: deadline=100, and this window is TWO PRs, so admission spends only
+    one value (10). Batch 0 is the ghost-lens batch (unconditional, i=0,
+    skipped). Batch 1 is ``one_b.md`` at 105 — past the soft deadline, under the
+    hard cap, still inside group(PR #1), so the run must keep going. Batch 2 is
+    the real boundary at 106.
+    """
+    repo = tmp_path
+    state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
+    base, (c1, c2, _c3) = _seed_window(repo, state_path, 3)
+    fakes = _fakes(
+        tmp_path.parent / f"cce152_skipbatch_{tmp_path.name}",
+        [_pr(1, c1), _pr(2, c2)],
+        TARGETS_WITH_A_SKIPPED_BATCH,
+    )
+    rc = runner.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=_fake_clock([0, 10, 105, 106]),
+    )
+    assert rc == 0
+    cr = read_current_run(state_path)
+    # Precondition: the skip really happened, and it happened at batch 0.
+    assert any("unknown_lens: ghost" in r for r in cr["partial_reasons"]), cr[
+        "partial_reasons"
+    ]
+    core = repo / "docs" / "site-src" / "core" / "connectors"
+    # THE assertion: the batch after the skip is still recognised as part of
+    # group(PR #1), so the past-deadline gate does not cut there.
+    assert (core / "one_b.md").exists(), cr["partial_reasons"]
+    # And the cut still lands on the real boundary, no further.
+    assert not (core / "two.md").exists()
+
+
+def test_past_the_hard_cap_at_a_boundary_still_defers_rather_than_cutting_in(
+    tmp_path, init_host, read_current_run
+):
+    """``_past_hard`` alone must not pick the hard-cap reason.
+
+    The two states are not the same run. Past the hard cap AND mid-group is a
+    forced cut that costs the advance. Past the hard cap AND standing on a PR
+    boundary is an ordinary deferral: the group behind the cut is complete, the
+    cursor is non-empty, and the baseline moves. Simplifying
+    ``if _past_hard and not _at_boundary`` to ``if _past_hard`` reads as
+    redundancy removal and converts every advanceable late run into one that
+    reports it cannot advance.
+
+    Clock: deadline=100, hard cap 115. Batch 1's gate sees 110 — past the soft
+    deadline, under the cap, mid-group — so no cut. Batch 2's gate sees 900,
+    past BOTH, and it is the PR1 -> PR2 boundary.
+    """
+    repo = tmp_path
+    state_path = init_host({"version": "1", "last_successful_run": {"head_sha": "s"}})
+    base, (c1, c2, c3, c4) = _seed_window(repo, state_path, 4)
+    fakes = _fakes(
+        tmp_path.parent / f"cce152_hardboundary_{tmp_path.name}",
+        [_pr(1, c1), _pr(2, c2), _pr(3, c3)],
+        TARGETS_BY_PR,
+    )
+    rc = runner.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        time_budget_seconds=100,
+        now_monotonic=_fake_clock([0, 10, 20, 110, 900]),
+    )
+    assert rc == 0
+    core = repo / "docs" / "site-src" / "core" / "connectors"
+    assert (core / "one_a.md").exists()
+    assert (core / "one_b.md").exists()
+    assert not (core / "two.md").exists()
+    cr = read_current_run(state_path)
+    # THE assertion: the deferral vocabulary, not the hard-cap vocabulary.
+    assert any("deferring the rest" in r for r in cr["partial_reasons"]), cr[
+        "partial_reasons"
+    ]
+    assert not any("hard cap" in r for r in cr["partial_reasons"]), cr[
+        "partial_reasons"
+    ]
+    # ...and the run really does advance, which is what the wording claims.
+    assert not any(
+        "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+    written = json.loads(state_path.read_text())
+    assert written["last_successful_run"]["head_sha"] == c1, written[
+        "last_successful_run"
+    ]
+    assert written["last_successful_run"]["head_sha"] != base

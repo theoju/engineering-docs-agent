@@ -105,8 +105,20 @@ def test_orchestrator_has_the_expected_call_site_population():
         f"expected 39 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
-    # 38 -> 39: CCE-152 split the authoring truncation into two reasons — a
-    # deferral to the next PR boundary, and a hard-cap cut inside a PR's group.
-    # Both are degraded=True. The run CONSUMED PRs whose pages it could not
-    # finish writing, which is the blind-to-its-own-input case the sibling
-    # truncation site already records, not a self-healing skip.
+    # 38 -> 39: CCE-152 added one site on net. The authoring truncation gained a
+    # second reason — a deferral to the next PR boundary versus a hard-cap cut
+    # inside a PR's group — but they share one `add_partial`, since only the
+    # parenthetical and the trailing clause differ. The site that actually
+    # arrived is `authoring_hard_cap_squeezed` in run(), recorded when the App
+    # token's TTL leaves the host no overrun to grant.
+    #
+    # Classification, per the mapping the sibling test's assertion message
+    # states: the truncation site is degraded=True because the run HELD BACK
+    # the page batches it could not reach — they stay owed, `held_back` names
+    # them, and the next run re-authors them, which is the self-healing case.
+    # (It is emphatically not the blind case: a run that CONSUMED input it
+    # could not process is one that walked past the work without recording it.)
+    # The squeeze site is info_only=True: it describes the host's configuration
+    # rather than this run's work, and flipping `partial` on it would cost a
+    # default-budget host auto-merge every night via CCE-140's
+    # `partial and not advance_cursor_backed` gate.

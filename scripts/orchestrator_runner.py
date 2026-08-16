@@ -316,9 +316,37 @@ DEFAULT_DEFERRAL_SKIP_THRESHOLD = 3
 # CCE-152: how far past the soft budget the authoring loop may run in order to
 # finish the PR it is in the middle of. 1.15 puts a 2100s host at ~2415s, which
 # still leaves room for the merge poll (`merge.checks_timeout_seconds`, 900s)
-# inside the GitHub App installation token's 1h TTL — the real ceiling on a
-# run, well under the workflow's own `timeout-minutes`.
+# inside the GitHub App installation token's TTL — the real ceiling on a run,
+# well under the workflow's own `timeout-minutes`.
+#
+# The ratio alone is NOT that guarantee, and its earlier wording claimed it was:
+# it holds for a 2100s host (2415 + 900 = 3315 < 3600) and fails outright for
+# the 2700s default (3105 + 900 = 4005 > 3600). `resolve_authoring_hard_cap`
+# clamps the product against GITHUB_APP_TOKEN_TTL_SECONDS so the bound is
+# computed rather than asserted.
 DEFAULT_AUTHORING_HARD_CAP_RATIO = 1.15
+
+# CCE-152: the GitHub App installation token the nightly workflow mints mid-job
+# lives one hour, and no `timeout-minutes` extends it — it, not the job timeout,
+# is the binding ceiling on a run. This existed only as prose (this module's
+# comments, `templates/workflow-run.yml`, the README) until the hard cap needed
+# to compute against it.
+GITHUB_APP_TOKEN_TTL_SECONDS = 3600
+
+# CCE-152: seconds held back inside the TTL for the work that happens after the
+# authoring loop's last dispatch returns and after the merge poll settles — the
+# in-flight page batch draining, the site generators, `git push`, the PR
+# create/append, and the notifier dispatch.
+#
+# Chosen deliberately, and it is a tail reserve rather than a safety factor,
+# because the ceiling it trims is already binding on a default-budget host.
+# 120s is the tail the dogfood workflow's own timeout arithmetic budgets
+# (`.github/workflows/docs-agent-nightly.yml`: "the post-deadline tail ...
+# ~5m" covers the batch too), and it is the largest value that still leaves a
+# 2100s host its full 1.15 overrun: 2100 * 1.15 = 2415 <= 3600 - 900 - 120.
+# Larger, and the two hosts in this repo's orbit would lose overrun they
+# demonstrably have room for; smaller, and the push/PR/notify tail is unfunded.
+AUTHORING_TTL_SAFETY_SECONDS = 120
 
 DEFAULT_MERGE_POLICY = "auto"
 DEFAULT_CHECKS_GRACE_SECONDS = 120
@@ -353,6 +381,19 @@ def resolve_merge_settings(config: dict) -> dict:
     }
 
 
+def _run_cfg(config: dict) -> dict:
+    """The `run:` block as a dict — `{}` when absent, null, or malformed.
+
+    CCE-152: one accessor for all three `run.*` resolvers. `resolve_time_budget`
+    used `config.get("run") or {}`, which raises AttributeError on
+    `run: "nonsense"` and kills the process, while its two siblings resolved the
+    same malformed block to defaults. The resolvers are also called with RAW
+    dicts by their unit tests, so the schema cannot be relied on here.
+    """
+    run_cfg = config.get("run")
+    return run_cfg if isinstance(run_cfg, dict) else {}
+
+
 def resolve_time_budget(config: dict, cli_override: int | None) -> int:
     """Resolve the per-run soft time budget in seconds.
 
@@ -362,7 +403,7 @@ def resolve_time_budget(config: dict, cli_override: int | None) -> int:
     """
     if cli_override is not None:
         return cli_override
-    run_cfg = config.get("run") or {}
+    run_cfg = _run_cfg(config)
     val = run_cfg.get("time_budget_seconds")
     if val is None:
         return DEFAULT_TIME_BUDGET_SECONDS
@@ -377,38 +418,96 @@ def resolve_deferral_threshold(config: dict) -> int:
     as `resolve_merge_settings`, so an existing host gains the skip hatch with
     no config edit. A value <= 0 disables skipping.
     """
-    run_cfg = config.get("run")
-    if not isinstance(run_cfg, dict):
-        run_cfg = {}
+    run_cfg = _run_cfg(config)
     val = run_cfg.get("deferral_skip_threshold")
     if val is None:
         return DEFAULT_DEFERRAL_SKIP_THRESHOLD
     return int(val)
 
 
-def resolve_authoring_hard_cap(config: dict, budget: int) -> int:
+def resolve_authoring_hard_cap(
+    config: dict, budget: int, *, out_reasons: list[str] | None = None
+) -> int:
     """Resolve the ceiling (seconds) the authoring loop may never cross (CCE-152).
 
     The soft deadline is checked at PR-group boundaries so a run always finishes
     the oldest PR's pages and the cursor can advance. That deferral is unbounded
     on its own — one PR fanning out to twenty pages would hold the run open past
-    the GitHub App installation token's 1h TTL and fail it outright. This cap
-    bounds the overrun: past it the loop cuts wherever it stands, which costs the
-    advance but never costs the run.
+    the GitHub App installation token's TTL and fail it outright. This cap bounds
+    the overrun: past it the loop cuts wherever it stands, which costs the advance
+    but never costs the run.
 
     Precedence: `run.authoring_hard_cap_seconds` > budget *
-    DEFAULT_AUTHORING_HARD_CAP_RATIO. Never below `budget` — a cap under the soft
-    deadline would cut BEFORE the deadline it exists to extend, restoring the
-    batch-boundary starvation CCE-152 fixes.
+    DEFAULT_AUTHORING_HARD_CAP_RATIO, then clamped down against the token TTL.
+
+    **A cap at or below `budget` is rejected, not clamped up.** Equal is as bad as
+    under: it collapses `authoring_hard_deadline` onto `deadline`, which makes
+    the hard test equivalent to `now > deadline` and restores the arbitrary
+    mid-group cut this ticket exists to remove. An operator who writes that has
+    made a typo, and a silent `max(cap, budget)` would hide it behind exactly the
+    starvation they were trying to configure away.
+
+    **The TTL clamp is the structural half.** `budget * ratio` is a ratio, not a
+    bound: at DEFAULT_TIME_BUDGET_SECONDS it yields 3105s, and 3105 plus the 900s
+    merge poll is 4005s against a 3600s token. Post-CCE-140 that poll runs on the
+    common path (a cursor-backed run passes `merge_deadline=None`), so the
+    overrun is reachable rather than theoretical. The ceiling is therefore
+    computed: TTL - the merge poll this host will actually run - the tail
+    reserve. The clamp applies to an explicit override too — the TTL is physics,
+    and it does not care where the number came from.
+
+    **When the ceiling lands at or below `budget`** the host's own budget plus
+    its merge poll already fills the token, so there is no overrun left to grant.
+    That is not a config error and must not abort: the budget itself may be
+    perfectly serviceable, it just leaves no room on top. The cap is held at
+    `budget` and the squeeze is appended to `out_reasons` for the caller to
+    record. Behaviour degrades to pre-CCE-152 — cuts may again land mid-group and
+    such a run earns no advance — which is never worse than before this ticket,
+    and never silent.
+
+    Note the asymmetry with the rejection above: both states are
+    `hard_deadline == deadline`, and only one is refused. An operator override is
+    a typo, correctable at the source. A TTL squeeze is arithmetic on a token
+    nobody in this process controls, and refusing to run is strictly worse than
+    running with the old cut behaviour.
     """
-    run_cfg = config.get("run")
-    if not isinstance(run_cfg, dict):
-        run_cfg = {}
+    run_cfg = _run_cfg(config)
     val = run_cfg.get("authoring_hard_cap_seconds")
-    cap = (
-        int(val) if val is not None else int(budget * DEFAULT_AUTHORING_HARD_CAP_RATIO)
+    if val is not None:
+        cap = int(val)
+        if cap <= budget:
+            raise ConfigError(
+                f"run.authoring_hard_cap_seconds ({cap}) must be greater than "
+                f"the soft time budget ({budget}); a hard cap at or below the "
+                f"budget makes the hard deadline the soft deadline, which cuts "
+                f"page authoring mid-PR-group and blocks the baseline advance"
+            )
+    else:
+        cap = int(budget * DEFAULT_AUTHORING_HARD_CAP_RATIO)
+
+    merge_settings = resolve_merge_settings(config)
+    # Only an auto-merge host runs the checks poll; subtracting it from a
+    # `policy: manual` host's ceiling would squeeze it for time it never spends.
+    poll = (
+        int(merge_settings["checks_timeout_seconds"])
+        if merge_settings["policy"] == "auto"
+        else 0
     )
-    return max(cap, budget)
+    ceiling = GITHUB_APP_TOKEN_TTL_SECONDS - poll - AUTHORING_TTL_SAFETY_SECONDS
+    if ceiling <= budget:
+        if out_reasons is not None:
+            out_reasons.append(
+                f"authoring_hard_cap_squeezed: run.time_budget_seconds "
+                f"({budget}s) plus the merge poll ({poll}s) plus the "
+                f"{AUTHORING_TTL_SAFETY_SECONDS}s post-run tail already fills "
+                f"the GitHub App token's {GITHUB_APP_TOKEN_TTL_SECONDS}s TTL, "
+                f"so the authoring hard cap is held at the budget instead of "
+                f"{cap}s. Page authoring can be cut mid-PR-group again and such "
+                f"a run earns no baseline advance. Lower "
+                f"run.time_budget_seconds or merge.checks_timeout_seconds."
+            )
+        return budget
+    return min(cap, ceiling)
 
 
 def _order_prs_oldest_first(
@@ -1546,12 +1645,25 @@ def run(
         emit_log(f"config invalid: {e}")
         return 2
     clock = now_monotonic or time.monotonic
-    budget = resolve_time_budget(config, time_budget_seconds)
+    # CCE-152: both resolvers can reject the config (an out-of-range hard cap),
+    # so they run inside the same guard as the load above. Outside it a
+    # ConfigError would escape run() entirely — main() has no handler — and kill
+    # the process before the notifier dispatch at the end of run(), which is the
+    # one failure shape strictly worse than every alternative: no digest, no
+    # partial reasons, no alarm.
+    hard_cap_reasons: list[str] = []
+    try:
+        budget = resolve_time_budget(config, time_budget_seconds)
+        authoring_hard_cap = resolve_authoring_hard_cap(
+            config, budget, out_reasons=hard_cap_reasons
+        )
+    except ConfigError as e:
+        emit_log(f"config invalid: {e}")
+        return 2
     deadline = clock() + budget if budget > 0 else None
     # CCE-152: derived from `deadline` rather than a second clock() call. The
     # time-budget tests drive a fake clock through a counted value sequence, so
     # an extra call here would shift every gate after it.
-    authoring_hard_cap = resolve_authoring_hard_cap(config, budget)
     authoring_hard_deadline = (
         deadline + (authoring_hard_cap - budget) if deadline is not None else None
     )
@@ -1596,6 +1708,18 @@ def run(
                     add_partial(state, "stale_current_run_cleared", info_only=True)
             except ValueError:
                 pass
+
+    # CCE-152: the hard cap resolved above may have been squeezed flat against
+    # the App token's TTL. Recorded here, not at the resolve call, for the same
+    # reason the CCE-127 block below sits here: `current_run` did not exist yet
+    # at the resolve, and the dict literal above would have overwritten any stub
+    # add_partial created. `info_only` because the squeeze describes the host's
+    # configuration, not this run's work — it costs a run its overrun, so it must
+    # reach the digest, but flipping `partial` on a default-budget host every
+    # night would cost it auto-merge (CCE-140 gates on `partial and not
+    # advance_cursor_backed`) for a condition that predates this ticket.
+    for _r in hard_cap_reasons:
+        add_partial(state, _r, info_only=True)
 
     # CCE-127: the workflow's App-token step runs under continue-on-error, so a
     # failure to mint the installation token no longer kills the job — the run
@@ -1836,7 +1960,12 @@ def run(
             # admission alone happens too early to bound the run (all PRs are
             # admitted minutes in; run 27263616736 then authored straight
             # through the deadline into the workflow's 60-min hard kill).
-            # Same at-least-one-progress guarantee as PR admission (i > 0).
+            # The at-least-one-progress guarantee is no longer PR admission's
+            # per-item `i > 0`: `i > 0` is necessary but not sufficient here,
+            # because the cut must also land on a PR boundary. What this loop
+            # guarantees is at least one COMPLETE PR GROUP — the `i > 0` escape
+            # only keeps the very first batch unconditional so a run that was
+            # already past its deadline on arrival still writes something.
             #
             # CCE-152: WHERE it may cut is the fix. Cutting at an arbitrary
             # batch index leaves the PR whose group was split owing a page, so a
@@ -1859,26 +1988,29 @@ def run(
                 )
                 _at_boundary = _owner != _prev_owner
                 if _now > deadline and (_at_boundary or _past_hard):
+                    # Two reasons, one emission. `merge_veto_reason` and the
+                    # digest key on the shared `time_budget_exceeded: authored
+                    # i/N page batches ` prefix; only the parenthetical and the
+                    # trailing clause distinguish a boundary deferral from a
+                    # hard-cap cut. The hard-cap wording is bounded and honest
+                    # about the cost — that run does not earn an advance, the
+                    # same standstill as before CCE-152, never worse, and it
+                    # keeps the run inside its token.
                     if _past_hard and not _at_boundary:
-                        # Bounded, and honest about the cost: this run does not
-                        # earn an advance. Same standstill as before CCE-152 —
-                        # never worse, and it keeps the run inside its token.
-                        add_partial(
-                            state,
-                            f"time_budget_exceeded: authored {i}/{len(per_target)} "
-                            f"page batches (hard cap {authoring_hard_cap}s over "
-                            f"budget {budget}s); cut inside PR #{_owner}, whose "
-                            f"pages are now incomplete, so the baseline cannot "
-                            f"advance to it",
-                            degraded=True,
+                        _cut_detail = (
+                            f"(hard cap {authoring_hard_cap}s over budget "
+                            f"{budget}s); cut inside PR #{_owner}, whose pages "
+                            f"are now incomplete, so the baseline cannot "
+                            f"advance to it"
                         )
                     else:
-                        add_partial(
-                            state,
-                            f"time_budget_exceeded: authored {i}/{len(per_target)} "
-                            f"page batches (budget {budget}s); deferring the rest",
-                            degraded=True,
-                        )
+                        _cut_detail = f"(budget {budget}s); deferring the rest"
+                    add_partial(
+                        state,
+                        f"time_budget_exceeded: authored {i}/{len(per_target)} "
+                        f"page batches " + _cut_detail,
+                        degraded=True,
+                    )
                     # Track A: an authoring truncation is a truncation. Without
                     # this the advance block below falls through to
                     # current_run.head_sha and the run persists a baseline

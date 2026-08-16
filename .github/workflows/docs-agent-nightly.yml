@@ -53,6 +53,12 @@ jobs:
     # This is headroom, not a target: the binding ceiling is still the App
     # installation token's 1h TTL, minted after setup, which the config's
     # 2100s budget is sized against.
+    #
+    # CCE-152: the authoring term is the hard cap, not the budget — the
+    # authoring loop may run to budget * 1.15 (2415s here) to finish the PR
+    # group it is mid-way through. 2415 + 900 = 3315s leaves ~285s of the hour
+    # for the tail, and `resolve_authoring_hard_cap` clamps the cap against the
+    # TTL so this cannot silently stop holding.
     timeout-minutes: 90
     env:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

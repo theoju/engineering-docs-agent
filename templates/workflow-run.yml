@@ -49,9 +49,20 @@ jobs:
     # therefore SILENT: no digest, no partial reasons, no alarm.
     #
     # Headroom, not a target. The real ceiling is the App installation token's
-    # 1h TTL, minted mid-job, which no job timeout can extend. Size
-    # `run.time_budget_seconds` so that budget + checks_timeout_seconds clears
-    # it — see the plugin README's auto-merge section.
+    # 1h TTL (GITHUB_APP_TOKEN_TTL_SECONDS), minted mid-job, which no job
+    # timeout can extend.
+    #
+    # CCE-152: the authoring term is NOT `run.time_budget_seconds`. The
+    # authoring loop may run to `run.authoring_hard_cap_seconds` — default
+    # budget * 1.15 — to finish the PR group it is mid-way through, because a
+    # mid-group cut leaves that PR owing a page and blocks the baseline
+    # advance. Size for authoring_hard_cap + checks_timeout_seconds + the tail:
+    # at the documented 2100s budget that is 2415 + 900 = 3315s, leaving ~285s
+    # of the hour. The orchestrator enforces this rather than trusting it —
+    # `resolve_authoring_hard_cap` clamps the cap to TTL - checks_timeout - 120s
+    # — so the failure mode is a lost overrun (an advisory
+    # `authoring_hard_cap_squeezed` reason, and mid-group cuts return), not an
+    # expired token. See the plugin README's auto-merge section.
     timeout-minutes: 90
     env:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

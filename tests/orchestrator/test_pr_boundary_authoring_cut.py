@@ -673,6 +673,78 @@ def test_a_configured_hard_cap_loads_and_governs_the_cut(
     ]
 
 
+def test_the_clamped_cap_not_the_raw_ratio_is_what_bounds_the_run(
+    tmp_path, init_host, read_current_run, base_config_yaml
+):
+    """The clamp reaches RUNTIME, not just the resolver's return value.
+
+    Every other test of the clamp asserts what ``resolve_authoring_hard_cap``
+    returns. Nothing asserted that the returned number is the one
+    ``authoring_hard_deadline`` is built from, so replacing
+    ``deadline + (authoring_hard_cap - budget)`` with the unclamped ratio
+    offset ``deadline + int(budget * 0.15)`` left the whole suite green — the
+    run()-level tests all drive their fake clock far past BOTH thresholds and
+    assert only the reason string, never the threshold value.
+
+    This host is chosen so the two diverge. ``time_budget_seconds: 2200``
+    resolves the ratio to ``int(2200 * 1.15) = 2530``, which the App-token
+    ceiling (``3600 - 900 - 285 = 2415``) narrows to 2415 — a real overrun of
+    215s, against the naive ratio's 330s. The gate is then shown a clock value
+    that sits BETWEEN them.
+
+    Clock: deadline 2200, true hard deadline 2415, unclamped-ratio hard
+    deadline 2530. Admission gates at 10 and 20 admit all three PRs. Batch 1's
+    gate sees 2500 — past the soft deadline, past the TRUE hard deadline, and
+    still inside group(PR1), so the real code cuts mid-group with the clamped
+    cap named. Under the unclamped offset 2500 is short of 2530, so the loop
+    would run on to the PR1 -> PR2 boundary, write ``one_b.md`` and report an
+    ordinary boundary deferral instead. Both assertions below fail on it.
+
+    The same divergence exists on the stock 2700 default, where the true
+    overrun is 0s and the ratio offset would hand the run 405s past its token;
+    2200 is the smaller fixture that shows it without a squeeze in the way.
+    """
+    narrowed = base_config_yaml.replace(
+        "time_budget_seconds: 2100", "time_budget_seconds: 2200"
+    )
+    repo = tmp_path
+    state_path = init_host(
+        {"version": "1", "last_successful_run": {"head_sha": "s"}},
+        config_yaml=narrowed,
+    )
+    _base, (c1, c2, c3, _c4) = _seed_window(repo, state_path, 4)
+    fakes = _fakes(
+        tmp_path.parent / f"cce152_clamp_runtime_{tmp_path.name}",
+        [_pr(1, c1), _pr(2, c2), _pr(3, c3)],
+        TARGETS_BY_PR,
+    )
+    # No CLI budget override: the budget, and therefore the cap, come from the
+    # config file exactly as they do on a real host.
+    rc = runner.run(
+        repo,
+        dry_run_dir=fakes,
+        no_pr=True,
+        now_monotonic=_fake_clock([0, 10, 20, 2500]),
+    )
+    assert rc == 0
+    cr = read_current_run(state_path)
+    # Precondition: this host really is on the clamped path — not squeezed, not
+    # an explicit override, and the ceiling really did narrow the ratio.
+    assert any(
+        r.startswith("authoring_hard_cap_clamped:") and "2530s" in r and "2415s" in r
+        for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+    core = repo / "docs" / "site-src" / "core" / "connectors"
+    assert (core / "one_a.md").exists()
+    # THE assertion: 2500 is past the CLAMPED hard deadline, so PR #1's second
+    # page is cut. Under the unclamped ratio offset it would have been written.
+    assert not (core / "one_b.md").exists()
+    cut = [r for r in cr["partial_reasons"] if "page batches" in r]
+    assert len(cut) == 1, cr["partial_reasons"]
+    assert "hard cap 2415s over budget 2200s" in cut[0], cut[0]
+    assert "the baseline cannot advance to it" in cut[0], cut[0]
+
+
 def test_a_hard_cap_below_the_budget_fails_the_run_cleanly_not_with_a_traceback(
     tmp_path, init_host, base_config_yaml, capsys
 ):

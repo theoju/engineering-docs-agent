@@ -9,17 +9,28 @@
 # `merge.checks_timeout_seconds` (default 900s), measured from the merge
 # attempt.
 #
-# At the 2700s default that is 2700 + 900 = 3600s, exactly
-# `.github/workflows/docs-agent-nightly.yml`'s `timeout-minutes: 60` — and the
-# App token minted mid-job carries a 1h TTL besides. The first cursor-backed
-# truncated run would be hard-killed mid-poll, and the kill lands BEFORE the
-# notifier dispatch at the end of run(), so it would fail silently: no digest,
-# no partial reasons, no alarm. Strictly worse than forfeiting the merge,
-# which at least reports that it forfeited.
+# At the 2700s default that is 2700 + 900 = 3600s — the whole of the App
+# token's 1h TTL, with nothing left for the tail. (The job timeout is the
+# slacker bound: `.github/workflows/docs-agent-nightly.yml` carries
+# `timeout-minutes: 90` since CCE-140.) A cursor-backed truncated run that
+# outlives the token degrades honestly, but a run that outlives the JOB is
+# hard-killed mid-poll, BEFORE the notifier dispatch at the end of run(), so it
+# fails silently: no digest, no partial reasons, no alarm. Strictly worse than
+# forfeiting the merge, which at least reports that it forfeited.
 #
-# 2100 + 900 = 3000s leaves ten minutes of headroom. Raising this back toward
-# 2700 requires lowering `merge.checks_timeout_seconds` by as much; the SUM is
-# what has to clear both the job timeout and the token TTL.
+# CCE-152: the authoring term is no longer this budget — the authoring loop may
+# run to `run.authoring_hard_cap_seconds`, defaulting to budget * 1.15, to
+# finish the PR group it is mid-way through. So the sum to size is the HARD CAP
+# plus the poll: 2415 + 900 = 3315s, which leaves ~285s of the hour for the
+# tail (the in-flight page batch, the site generators, the push, the PR create)
+# — not the ten minutes the pre-CCE-152 arithmetic implied.
+#
+# Raising this back toward 2700 no longer merely eats that headroom: the TTL
+# ceiling (3600 - 900 - 285 = 2415) would land at or below the budget, so the
+# cap is squeezed flat onto it, every run records an advisory
+# `authoring_hard_cap_squeezed` reason, and mid-group cuts come back. Lower
+# `merge.checks_timeout_seconds` first if you want the budget back; the cap and
+# the poll together are what have to clear the token.
 run:
   time_budget_seconds: 2100
 

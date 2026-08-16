@@ -59,7 +59,7 @@ jobs:
     # advance. Size for authoring_hard_cap + checks_timeout_seconds + the tail:
     # at the documented 2100s budget that is 2415 + 900 = 3315s, leaving ~285s
     # of the hour. The orchestrator enforces this rather than trusting it —
-    # `resolve_authoring_hard_cap` clamps the cap to TTL - checks_timeout - 120s
+    # `resolve_authoring_hard_cap` clamps the cap to TTL - checks_timeout - 285s
     # — so the failure mode is a lost overrun (an advisory
     # `authoring_hard_cap_squeezed` reason, and mid-group cuts return), not an
     # expired token. See the plugin README's auto-merge section.

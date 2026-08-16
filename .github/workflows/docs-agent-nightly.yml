@@ -199,7 +199,7 @@ jobs:
         # so no plumbing is needed beyond passing it through.
         #
         # DOCS_AGENT_DEBUG_DIR (SP-1/CCE-41): toggle the runner's
-        # forensic capture mode (see scripts/orchestrator_runner.py:357).
+        # forensic capture mode (see scripts/orchestrator_runner.py).
         # Per-dispatch prompt/stdout/stderr/stream/meta land in this dir
         # and are persisted past the runner via the upload step below.
         env:

@@ -192,7 +192,7 @@ jobs:
           # SP-1 / CCE-41: forensics capture mode. Per-dispatch
           # prompt/stdout/stderr/stream/meta land in this dir; the
           # upload-artifact step below persists them past the runner.
-          # See scripts/orchestrator_runner.py:442.
+          # See scripts/orchestrator_runner.py.
           DOCS_AGENT_DEBUG_DIR: ${{ runner.temp }}/docs-agent-debug
           # CCE-45: GH_TOKEN sourced from the GitHub App installation token
           # (or GITHUB_TOKEN fallback). Lives at step-env (not job-env) because

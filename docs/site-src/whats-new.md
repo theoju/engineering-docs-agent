@@ -8,6 +8,54 @@ synthesized_into: []
 
 # What's New
 
+## 2026-08-17T07:56:16.376769+00:00
+- PR #219: Records the outcome of the reference-aware batching experiment for the graphify extraction pipeline and adds a durable `.graphifyignore` mechanism to exclude minified fixtures from extraction. The experiment dispatched each spec together with the code files it cites (20 documents, 7 requests): it rescued 84 code-concept nodes that flat batching always discarded, but reduced target-nodes/doc from 1.02 to 0.55 because large batches crowded out the spec's own nodes in favor of code nodes. The change is deliberately not merged into `build_merge`; only the findings write-up and the ignore-file fix land.
+- PR #220: Added .gitignore entries for graphify-out/ (38 MB of regenerable knowledge-graph build output) and uv.lock (no current consumer references uv). Config-only change; no code or docs behavior changes.
+- PR #221: Ran a controlled A/B test on graphify's semantic-extraction system prompt, holding the parser, chunker, and out-of-scope filter constant and varying only the `_extraction_system` prompt text. Adding a DOCUMENT MODE instruction raised extracted concept nodes per document from 1 to 6-8 (and surfaced 3-6 internal edges vs 0) for roughly +11% output-token cost, confirming that the stock prompt itself — not the parser or the downstream filter — was capping graphify's node yield. This closes the prompt-ceiling hypothesis CCE-146 left explicitly "untested," and the PR updates the preserved runbook findings doc plus the whats-new changelog entry.
+- PR #222: Updated docs/runbooks/graphify-extraction-findings.md to reflect graphify's switch from the Gemini to the Haiku backend, correcting three findings that had gone stale: the 'untested at scale' caveat is discharged (81-doc /graphify run: 6.37 nodes/doc, 0/37 failed chunks, 16 minutes, graph grew 4,011→4,446 nodes), the 20-requests-per-day framing is marked historical rather than removed, and the chunk-3 'crowding' depth tax is reclassified as a Gemini-specific property rather than an inherent effect of batching (Haiku shows no crowding at chunk 3). A new 'The Haiku backend' section documents a head-to-head comparison on an identical chunk.
+- PR #223: PR #223 edited the CCE-144 blind-run-detection plan and spec docs (docs/superpowers/plans/2026-08-13-cce144-blind-run-detection.md and docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md) to record the design as archived/abandoned, on the premise that the implementation branch was never merged. Nine minutes after this PR merged, PR #224 merged that same implementation to main, reversing the abandon decision. The PR body was subsequently heavily annotated to flag itself as superseded and factually false as a description of current state — it now serves only as a historical record of a decision that was reversed, not as documentation of what shipped.
+- PR #224: Splits the previously overloaded `partial` state flag into two distinct signals: `blind` (a blocking subagent was prevented from producing any judgment, e.g. rate-limited) and `degraded` (the pipeline received subagent output but rejected specific content). `state_io.add_partial` gains a `degraded` keyword whose default (neither `info_only` nor `degraded` set) flips both `partial` and `blind` — a deliberately loud default so an unclassified failure mode surfaces rather than passing silently. `orchestrator_runner.run()` now exits non-zero, freezes the watermark cursor, and blocks auto-merge whenever a run is classified blind, while a merely-degraded (self-healing) run can still advance a cursor-backed window per the existing CCE-140 gate. Classification is applied per call site across all seven agent dispatches via `_record_dispatch_reasons`, with `time_budget_*` reasons deliberately kept degraded (not blind) to avoid reinstating the CCE-109 doom loop.
+- PR #228: Adds two net-new documentation-only artifacts: a repo-root CONTEXT.md glossary defining the orchestrator's domain vocabulary (window, baseline, cursor, window head, promotion, ephemeral advance, admission gate, deferral, owed page, forgiveness, held back, partial run, truncation, batch, block, drift), and ADR 0001 recording the decision that the baseline advances on disk even when a run is partial. No code changes; full test suite green (1339 passed, 5 skipped).
+- PR #227: The nightly authoring loop now cuts its per-run work at a PR boundary instead of an arbitrary batch index. Previously the CCE-109 time-budget check could fire mid-way through the oldest PR's page-batch group, and the existing at-least-one-progress escape hatch (`i > 0`) tracked batches, not PRs — so a PR whose fan-out exceeded one run's authoring budget got split across every subsequent run, never finished, and permanently occupied `held_back`. The fix ensures a run completes at least one full PR's page group before truncating, so `advance_cursor_list` and `_last_processed_merge_sha` always have something to advance past.
+### Pages to review (source drift)
+- architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
+- architecture/cce-capability-c-canonical-core-citations.md — changed: docs/superpowers/plans/2026-08-13-cce144-blind-run-detection.md, docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md, templates/config.schema.json
+- architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-08-13-cce144-blind-run-detection.md, docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md
+- architecture/cce10-source-collector-canonical-shape.md — changed: scripts/orchestrator_runner.py
+- architecture/cce12-source-collector-tool-use-diagnostics.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-api-reference.md — changed: scripts/state_io.py
+- architecture/cce23-decision-archive.md — changed: scripts/orchestrator_runner.py, scripts/state_io.py
+- architecture/cce23-source-map-drift.md — changed: scripts/orchestrator_runner.py
+- architecture/cce32-github-pages-publish-target.md — changed: docs/superpowers/plans/2026-08-13-cce144-blind-run-detection.md, templates/workflow-run.yml
+- architecture/cce4-schema-enforcement.md — changed: scripts/orchestrator_runner.py, scripts/verify_runner.py, tests/orchestrator/test_pipeline_integration.py, tests/orchestrator/test_schema_invalid_soft_fail.py
+- architecture/cce6-7-8-batch.md — changed: scripts/orchestrator_runner.py
+- architecture/engineering-docs-agent.md — changed: docs/site-src/whats-new.md
+- architecture/glossary.md — changed: CONTEXT.md, docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md
+- architecture/index.md — changed: scripts/orchestrator_runner.py
+- architecture/orchestrator.md — changed: CHANGELOG.md, scripts/orchestrator_runner.py, scripts/state_io.py, templates/workflow-run.yml, tests/orchestrator/test_blind_run_interlocks.py, tests/orchestrator/test_classification_coverage.py, tests/orchestrator/test_cursor_backed_merge.py, tests/orchestrator/test_dispatch_reasons_classification.py, tests/orchestrator/test_pr_boundary_authoring_cut.py, tests/state_io/test_add_partial_blind.py
+- architecture/publish-verifier.md — changed: scripts/verify_runner.py, templates/config.schema.json
+- architecture/structured-docs-site-generation.md — changed: docs/superpowers/plans/2026-08-13-cce144-blind-run-detection.md, docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md
+- archive/2026-07-13-cce120-gap-detector-prid-injection.md — changed: scripts/orchestrator_runner.py
+- archive/cce14-source-collector-prompt-hardening.md — changed: scripts/orchestrator_runner.py
+- archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
+- archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py, scripts/state_io.py
+- archive/v0-1-1-hardening.md — changed: scripts/orchestrator_runner.py, scripts/state_io.py, scripts/verify_runner.py, templates/config.schema.json, tests/orchestrator/test_pipeline_integration.py
+### Pages to review (citation drift)
+- architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+### Core pages to review (drift)
+- architecture/cce-capability-c-canonical-core-citations.md (source, citation)
+- architecture/cce-capability-c2-canonical-core-authoring.md (source)
+- architecture/cce10-source-collector-canonical-shape.md (source)
+- architecture/cce12-source-collector-tool-use-diagnostics.md (source)
+- architecture/cce23-api-reference.md (source)
+- architecture/cce23-decision-archive.md (source)
+- architecture/cce23-source-map-drift.md (source)
+- architecture/cce32-github-pages-publish-target.md (source)
+- architecture/cce4-schema-enforcement.md (source)
+- architecture/cce6-7-8-batch.md (source)
+- architecture/engineering-docs-agent.md (source)
+- architecture/structured-docs-site-generation.md (source)
+
 ## 2026-08-13T05:51:14.070980+00:00
 
 - PR #216: Moves the graphify semantic-extraction diagnosis from the gitignored `graphify-out/` build directory into a permanent `docs/runbooks/graphify-extraction-findings.md` file so the findings survive a directory rebuild or clean. The runbook documents that graphify extraction is not underproducing nodes (it generates ~4.2 nodes per file) but loses 64% of them at `graphify/llm.py:_out_of_scope`, which discards any node whose `source_file` names a real file not dispatched in the same chunk — explaining why the doc layer (specs/plans) consistently yields ~1 node per file regardless of document size. It also records that reducing batch size from 15 to 3 made cross-file attribution measurably worse (0.98 vs 1.02 nodes/file baseline), that the Gemini free tier is 20 requests per day (not per minute, so one full pass exhausts it), that `_FILE_CHAR_CAP` truncates 23 of 58 spec/plan files at 20,000 chars, an untried reference-aware batching fix, and a `graph.json` NetworkX `links`-vs-`edges` measurement trap that silently zeroes connectivity metrics. No production code changed; the file is placed under `docs/runbooks/` rather than `docs/site-src/` to sit outside the docs-agent lens path and its Tier-1 citation lints. **Two claims in this entry were corrected later:** the reference-aware batching fix was tried and rejected (CCE-146), and `_FILE_CHAR_CAP` was found to _slice_ oversized files across multiple requests rather than truncate them (CCE-148) — so the model does see the full text of a large plan, at roughly 7x the request cost. CCE-148 also established that the extraction prompt, not the batching, sets the ~1 node/file ceiling. `docs/runbooks/graphify-extraction-findings.md` carries the current text.

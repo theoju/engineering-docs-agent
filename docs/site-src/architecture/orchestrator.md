@@ -1,8 +1,9 @@
 ---
-description: "Documents architecture orchestrator: the CCE-109/CCE-114 soft time-budget check bounds every expensive loop in the nightly run, CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages, CCE-125 makes a gap-detector 'couldn't judge' verdict an info-only advisory outcome, and CCE-127 degrades a failed GitHub App token mint to a blocking partial reason instead of killing the job."
+description: "Documents architecture orchestrator: the CCE-109/CCE-114/CCE-152 soft time-budget check that now cuts page-authoring at PR boundaries, CCE-144's split of `partial` into `blind` (prevented from judging) versus `degraded` (judged and held work back) and its effect on watermark advancement and auto-merge, CCE-119's orchestrator-authoritative agent-authored frontmatter, CCE-125's gap-detector 'couldn't judge' advisory outcome, and CCE-127's degrade of a failed GitHub App token mint to a blocking reason instead of killing the job."
 source_files:
   - CHANGELOG.md
   - scripts/orchestrator_runner.py
+  - scripts/state_io.py
   - agents/page-author.md
   - agents/gap-detector.md
   - agents/schemas/gap_detector.schema.json
@@ -11,8 +12,14 @@ source_files:
   - tests/orchestrator/test_enforce_agent_frontmatter.py
   - tests/orchestrator/test_agent_authored_create_frontmatter.py
   - tests/orchestrator/test_gap_detector_unjudged.py
+  - tests/orchestrator/test_blind_run_interlocks.py
+  - tests/orchestrator/test_classification_coverage.py
+  - tests/orchestrator/test_dispatch_reasons_classification.py
+  - tests/orchestrator/test_pr_boundary_authoring_cut.py
+  - tests/orchestrator/test_cursor_backed_merge.py
+  - tests/state_io/test_add_partial_blind.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-08-08"
+last_reviewed: "2026-08-17"
 status: draft
 doc_kind: architecture
 ---
@@ -113,6 +120,39 @@ Both loops are otherwise advisory — a fact-checker `contradiction` verdict add
 
 A time-budget cut anywhere in the run — admission, authoring, fact-checking, or gap-detection — sets `state["current_run"]["partial"] = True` with a `time_budget_exceeded: ...` reason describing exactly how much of that stage completed (`authored 1/3 page batches`, `fact-checked 0/3 pages`, `gap-checked 0/3 PRs`), and for the authoring cut, whether it landed on a PR boundary or was forced by the hard cap. Because authoring and the two advisory loops run in that fixed order, an authoring-loop cut also means the fact-checker and gap-detector loops never start — the pages that _were_ authored still exist and are still committed, but the run stays partial and open for manual review rather than auto-merging. Setting `time_budget_seconds: 0` (or passing `--time-budget 0` at the CLI) disables all four checkpoints and lets a run author, fact-check, and gap-check every admitted PR regardless of wall-clock time — useful for a manual `--no-pr` bootstrap run where you're willing to wait, dangerous to leave on for the scheduled nightly.
 
+Every one of these `time_budget_exceeded` reasons is recorded `degraded=True` (see the next section) — the run judged the situation and deliberately held work back, it was never prevented from judging. A time-budget cut alone therefore never trips the `blind` exit code or freezes the watermark; it still blocks a non-cursor-backed advance and auto-merge through the pre-existing `partial and not advance_cursor_backed` gate. Marking any `time_budget_*` reason blind instead would turn every truncated run red and delete the cursor-backed advance CCE-140 exists to produce — reinstating the CCE-109 doom loop this whole mechanism was built to close.
+
+## `blind` vs. `degraded`: two meanings of `partial`
+
+Two nightly runs (2026-08-11 and 2026-08-12) reported `conclusion: success` while every subagent was rate-limited with zero calls made. Because `run()` returned 0 on every path, there was no way to distinguish that from an ordinary clean run — and the 2026-08-12 run went on to advance `last_successful_run`, a consume-once cursor, past three feature PRs (#211/CCE-138, #212/CCE-139, #213/CCE-140) whose content was never actually authored. That window is permanently lost; nothing ever re-reads it.
+
+CCE-144 closes the gap by splitting what `partial` used to conflate into two orthogonal signals, both owned by `add_partial` (`scripts/state_io.py:add_partial`):
+
+- **`blind`** — the run was *prevented from judging*. A blocking subagent never produced usable output (rate-limited, malformed, unparseable), so the pipeline has nothing to react to and no way to know what it missed.
+- **`degraded`** — the run *judged and rejected* something. It received subagent output but declined to use it (a time-budget cut, a lint block, an unsafe path, an unknown lens). This is self-healing: the held-back work stays in-window and the next run retries it.
+
+`add_partial` takes a `degraded` keyword to tell them apart:
+
+```python
+if not info_only:
+    cr["partial"] = True
+    if not degraded:
+        cr["blind"] = True
+        cr.setdefault("blind_reasons", [])
+        if safe_reason not in cr["blind_reasons"]:
+            cr["blind_reasons"].append(safe_reason)
+```
+
+The default — neither `info_only` nor `degraded` set — is **blind**, deliberately: an unclassified new blocking failure mode turns the run red instead of passing silently. Classification is applied per call site, never by pattern-matching the reason string: the literal prefix `schema_invalid:` is emitted by three call sites carrying two different classifications — source-collector's is blind by default (`sources is None` with no reasons), while page-author's and gap-detector's pass `degraded=True` (an unlanded page-author batch already keeps its PR out of `advance_cursor_list`, and gap-detector's output sits outside the merge gate entirely, so neither failure is silent). `_record_dispatch_reasons` (`scripts/orchestrator_runner.py:_record_dispatch_reasons`) threads that `degraded` kwarg through the same helper used at all seven agent dispatch sites, so a caller opts into "self-healing" explicitly rather than by accident.
+
+Three consumers read `current_run["blind"]`:
+
+- **`_exit_code`** (`scripts/orchestrator_runner.py:_exit_code`) returns 1 for a blind run — the same signal class `run()` already returns when it can't open the docs PR — so an operator watching only the workflow's pass/fail status takes the same action either way.
+- **`_should_advance_watermark`** (`scripts/orchestrator_runner.py:_should_advance_watermark`) refuses to move `last_successful_run` when the run is blind. Re-processing a window is cheap and idempotent; skipping one is not, so the asymmetry decides: when in doubt, don't advance.
+- **`_maybe_auto_merge`** (`scripts/orchestrator_runner.py:_maybe_auto_merge`) checks `blind` unconditionally, ahead of the CCE-140 `partial and not advance_cursor_backed` carve-out, and skips with `auto_merge_skipped: blind_run` when it's set. A cursor-backed advance proves the baseline is honest about what the run *saw*; a blind run did not see, so the carve-out that lets a merely-partial, cursor-backed run merge must not also let a blind one through.
+
+A run that is merely `degraded` (never `blind`) can still clear the CCE-140 gate and advance a cursor-backed window and auto-merge; only `blind` gates the watermark and the merge unconditionally.
+
 ## Advisory agents: a "couldn't judge" verdict must not degrade the run
 
 `gap-detector` and `fact-checker` sit downstream of the blocking pipeline (source-collector, pr-summarizer, page-author, content-validator, notifier) as advisory layers — their output feeds a PR note, not a merge gate. A dispatch failure on either one is recorded `info_only=True` and never flips `partial` (fact-checker since CCE-118; gap-detector since CCE-125). The distinction that matters is between an agent that _failed_ and an agent that _ran and said "I can't tell"_ — the latter is a legitimate outcome, not a malfunction, and treating it as one was the last recurring driver of unnecessary `partial` nightlies (`schema_invalid: gap-detector: None is not of type 'boolean'`, observed on PR #189's run).
@@ -154,6 +194,8 @@ if os.environ.get("DOCS_AGENT_APP_TOKEN_STATUS", "") == "failure":
 ```
 
 Only the literal `"failure"` degrades the run — `"skipped"` is the documented bare-host path (no `DOCS_AGENT_APP_CLIENT_ID` configured), and `"success"` or an unset variable both stay silent. `ok=False` routes the reason through the ordinary blocking `_record_dispatch_reasons` path, so it sets `partial: true` the same way a failed source-collector or page-author dispatch would. No new gate code is needed: `_maybe_auto_merge` (`scripts/orchestrator_runner.py:_maybe_auto_merge`) already skips with `partial_run` whenever `partial` is true, so a `GITHUB_TOKEN`-backed run reuses the existing interlock instead of auto-merging on an unvalidated PR. Placement of the check is deliberate — after the `current_run` dict literal is assigned (an earlier `add_partial` call would create a stub the literal would then silently overwrite) and before the merge decision reads `state["current_run"]["partial"]`.
+
+This `_record_dispatch_reasons` call carries no `degraded` kwarg, so under CCE-144's blind/degraded split (see above) `app_token_unavailable` classifies **blind**, not merely `partial`: the run exits non-zero, `_should_advance_watermark` freezes the cursor, and `_maybe_auto_merge`'s unconditional `blind` gate skips with `blind_run` — ahead of, and now redundant with, its pre-existing entry in `_MERGE_VETO_REASON_PREFIXES` (`scripts/orchestrator_runner.py:merge_veto_reason`). Both mechanisms agree because the underlying fact hasn't changed — a `GITHUB_TOKEN`-backed run never fires host CI — but `blind` is the one that also stops the watermark from moving, which the veto-prefix list alone never did.
 
 ## Agent-authored create-page frontmatter fidelity
 

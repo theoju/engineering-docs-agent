@@ -2,7 +2,9 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/55
+  - https://github.com/theoju/engineering-docs-agent/pull/227
 synthesized_into: []
+doc_kind: architecture
 ---
 
 # Subagent Forensic Capture in CI
@@ -36,6 +38,16 @@ Enabling `DOCS_AGENT_DEBUG_DIR` is not free. The switch to `stream-json` mode ad
 The 90-minute job timeout has headroom for this (it was 60 when this was written; CCE-140 raised it). The spec explicitly accepts the cost for a once-daily cron: the diagnostic value outweighs a fixed per-run overhead. Note that since CCE-152 the job timeout is no longer the binding ceiling on a run — the GitHub App installation token's 1h TTL is, and this overhead is spent inside it. See [Orchestrator](../architecture/orchestrator.md).
 
 If the latency becomes a concern at higher subagent counts, the most targeted fix is scoping `DOCS_AGENT_DEBUG_DIR` to failure-only paths rather than unconditional capture. That is deferred until SP-1 produces CI evidence to scope it against.
+
+## Diagnosing a stalled baseline
+
+If you're pulling forensic artifacts because `last_successful_run` in `state.json` hasn't moved across several nightlies, check the run's `partial_reasons` for a repeating `time_budget_exceeded: authored i/N page batches ...` entry before you go digging through `stream.jsonl`. That message is emitted by the authoring loop in `scripts/orchestrator_runner.py:run`, and where it's allowed to fire changed under CCE-152.
+
+Before CCE-152, the soft-deadline check in that loop cut at whatever page batch it landed on when the clock passed `deadline`, with an `i > 0` escape hatch that only guaranteed the very first batch ran unconditionally — it said nothing about finishing a PR's whole page group. A PR whose fan-out exceeded one run's budget got its page group split at the same point on every subsequent run: the same leading pages got re-authored, `advance_cursor_list` broke at index 0 every time, and the baseline never moved. This is exactly what happened on the ADIS host — PR #646 restructured `CLAUDE.md` into roughly six pages against a 1–5 page-per-run budget, and four consecutive nightlies (2026-08-13 through 2026-08-15) each re-authored the same leading pages and ended in `no_advance_no_cursor`, freezing the baseline for 20.6 days even though admission itself never truncated.
+
+Since CCE-152, the cut is scoped to a PR boundary: the loop only truncates when the batch it's about to author belongs to a different PR than the previous batch (`_owner != _prev_owner` in `run`), or once the run has crossed `authoring_hard_deadline` — a second, harder ceiling computed by `resolve_authoring_hard_cap`. That ceiling exists because "always finish the current PR" is unbounded on its own: a PR fanning out to twenty pages could hold a run open past the GitHub App installation token's one-hour TTL and fail it outright, so the hard cap trades a bounded overrun (`run.authoring_hard_cap_seconds`, or `budget * 1.15` by default) against that TTL and cuts wherever the loop stands once it's exceeded.
+
+When you're reading the digest or `partial_reasons` for this, the cut reason now names the PR the truncation landed inside, and the run also carries `authoring_hard_cap_squeezed` or `authoring_hard_cap_clamped` (both `info_only`) when the hard cap couldn't add any overrun on top of the soft budget — worth checking before you assume a fresh stall is the same PR-boundary bug this fixed. In forensic capture, `meta.json`'s `duration_ms` per page-author dispatch is the fastest way to confirm whether a given PR's page group is actually finishing inside the hard cap or getting cut again.
 
 ## Scope and deferred work
 

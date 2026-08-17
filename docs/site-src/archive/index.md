@@ -10,7 +10,13 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **CCE-152: PR-Boundary Authoring Cut (2026-08-17)** — The ADIS host's baseline (`last_successful_run.head_sha`) sat frozen for 20.6 days. Four consecutive scheduled nightlies, 2026-08-13 through 2026-08-15, each authored 1-5 of roughly 75 page batches and ended in `no_advance_no_cursor` — despite PR admission itself never truncating: all 53 PRs in the window were admitted every single night. The stall was diagnosed from forensic capture on run 31878131334 (see Subagent Forensic Capture in CI) and tracked host-side as ADIS-515 and ADIS-530.
+- **ADR 0001: The baseline advances on disk even when the run is partial** — Date: 2026-08-15
+- **CCE-146/148: The Graphify Extraction Prompt Is the Node-Yield Ceiling** — CCE-146 diagnosed graphify's low fleet-wide semantic-extraction yield on spec and plan documents — 1.02 nodes per file, averaged over 58 previously-extracted files — and traced 64% of the loss to `graphify/llm.py:_out_of_scope`, which drops any node whose `source_file` names a real file that was not dispatched in the same batch. That filter explains the loss, but it does not explain the low raw yield underneath it: even before the filter runs, the stock extraction prompt was producing roughly one node per document. Three separate batching experiments (topup, progress, topoff/retry variations) moved that number by less than 0.5 in either direction. CCE-146 left explicitly open whether the extraction system prompt itself — as opposed to the parser, the chunker, or the out-of-scope filter — was the actual ceiling.
+- **CCE-150: blind-run abandon decision, reversed nine minutes later** — This page is a decision-history record only. It does not describe current
+- **CCE-144: Blind-Run Detection (2026-08-13)** — The docs-agent nightly could not report failure. `orchestrator_runner.run` returned `2` on a config error and `1` when the docs PR could not be opened — every other path, including a fully rate-limited run, returned `0`. A run whose subagents never answered was a green check by construction.
 - **Graphify Semantic-Extraction Findings (2026-08-13)** — **PR:** #216
+- **Reference-Aware Batching: Tried and Rejected (2026-08-13)** — **PR:** #219
 - **CCE-134: Citation Exempt Token, Not Example Prefix** — Nightly run 31275900434 went `partial`. `citation_exists` (Tier-1, block)
 - **CCE-127: A Failed App-Token Mint Degrades the Nightly to `partial`, It No Longer Kills the Job** — The dogfood nightly in `theoju/engineering-docs-agent` failed 15 nights running, from
 - **CCE-130: Stale Branch Archive and Prune (2026-08-08)** — **PR:** #199
@@ -50,9 +56,9 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **Auth-tier migration: drop explicit API key threading** — **PR #91 · merged 2026-06-09 · non-breaking**
 - **Measurements archive** — _Auto-generated; 7 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **Nightly partial-run banner now matches the actual `partial` flag** — PR #177 fixes a display bug: a clean, auto-merge-eligible nightly run could still
-- **Plans archive** — _Auto-generated; 74 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Plans archive** — _Auto-generated; 75 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
-- **Specs archive** — _Auto-generated; 68 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Specs archive** — _Auto-generated; 69 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_43 pages · regenerated nightly_
+_49 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

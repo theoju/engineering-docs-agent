@@ -5,6 +5,9 @@
     "CHANGELOG.md": [
       "architecture/orchestrator.md"
     ],
+    "CONTEXT.md": [
+      "architecture/glossary.md"
+    ],
     "agents/content-validator.md": [
       "architecture/cce4-schema-enforcement.md"
     ],
@@ -77,6 +80,9 @@
     ],
     "agents/source-collector.md": [
       "architecture/cce4-schema-enforcement.md"
+    ],
+    "docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md": [
+      "architecture/glossary.md"
     ],
     "docs/site-src/.doc-core-manifest.json": [
       "architecture/engineering-docs-agent.md"
@@ -1144,6 +1150,12 @@
       "architecture/cce32-github-pages-publish-target.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/plans/2026-08-13-cce144-blind-run-detection.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/specs/2026-05-19-engineering-docs-agent-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1485,6 +1497,11 @@
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/templates/sdd-fidelity-gate.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1597,6 +1614,7 @@
     "scripts/state_io.py": [
       "architecture/cce23-api-reference.md",
       "architecture/cce23-decision-archive.md",
+      "architecture/orchestrator.md",
       "archive/cce5-9-batch-prep-roadmap.md",
       "archive/v0-1-1-hardening.md"
     ],
@@ -1695,11 +1713,23 @@
     "tests/orchestrator/test_agent_authored_create_frontmatter.py": [
       "architecture/orchestrator.md"
     ],
+    "tests/orchestrator/test_blind_run_interlocks.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_build_poller.py": [
       "architecture/publish-verifier.md"
     ],
+    "tests/orchestrator/test_classification_coverage.py": [
+      "architecture/orchestrator.md"
+    ],
+    "tests/orchestrator/test_cursor_backed_merge.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_dispatch_debug_capture.py": [
       "archive/cce14-source-collector-prompt-hardening.md"
+    ],
+    "tests/orchestrator/test_dispatch_reasons_classification.py": [
+      "architecture/orchestrator.md"
     ],
     "tests/orchestrator/test_dispatch_rescue.py": [
       "archive/cce15-source-collector-root-cause-sweep.md"
@@ -1735,6 +1765,9 @@
       "architecture/cce4-schema-enforcement.md",
       "archive/v0-1-1-hardening.md"
     ],
+    "tests/orchestrator/test_pr_boundary_authoring_cut.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_schema_invalid_soft_fail.py": [
       "architecture/cce4-schema-enforcement.md"
     ],
@@ -1754,6 +1787,9 @@
     ],
     "tests/site/test_api_build_smoke.py": [
       "architecture/cce23-api-reference.md"
+    ],
+    "tests/state_io/test_add_partial_blind.py": [
+      "architecture/orchestrator.md"
     ],
     "tests/stderr_emit/test_stderr_emit.py": [
       "architecture/publish-verifier.md"
@@ -1870,6 +1906,10 @@
       "scripts/lint/lint_runner.py",
       "scripts/lint/stub_redirect.py"
     ],
+    "architecture/glossary.md": [
+      "CONTEXT.md",
+      "docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md"
+    ],
     "architecture/index.md": [
       "scripts/orchestrator_runner.py",
       "scripts/frontmatter_contract.py"
@@ -1880,6 +1920,7 @@
     "architecture/orchestrator.md": [
       "CHANGELOG.md",
       "scripts/orchestrator_runner.py",
+      "scripts/state_io.py",
       "agents/page-author.md",
       "agents/gap-detector.md",
       "agents/schemas/gap_detector.schema.json",
@@ -1888,6 +1929,12 @@
       "tests/orchestrator/test_enforce_agent_frontmatter.py",
       "tests/orchestrator/test_agent_authored_create_frontmatter.py",
       "tests/orchestrator/test_gap_detector_unjudged.py",
+      "tests/orchestrator/test_blind_run_interlocks.py",
+      "tests/orchestrator/test_classification_coverage.py",
+      "tests/orchestrator/test_dispatch_reasons_classification.py",
+      "tests/orchestrator/test_pr_boundary_authoring_cut.py",
+      "tests/orchestrator/test_cursor_backed_merge.py",
+      "tests/state_io/test_add_partial_blind.py",
       "tests/templates/test_workflow_run_parity.py"
     ],
     "architecture/publish-verifier.md": [

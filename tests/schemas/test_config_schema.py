@@ -463,6 +463,27 @@ def test_authoring_hard_cap_seconds_rejects_a_non_positive_integer(bad):
         validate(cfg, SCHEMA)
 
 
+def test_run_block_accepts_reuse_pr_summaries():
+    """CCE-159: same hard requirement as the two keys above. The runner reads
+    `run.reuse_pr_summaries` as its kill switch, so a host that sets it against
+    an unamended schema does not lose the optimization — it aborts the nightly
+    at config validation, which is the failure mode this whole block invites."""
+    cfg = yaml.safe_load(_CCE140_BASE_CFG)
+    cfg["run"] = {"time_budget_seconds": 2340, "reuse_pr_summaries": False}
+    validate(cfg, SCHEMA)
+
+
+@pytest.mark.parametrize("bad", [0, 1, "false", "no"])
+def test_reuse_pr_summaries_rejects_a_non_boolean(bad):
+    """A truthy string is the shape a hand-edited YAML most plausibly takes,
+    and `reuse_pr_summaries: "false"` read as truthy would silently keep the
+    cache on for an operator who had explicitly turned it off."""
+    cfg = yaml.safe_load(_CCE140_BASE_CFG)
+    cfg["run"] = {"reuse_pr_summaries": bad}
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)
+
+
 def test_deferral_skip_threshold_rejects_a_negative():
     cfg = yaml.safe_load(_CCE140_BASE_CFG)
     cfg["run"] = {"deferral_skip_threshold": -1}

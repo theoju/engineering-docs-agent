@@ -49,6 +49,29 @@
         }
       }
     },
+    "pr_summaries": {
+      "type": "object",
+      "description": "CCE-159: pr-summarizer output reused across runs. Keys are {owner}/{name}#{pr}, the same shape as deferral_counts. An entry is only served when its merge_sha still matches the PR's and its fingerprint still matches agents/pr-summarizer.md, so editing the agent or rewriting history invalidates it. Runner-owned, not operator-edited. Absent means nothing has ever been cached; the key is never seeded empty.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["merge_sha", "fingerprint", "last_seen_at", "summary"],
+        "properties": {
+          "merge_sha": { "type": "string" },
+          "fingerprint": {
+            "type": "string",
+            "description": "Truncated sha256 of agents/pr-summarizer.md at the time the summary was produced."
+          },
+          "last_seen_at": {
+            "type": "string",
+            "description": "Refreshed on every run this PR appears in the window. Entries unseen for PR_SUMMARY_RETENTION_DAYS are evicted, which bounds growth without wiping the cache when a window shrinks transiently."
+          },
+          "summary": {
+            "type": "object",
+            "description": "Raw pr-summarizer output. pr_number is re-stamped from the PR on reuse, so the stored echo is not authoritative."
+          }
+        }
+      }
+    },
     "cursors": { "type": "object" }
   }
 }

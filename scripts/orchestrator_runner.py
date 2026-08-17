@@ -6,7 +6,7 @@ instead of invoking Claude.
 """
 
 from __future__ import annotations
-import argparse, fnmatch, json, os, re, subprocess, sys, time
+import argparse, fnmatch, hashlib, json, os, re, subprocess, sys, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -766,6 +766,116 @@ def next_deferral_counts(
             out[k] = int(out.get(k, 0)) + 1
         else:
             out.pop(k, None)
+    return out
+
+
+# CCE-159: how long an unused summary-cache entry survives. A PR leaves the
+# window for good once the baseline passes it, and its entry is dead weight
+# after that. Eviction is by last-seen rather than by window membership on
+# purpose: a window shrinks transiently when the source-collector degrades,
+# and wiping the cache exactly when the pipeline is already struggling is the
+# failure this retention exists to avoid.
+PR_SUMMARY_RETENTION_DAYS = 30
+
+
+def pr_summarizer_fingerprint() -> str:
+    """Hash of the pr-summarizer agent definition (CCE-159).
+
+    A cached summary is only valid for the instructions that produced it, so
+    editing ``agents/pr-summarizer.md`` has to invalidate every entry. Hashing
+    the file makes that automatic — there is no version constant anyone has to
+    remember to bump, which is the failure mode a hand-maintained one has.
+
+    An unreadable agent file returns ``""``, which matches no stored entry, so
+    the cache fails closed to a full re-summarize rather than serving summaries
+    it cannot prove are current.
+    """
+    try:
+        return hashlib.sha256(
+            (_AGENTS_DIR / "pr-summarizer.md").read_bytes()
+        ).hexdigest()[:16]
+    except OSError:
+        return ""
+
+
+def cached_pr_summary(
+    cache: dict, pr: dict, *, repo: dict, fingerprint: str
+) -> dict | None:
+    """The stored summary for ``pr``, or None when it must be re-summarized.
+
+    Three conditions, all of them necessary:
+
+    - an entry exists under this PR's identity;
+    - its ``merge_sha`` matches the PR's. A merged PR is immutable, which is
+      what makes this cache exact rather than heuristic — a mismatch means the
+      window is describing different content under the same number (rewritten
+      history, a reopened-and-remerged PR) and the summary cannot be trusted;
+    - its ``fingerprint`` matches the current agent definition.
+
+    Returns the RAW agent output. The caller re-stamps ``pr_number`` from the
+    PR itself, exactly as it does for a fresh dispatch, so a fixture-static
+    echo in a stored summary cannot leak through.
+    """
+    if not fingerprint:
+        return None
+    entry = (cache or {}).get(deferral_key(repo, pr.get("number")))
+    if not isinstance(entry, dict):
+        return None
+    if entry.get("fingerprint") != fingerprint:
+        return None
+    merge_sha = pr.get("merge_sha")
+    if not merge_sha or entry.get("merge_sha") != merge_sha:
+        return None
+    summary = entry.get("summary")
+    return summary if isinstance(summary, dict) else None
+
+
+def next_pr_summaries(
+    cache: dict,
+    *,
+    repo: dict,
+    window_prs: list[dict],
+    summary_by_number: dict,
+    fingerprint: str,
+    now: datetime,
+    retention_days: int = PR_SUMMARY_RETENTION_DAYS,
+) -> dict:
+    """Return the next persistent summary cache (never mutates ``cache``).
+
+    Lifecycle, mirroring ``next_deferral_counts``:
+
+    - a PR this run holds a summary for → entry written, fingerprint and
+      ``merge_sha`` stamped from this run;
+    - a PR in this window with no usable summary → any existing entry is kept
+      and its ``last_seen_at`` refreshed, so a PR that keeps being deferred
+      never ages out while it is still being asked for;
+    - everything else → carried forward until ``retention_days`` stale.
+
+    A PR with no ``merge_sha`` is never stored. The sha is half the cache key's
+    validity check, and an entry that cannot be invalidated is worse than no
+    entry at all.
+    """
+    now_iso = now.isoformat()
+    cutoff = (now - timedelta(days=retention_days)).isoformat()
+    out = {
+        k: v
+        for k, v in (cache or {}).items()
+        if isinstance(v, dict) and str(v.get("last_seen_at") or "") >= cutoff
+    }
+    for pr in window_prs:
+        number = pr.get("number")
+        key = deferral_key(repo, number)
+        summary = summary_by_number.get(number)
+        merge_sha = pr.get("merge_sha")
+        if isinstance(summary, dict) and merge_sha:
+            out[key] = {
+                "merge_sha": merge_sha,
+                "fingerprint": fingerprint,
+                "last_seen_at": now_iso,
+                "summary": summary,
+            }
+        elif key in out:
+            out[key] = {**out[key], "last_seen_at": now_iso}
     return out
 
 
@@ -1937,6 +2047,18 @@ def run(
         # nothing, and the deferral-count prune below runs on EVERY run — a
         # clean run is precisely what resets a PR's "consecutive" history.
         still_deferred: list[dict] = []
+        # CCE-159: a merged PR's summary is a pure function of content that can
+        # no longer change, so re-dispatching for it every night is pure waste.
+        # Measured on the ADIS host: 52 of 58 PRs summarized on 2026-08-17 had
+        # been summarized the night before — 90% repeat work, including every
+        # PR that run went on to discard.
+        _summary_cache = state.get("pr_summaries", {}) or {}
+        _reuse_summaries = bool(
+            (config.get("run") or {}).get("reuse_pr_summaries", True)
+        )
+        _summary_fingerprint = pr_summarizer_fingerprint()
+        _summary_by_number: dict = {}
+        _summaries_reused = 0
         for i, pr in enumerate(prs):
             if deadline is not None and i > 0 and clock() > deadline:
                 add_partial(
@@ -1956,6 +2078,20 @@ def run(
                 prs = prs[:i]
                 time_truncated = True
                 break
+            _cached = (
+                cached_pr_summary(
+                    _summary_cache, pr, repo=repo, fingerprint=_summary_fingerprint
+                )
+                if _reuse_summaries
+                else None
+            )
+            if _cached is not None:
+                _summaries_reused += 1
+                _summary_by_number[pr["number"]] = _cached
+                # Re-stamped from the PR, same as the fresh path below: a
+                # stored summary's own pr_number echo is not authoritative.
+                summaries.append({**_cached, "pr_number": pr["number"]})
+                continue
             jira_context = [
                 jira_lookup[k] for k in pr.get("jira_keys", []) if k in jira_lookup
             ]
@@ -1989,6 +2125,7 @@ def run(
             # Use the PR's actual number, not summary's echo (which is fixture-static in tests).
             summary_with_pr = {**summary, "pr_number": pr["number"]}
             summaries.append(summary_with_pr)
+            _summary_by_number[pr["number"]] = summary
 
         # Page authoring: batch doc_targets per (lens, page_hint).
         import frontmatter_contract as fmc
@@ -2749,6 +2886,31 @@ def run(
             state["deferral_counts"] = _next_counts
         else:
             state.pop("deferral_counts", None)
+        # CCE-159: same never-seed-empty contract as deferral_counts — a host
+        # that reused nothing and summarized nothing keeps a state.json
+        # byte-identical to its pre-CCE-159 content.
+        _next_summaries = next_pr_summaries(
+            _summary_cache,
+            repo=repo,
+            window_prs=window_prs,
+            summary_by_number=_summary_by_number,
+            fingerprint=_summary_fingerprint,
+            now=datetime.now(timezone.utc),
+        )
+        if _next_summaries:
+            state["pr_summaries"] = _next_summaries
+        else:
+            state.pop("pr_summaries", None)
+        if _summaries_reused:
+            # Advisory: the saving has to be visible in the digest, or the one
+            # number that says whether this feature is working is invisible.
+            add_partial(
+                state,
+                f"pr_summaries_reused: {_summaries_reused}/{len(window_prs)} "
+                f"PRs served from cache, {_summaries_reused} pr-summarizer "
+                "dispatches skipped",
+                info_only=True,
+            )
         if _should_advance_watermark(state):
             state["last_successful_run"] = {
                 "head_sha": advance_sha,

@@ -25,6 +25,16 @@ docs:
 sources:
   git: { host: github }
 lint: { tier1: default }
+run:
+  # CCE-152: the shared host fixture is sized like a REAL host, not like the
+  # bare default. DEFAULT_TIME_BUDGET_SECONDS (2700) plus the 900s merge poll
+  # is the whole 3600s App-token TTL with no tail left, so a 2700s host trips
+  # `authoring_hard_cap_squeezed` on every run — an advisory reason that would
+  # otherwise show up in every unrelated orchestrator test's partial_reasons.
+  # 2100 is what both hosts in this repo's orbit set, and what the README's
+  # sizing guidance prescribes. The squeeze itself is pinned deliberately in
+  # tests/orchestrator/test_pr_boundary_authoring_cut.py.
+  time_budget_seconds: 2100
 publishing:
   base_url: https://example.com
   build_workflow: deploy.yml
@@ -67,6 +77,16 @@ def _pin_repo_slug(monkeypatch):
     reintroduce exactly this bug.
     """
     monkeypatch.setenv("GITHUB_REPOSITORY", "unknown/unknown")
+
+
+@pytest.fixture
+def base_config_yaml() -> str:
+    """The shared host config, for tests that need to vary one key of it.
+
+    `tests/` has no `__init__.py`, so CONFIG_YAML is not importable by path from
+    a test module — this fixture is the supported way to reach it.
+    """
+    return CONFIG_YAML
 
 
 @pytest.fixture

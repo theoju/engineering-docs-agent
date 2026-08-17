@@ -444,6 +444,25 @@ def test_run_block_still_rejects_an_unknown_key():
         validate(cfg, SCHEMA)
 
 
+def test_run_block_accepts_authoring_hard_cap_seconds():
+    """CCE-152: the key was documented in the resolver's docstring and read by
+    `resolve_authoring_hard_cap` while the schema still rejected it, so a host
+    that followed the documentation aborted its nightly at config validation
+    with exit 2. The `integer` type also guards the resolver's `int(val)`,
+    which was otherwise unguarded against `authoring_hard_cap_seconds: soon`."""
+    cfg = yaml.safe_load(_CCE140_BASE_CFG)
+    cfg["run"] = {"time_budget_seconds": 2100, "authoring_hard_cap_seconds": 2415}
+    validate(cfg, SCHEMA)
+
+
+@pytest.mark.parametrize("bad", [0, -1, "soon", 2415.5])
+def test_authoring_hard_cap_seconds_rejects_a_non_positive_integer(bad):
+    cfg = yaml.safe_load(_CCE140_BASE_CFG)
+    cfg["run"] = {"authoring_hard_cap_seconds": bad}
+    with pytest.raises(ValidationError):
+        validate(cfg, SCHEMA)
+
+
 def test_deferral_skip_threshold_rejects_a_negative():
     cfg = yaml.safe_load(_CCE140_BASE_CFG)
     cfg["run"] = {"deferral_skip_threshold": -1}

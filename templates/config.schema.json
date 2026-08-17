@@ -196,6 +196,11 @@
           "type": "integer",
           "minimum": 0,
           "description": "CCE-140: number of CONSECUTIVE runs a PR may be deferred before the next run abandons it — the advance cursor walks past it, an entry is appended to state.json `skipped_prs`, and a non-informational partial reason names the PR and its pages. Default 3. 0 disables skipping entirely, which restores the pre-CCE-140 indefinite-stall behaviour."
+        },
+        "authoring_hard_cap_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "CCE-152: ceiling in seconds the page-authoring loop may never cross. The soft deadline (time_budget_seconds) only cuts at a PR-group boundary so a run finishes the oldest PR's pages and the baseline can advance; this bounds how far that deferral may push the run. Must be GREATER than time_budget_seconds — a value at or below it collapses the hard deadline onto the soft one and restores the mid-PR-group cut, so it is rejected at startup rather than clamped up. That rejection is NOT expressible here — JSON Schema cannot compare two sibling properties — so this file accepts it and `resolve_authoring_hard_cap` raises at startup, exiting 2 with a logged reason. Default time_budget_seconds * 1.15, then clamped down against the GitHub App installation token's 1h TTL minus the merge poll and the post-run tail. The clamp bounds the overrun above time_budget_seconds, not time_budget_seconds itself: a budget that already fills the TTL is held flat with an advisory reason and is bounded by nothing but itself."
         }
       }
     },

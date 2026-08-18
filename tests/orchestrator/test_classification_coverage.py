@@ -101,10 +101,20 @@ def test_orchestrator_has_the_expected_call_site_population():
     against the spec's Classification section and update the number here in
     the same commit that adds them."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 39, (
-        f"expected 39 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 40, (
+        f"expected 40 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
+    # 39 -> 40: CCE-159 added `pr_summaries_reused` in run(), reporting how
+    # many PRs were served from the summary cache instead of re-dispatched.
+    #
+    # Classification: info_only=True. It reports work the run did NOT have to
+    # do, so it is the opposite of a degradation — nothing was held back and
+    # nothing was consumed unprocessed. Flipping `partial` on a successful
+    # saving would also cost auto-merge every night through CCE-140's
+    # `partial and not advance_cursor_backed` gate, turning the optimization
+    # into an outage. It is recorded at all because a saving nobody can see is
+    # indistinguishable from a feature that silently stopped working.
     # 38 -> 39: CCE-152 added one site on net. The authoring truncation gained a
     # second reason — a deferral to the next PR boundary versus a hard-cap cut
     # inside a PR's group — but they share one `add_partial`, since only the

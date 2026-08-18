@@ -192,6 +192,10 @@
           "minimum": 0,
           "description": "CCE-109: soft per-run time budget in seconds. 0 = unlimited. Default 2700."
         },
+        "reuse_pr_summaries": {
+          "type": "boolean",
+          "description": "CCE-159: reuse a merged PR's stored pr-summarizer output instead of re-dispatching for it on every run. Default true. A merged PR is immutable, so an entry is served only while both its merge_sha and the agents/pr-summarizer.md fingerprint still match; either changing invalidates it. Set false to restore the pre-CCE-159 behaviour where every PR in the window is re-summarized every run."
+        },
         "deferral_skip_threshold": {
           "type": "integer",
           "minimum": 0,

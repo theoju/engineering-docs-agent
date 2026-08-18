@@ -1,0 +1,839 @@
+<meta charset="utf-8" />
+<title>PROTOTYPE — CCE-160 summary parse</title>
+<style>
+  :root {
+    --ink: #16181d;
+    --ink-soft: #5b6070;
+    --ink-faint: #8b91a3;
+    --ground: #fbfbfc;
+    --panel: #ffffff;
+    --line: #e4e6ec;
+    --accent: #4338ca;
+    --accent-soft: #eef0fe;
+    --good: #16794a;
+    --good-soft: #e6f4ec;
+    --warn: #9a5b00;
+    --warn-soft: #fdf1de;
+    --bad: #b02020;
+    --bad-soft: #fdeaea;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font:
+      16px/1.6 -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      system-ui,
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 56px 28px 96px;
+  }
+  h1 {
+    font-size: 30px;
+    line-height: 1.2;
+    margin: 0 0 6px;
+    letter-spacing: -0.02em;
+  }
+  .kicker {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 14px;
+  }
+  .lede {
+    font-size: 17px;
+    color: var(--ink-soft);
+    max-width: 68ch;
+    margin: 0 0 10px;
+  }
+  .lede strong {
+    color: var(--ink);
+  }
+  h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--ink-faint);
+    font-weight: 600;
+    margin: 44px 0 14px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 22px 24px;
+  }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 190px;
+    flex: 1;
+  }
+  .field-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-soft);
+  }
+  .field-note {
+    font-size: 12px;
+    color: var(--ink-faint);
+    line-height: 1.45;
+  }
+  button {
+    font: inherit;
+    font-size: 14px;
+    padding: 8px 13px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink);
+    cursor: pointer;
+    text-align: left;
+  }
+  button:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  button.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  button.on:hover {
+    color: #fff;
+  }
+  button.step {
+    display: block;
+    width: 100%;
+    margin-bottom: 8px;
+  }
+  button.step.done {
+    opacity: 0.45;
+  }
+  button.step.next {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  button:disabled {
+    cursor: default;
+    opacity: 0.4;
+  }
+  .seg {
+    display: inline-flex;
+    gap: 0;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+  .seg button {
+    border: 0;
+    border-radius: 0;
+    border-right: 1px solid var(--line);
+  }
+  .seg button:last-child {
+    border-right: 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4px;
+  }
+  th,
+  td {
+    text-align: left;
+    padding: 11px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+    font-weight: 600;
+  }
+  td.mech {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  td.mech small {
+    display: block;
+    font-weight: 400;
+    color: var(--ink-faint);
+    font-size: 12px;
+  }
+  .pill {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .pill.good {
+    background: var(--good-soft);
+    color: var(--good);
+  }
+  .pill.warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+  .pill.bad {
+    background: var(--bad-soft);
+    color: var(--bad);
+  }
+  .verdict-why {
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-top: 3px;
+  }
+  pre {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    background: #f5f6f8;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 0;
+    white-space: pre;
+  }
+  .esc {
+    color: var(--bad);
+    font-weight: 700;
+  }
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+  .tabs button {
+    font-size: 13px;
+  }
+  .scenario-desc {
+    font-size: 15px;
+    color: var(--ink-soft);
+    margin: 0 0 16px;
+    max-width: 70ch;
+  }
+  .scenario-desc b {
+    color: var(--ink);
+  }
+  .watch {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 11px 15px;
+    border-radius: 0 7px 7px 0;
+    font-size: 14px;
+    margin: 0 0 18px;
+  }
+  .changed {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 13px;
+    min-height: 20px;
+    margin-top: 12px;
+  }
+  .legend {
+    font-size: 13px;
+    color: var(--ink-faint);
+    margin-top: 14px;
+    line-height: 1.7;
+  }
+  .legend .pill {
+    margin-right: 6px;
+  }
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 22px;
+  }
+  @media (max-width: 860px) {
+    .cols {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<div class="wrap">
+  <div class="kicker">Throwaway prototype · CCE-160</div>
+  <h1>Which fix survives every shape the JS suite can print?</h1>
+
+  <p class="lede">
+    A gate in the test suite runs a JavaScript test suite in a separate program,
+    reads the summary it prints, and decides whether to let the build through.
+    It has to catch a suite that quietly ran <strong>nothing</strong> — because
+    a suite that runs nothing still reports success. Right now it reads that
+    summary with a pattern that breaks the moment the output arrives in colour,
+    which is what happens in every agent session.
+  </p>
+  <p class="lede">
+    Four candidate fixes are on the table. This page runs all four side by side
+    against every situation the gate can meet, so we can see which one is
+    <strong>right</strong> everywhere rather than argue about which one sounds
+    safest.
+  </p>
+
+  <h2>The situation right now</h2>
+  <div class="card">
+    <div class="row" style="gap: 22px; align-items: flex-start">
+      <div class="field">
+        <span class="field-label">The JavaScript suite itself</span>
+        <div class="seg" id="seg-suite"></div>
+        <span class="field-note"
+          >Healthy = 53 real tests pass. Hollow = the suite exists but runs
+          nothing. Broken = real failures.</span
+        >
+      </div>
+      <div class="field">
+        <span class="field-label">Colour forced on by the environment</span>
+        <div class="seg" id="seg-color"></div>
+        <span class="field-note"
+          >Off in a normal terminal and in CI.
+          <strong>On in every agent session</strong> — that is the whole
+          bug.</span
+        >
+      </div>
+    </div>
+    <div
+      class="row"
+      style="gap: 22px; align-items: flex-start; margin-top: 20px"
+    >
+      <div class="field">
+        <span class="field-label">A future release renames the summary</span>
+        <div class="seg" id="seg-drift"></div>
+        <span class="field-note"
+          >The default report is written for humans, so its wording is not a
+          promise. Simulates it printing &ldquo;passed&rdquo; instead of
+          &ldquo;pass&rdquo;.</span
+        >
+      </div>
+      <div class="field">
+        <span class="field-label"
+          >The machine-readable report is available</span
+        >
+        <div class="seg" id="seg-tap"></div>
+        <span class="field-note"
+          >Two of the four fixes ask for it by name. If a future release drops
+          it, they have nothing to read.</span
+        >
+      </div>
+    </div>
+    <div class="changed" id="changed"></div>
+  </div>
+
+  <h2>What each candidate fix decides</h2>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 27%">Candidate fix</th>
+          <th style="width: 27%">Verdict</th>
+          <th>Is that the right answer?</th>
+        </tr>
+      </thead>
+      <tbody id="verdicts"></tbody>
+    </table>
+    <div class="legend">
+      <span class="pill good">Correct</span> the gate agreed with reality.<br />
+      <span class="pill warn">False alarm</span> a healthy suite was rejected —
+      safe, but it costs someone an afternoon.<br />
+      <span class="pill bad">Let it through</span> a suite that ran nothing, or
+      failed, was waved past. This is the one that must never happen.
+    </div>
+  </div>
+
+  <h2>What the JavaScript suite actually printed</h2>
+  <div class="cols">
+    <div>
+      <div class="field-label" style="margin-bottom: 8px">
+        Without asking for the machine-readable report
+      </div>
+      <pre id="out-default"></pre>
+    </div>
+    <div>
+      <div class="field-label" style="margin-bottom: 8px">
+        Having asked for the machine-readable report
+      </div>
+      <pre id="out-tap"></pre>
+    </div>
+  </div>
+  <p class="field-note" style="margin-top: 10px">
+    <span class="esc">&#9243;[34m</span> is an invisible colour instruction. The
+    current gate anchors its pattern to the start of the line, and those
+    instructions sit in front of everything it looks for.
+  </p>
+
+  <h2>Guided walkthroughs</h2>
+  <div class="tabs" id="tabs"></div>
+  <div class="card">
+    <p class="scenario-desc" id="sc-desc"></p>
+    <div class="watch" id="sc-watch"></div>
+    <div id="sc-steps"></div>
+  </div>
+</div>
+
+<script>
+  // ─────────────────────────────────────────────────────────────────────────
+  // PURE MODULE — the bit that answers the question. No DOM in here.
+  // Lifts out whole once the question is settled.
+  // ─────────────────────────────────────────────────────────────────────────
+  const Gate = (() => {
+    const ESC = "";
+    const MIN_EXPECTED_TESTS = 20; // mirrors _MIN_EXPECTED_TESTS
+    const ANSI = /\[[0-9;]*m/g;
+    const PASS_RE = /^\s*[ℹ#]\s*pass (\d+)\b/m; // mirrors _PASS_RE
+    const FAIL_RE = /^\s*[ℹ#]\s*fail (\d+)\b/m; // mirrors _FAIL_RE
+
+    const SUITES = {
+      healthy: { tests: 53, pass: 53, fail: 0, exit: 0 },
+      hollow: { tests: 0, pass: 0, fail: 0, exit: 0 },
+      broken: { tests: 53, pass: 50, fail: 3, exit: 1 },
+    };
+
+    // A suite is "good" only when it really ran and really passed. This is the
+    // ground truth every candidate fix is scored against.
+    const suiteIsGood = (suite) =>
+      SUITES[suite].fail === 0 && SUITES[suite].pass >= MIN_EXPECTED_TESTS;
+
+    function defaultReport(c, renamed) {
+      const word = renamed ? "passed" : "pass";
+      return [
+        "ℹ tests " + c.tests,
+        "ℹ suites 0",
+        "ℹ " + word + " " + c.pass,
+        "ℹ fail " + c.fail,
+        "ℹ skipped 0",
+      ];
+    }
+
+    // The machine-readable report is a stable contract and is never colourised.
+    // VERIFIED, not assumed: `FORCE_COLOR=3 node --test --test-reporter=tap …`
+    // on node v26.5.0 emits 0 escape bytes, and its summary lines are exactly
+    // `# pass 53` / `# fail 0`. If this ever stops holding, the "Both" column
+    // starts beating "Ask for the machine report" and this model must be rerun.
+    const machineReport = (c) => [
+      "1.." + c.tests,
+      "# tests " + c.tests,
+      "# pass " + c.pass,
+      "# fail " + c.fail,
+    ];
+
+    const paint = (lines) => lines.map((l) => ESC + "[34m" + l + ESC + "[39m");
+
+    /** Simulates the child program. `world` is the situation; `askForMachine`
+     *  is the one thing a candidate fix can change about what gets printed. */
+    function childRun(world, askForMachine) {
+      if (askForMachine && !world.machineReportAvailable) {
+        return {
+          exitCode: 1,
+          stdout: "",
+          note: "the report it asked for does not exist in this release",
+        };
+      }
+      const c = SUITES[world.suite];
+      let lines = askForMachine
+        ? machineReport(c)
+        : defaultReport(c, world.summaryRenamed);
+      if (!askForMachine && world.colourForced) lines = paint(lines);
+      return { exitCode: c.exit, stdout: lines.join("\n") + "\n", note: null };
+    }
+
+    /** The gate's decision ladder. Mirrors the real assertions, in order. */
+    function decide(exitCode, text) {
+      if (exitCode !== 0)
+        return {
+          pass: false,
+          label: "Rejected",
+          why: "the suite reported a failing exit",
+        };
+      const p = PASS_RE.exec(text);
+      const f = FAIL_RE.exec(text);
+      if (!p || !f)
+        return {
+          pass: false,
+          label: "Rejected",
+          why: "could not read the summary at all",
+        };
+      const passed = +p[1];
+      const failed = +f[1];
+      if (failed > 0)
+        return {
+          pass: false,
+          label: "Rejected",
+          why: failed + " test(s) reported as failing",
+        };
+      if (passed < MIN_EXPECTED_TESTS)
+        return {
+          pass: false,
+          label: "Rejected",
+          why: "only " + passed + " test(s) ran — the suite is hollow",
+        };
+      return {
+        pass: true,
+        label: "Let through",
+        why: passed + " tests ran and passed",
+      };
+    }
+
+    const MECHANISMS = [
+      {
+        id: "today",
+        name: "Leave it as it is",
+        sub: "today’s code",
+        askForMachine: false,
+        removeColour: false,
+      },
+      {
+        id: "strip",
+        name: "Ignore colour instructions",
+        sub: "strip them before reading",
+        askForMachine: false,
+        removeColour: true,
+      },
+      {
+        id: "machine",
+        name: "Ask for the machine report",
+        sub: "pin the stable format",
+        askForMachine: true,
+        removeColour: false,
+      },
+      {
+        id: "both",
+        name: "Both",
+        sub: "ask for it and strip anyway",
+        askForMachine: true,
+        removeColour: true,
+      },
+    ];
+
+    /** Run one candidate fix against one situation, and score it. */
+    function evaluate(mech, world) {
+      const child = childRun(world, mech.askForMachine);
+      const text = mech.removeColour
+        ? child.stdout.replace(ANSI, "")
+        : child.stdout;
+      const verdict = decide(child.exitCode, text);
+      const shouldPass = suiteIsGood(world.suite);
+      const grade =
+        verdict.pass === shouldPass
+          ? "correct"
+          : verdict.pass
+            ? "letThrough"
+            : "falseAlarm";
+      return { child, verdict, grade };
+    }
+
+    return { MECHANISMS, SUITES, childRun, decide, evaluate, suiteIsGood };
+  })();
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // THROWAWAY PAGE — thin shell over the module above.
+  // ─────────────────────────────────────────────────────────────────────────
+  const CONTROLS = [
+    {
+      key: "suite",
+      node: "seg-suite",
+      options: [
+        ["healthy", "Healthy"],
+        ["hollow", "Hollow"],
+        ["broken", "Broken"],
+      ],
+    },
+    {
+      key: "colourForced",
+      node: "seg-color",
+      options: [
+        [false, "Off"],
+        [true, "On"],
+      ],
+    },
+    {
+      key: "summaryRenamed",
+      node: "seg-drift",
+      options: [
+        [false, "No"],
+        [true, "Yes"],
+      ],
+    },
+    {
+      key: "machineReportAvailable",
+      node: "seg-tap",
+      options: [
+        [true, "Yes"],
+        [false, "No"],
+      ],
+    },
+  ];
+
+  const LABELS = {
+    suite: "the JavaScript suite",
+    colourForced: "forced colour",
+    summaryRenamed: "the renamed summary",
+    machineReportAvailable: "the machine report",
+  };
+
+  const START = {
+    suite: "healthy",
+    colourForced: false,
+    summaryRenamed: false,
+    machineReportAvailable: true,
+  };
+
+  const SCENARIOS = [
+    {
+      tab: "1 · A human runs it",
+      desc: "Someone runs the suite in their own terminal, or CI does. Nothing is forcing colour, because the output is being captured rather than shown on screen.",
+      watch:
+        "All four candidates agree and let it through. This is why nobody noticed the bug for so long — it is invisible from here.",
+      start: Object.assign({}, START),
+      steps: [
+        { label: "Run the healthy suite with nothing unusual set", set: {} },
+      ],
+    },
+    {
+      tab: "2 · An agent runs it",
+      desc: "The same healthy suite, in an agent session. The session hands every program it starts an instruction to colour its output, whether or not anyone will ever look at it.",
+      watch:
+        "Today’s code flips to a false alarm — it reports it cannot read a summary that is sitting right there. The other three are unmoved.",
+      start: Object.assign({}, START),
+      steps: [
+        {
+          label: "Turn on the forced colour the agent session sets",
+          set: { colourForced: true },
+        },
+      ],
+    },
+    {
+      tab: "3 · Don’t weaken the gate",
+      desc: "The gate exists for one reason: a suite that runs nothing still reports success. Any fix that made the colour problem go away by trusting the exit code alone would sail straight past this.",
+      watch:
+        "Every candidate must reject. A green here would be worse than the bug we are fixing — it is the exact failure this gate exists to prevent.",
+      start: Object.assign({}, START, { colourForced: true }),
+      steps: [
+        {
+          label: "Hollow out the suite so it runs nothing at all",
+          set: { suite: "hollow" },
+        },
+      ],
+    },
+    {
+      tab: "4 · The renamed summary",
+      desc: "The default report is written for people to read, so its wording carries no promise. Suppose a future release prints “passed 53” instead of “pass 53”. This is the case that separates the two serious candidates.",
+      watch:
+        "Ignoring colour is not enough — it still cannot read a summary whose words moved. Asking for the machine-readable report is untouched, because that format is a contract.",
+      start: Object.assign({}, START),
+      steps: [
+        {
+          label: "Turn on forced colour, as in an agent session",
+          set: { colourForced: true },
+        },
+        {
+          label: "Now rename the summary, as a future release might",
+          set: { summaryRenamed: true },
+        },
+      ],
+    },
+    {
+      tab: "5 · The price of pinning",
+      desc: "Asking for a specific report by name is a dependency. This is what it costs when a future release drops or renames that report.",
+      watch:
+        "Both pinned candidates fail loudly on a perfectly healthy suite. That is a false alarm — but a loud, immediate one, not a silent wrong answer. Compare with scenario 4, where the unpinned candidate fails just as loudly for the opposite reason.",
+      start: Object.assign({}, START),
+      steps: [
+        {
+          label: "Take away the machine-readable report",
+          set: { machineReportAvailable: false },
+        },
+      ],
+    },
+    {
+      tab: "6 · Everything at once",
+      desc: "The worst realistic day: an agent session, a renamed summary, and a genuinely broken suite underneath it all.",
+      watch:
+        "Every candidate rejects, which is right — but only the pinned ones reject for the right reason. Read the “why” column: two of them reject because they cannot read anything, which would have hidden the real failure underneath.",
+      start: Object.assign({}, START),
+      steps: [
+        {
+          label: "Agent session: force colour on",
+          set: { colourForced: true },
+        },
+        {
+          label: "A future release renames the summary",
+          set: { summaryRenamed: true },
+        },
+        {
+          label: "And the suite is genuinely broken",
+          set: { suite: "broken" },
+        },
+      ],
+    },
+  ];
+
+  let world = Object.assign({}, START);
+  let scenario = 0;
+  let stepIndex = 0;
+  let lastChange = "";
+
+  function setWorld(patch, describe) {
+    const before = Object.assign({}, world);
+    world = Object.assign({}, world, patch);
+    if (describe) {
+      const bits = Object.keys(patch)
+        .filter((k) => before[k] !== world[k])
+        .map((k) => LABELS[k] + " → " + String(world[k]));
+      lastChange = bits.length ? "Changed: " + bits.join(", ") : "";
+    }
+  }
+
+  function showEscapes(text) {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/\[([0-9;]*)m/g, '<span class="esc">␛[$1m</span>');
+  }
+
+  function renderControls() {
+    for (const c of CONTROLS) {
+      const host = document.getElementById(c.node);
+      host.innerHTML = "";
+      for (const opt of c.options) {
+        const b = document.createElement("button");
+        b.textContent = opt[1];
+        if (world[c.key] === opt[0]) b.className = "on";
+        b.onclick = () => {
+          setWorld({ [c.key]: opt[0] }, true);
+          render();
+        };
+        host.appendChild(b);
+      }
+    }
+    document.getElementById("changed").textContent = lastChange;
+  }
+
+  function renderVerdicts() {
+    const body = document.getElementById("verdicts");
+    body.innerHTML = "";
+    const PILL = {
+      correct: ["good", "Correct"],
+      falseAlarm: ["warn", "False alarm"],
+      letThrough: ["bad", "Let it through"],
+    };
+    for (const mech of Gate.MECHANISMS) {
+      const r = Gate.evaluate(mech, world);
+      const tr = document.createElement("tr");
+
+      const name = document.createElement("td");
+      name.className = "mech";
+      name.innerHTML = mech.name + "<small>" + mech.sub + "</small>";
+
+      const v = document.createElement("td");
+      const why = r.child.note ? r.child.note : r.verdict.why;
+      v.innerHTML =
+        "<strong>" +
+        r.verdict.label +
+        "</strong>" +
+        '<div class="verdict-why">' +
+        why +
+        "</div>";
+
+      const g = document.createElement("td");
+      const pill = PILL[r.grade];
+      g.innerHTML = '<span class="pill ' + pill[0] + '">' + pill[1] + "</span>";
+
+      tr.appendChild(name);
+      tr.appendChild(v);
+      tr.appendChild(g);
+      body.appendChild(tr);
+    }
+  }
+
+  function renderOutputs() {
+    const plain = Gate.childRun(world, false);
+    const machine = Gate.childRun(world, true);
+    document.getElementById("out-default").innerHTML =
+      showEscapes(plain.stdout) || "(nothing)";
+    document.getElementById("out-tap").innerHTML = machine.note
+      ? "(the suite refused to start: " + machine.note + ")"
+      : showEscapes(machine.stdout);
+  }
+
+  function renderScenario() {
+    const tabs = document.getElementById("tabs");
+    tabs.innerHTML = "";
+    SCENARIOS.forEach((s, i) => {
+      const b = document.createElement("button");
+      b.textContent = s.tab;
+      if (i === scenario) b.className = "on";
+      b.onclick = () => startScenario(i);
+      tabs.appendChild(b);
+    });
+
+    const s = SCENARIOS[scenario];
+    document.getElementById("sc-desc").innerHTML = s.desc;
+    document.getElementById("sc-watch").innerHTML =
+      "<b>Watch for:</b> " + s.watch;
+
+    const host = document.getElementById("sc-steps");
+    host.innerHTML = "";
+    s.steps.forEach((step, i) => {
+      const b = document.createElement("button");
+      b.className =
+        "step" + (i < stepIndex ? " done" : i === stepIndex ? " next" : "");
+      b.textContent = i + 1 + ". " + step.label;
+      b.disabled = i !== stepIndex;
+      b.onclick = () => {
+        setWorld(step.set, true);
+        stepIndex = i + 1;
+        render();
+      };
+      host.appendChild(b);
+    });
+    if (s.steps.length && stepIndex >= s.steps.length) {
+      const done = document.createElement("div");
+      done.className = "field-note";
+      done.style.marginTop = "10px";
+      done.textContent =
+        "Walkthrough complete — read the verdict table above, or keep poking with the controls.";
+      host.appendChild(done);
+    }
+  }
+
+  function startScenario(i) {
+    scenario = i;
+    stepIndex = 0;
+    lastChange = "reset to the starting situation";
+    world = Object.assign({}, SCENARIOS[i].start);
+    render();
+  }
+
+  function render() {
+    renderControls();
+    renderVerdicts();
+    renderOutputs();
+    renderScenario();
+  }
+
+  startScenario(0);
+</script>

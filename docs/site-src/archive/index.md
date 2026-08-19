@@ -10,6 +10,11 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **CCE-159 — a merged PR's summary is bought once, not once per night** — The nightly window is a lookback from a baseline that advances slowly, so the
+- **CCE-152: Authoring Cuts at a PR Boundary, Not a Batch Index** — The ADIS host sat on one baseline for 20.6 days because the CCE-114 authoring-loop time-budget cut guaranteed progress in the wrong unit — one batch, not one PR — so a run whose oldest admitted PR fanned out to more page batches than the budget allowed split that PR's group on every single nightly and never advanced past it. CCE-152 moves the guarantee to one complete PR group and adds a bounded hard cap so the fix can't turn into an unbounded overrun of its own.
+- **ADR: the baseline advance is ephemeral until promotion** — Accepted. Reaffirms the CCE-40 design after it was challenged by CCE-153.
+- **CCE-144: Blind-Run Detection (2026-08-14)** — The docs-agent nightly could not report failure. Runs `31472240064` (2026-08-11) and `31579090583` (2026-08-12) both reported `conclusion: success`, but every subagent on both runs had been rejected by a weekly rate limit before making a single tool call — `source-collector` and `notifier` both returned `None`. Nothing alarmed, because no code path made the job exit non-zero for that condition: `run` returned `0` on every path except a config error (`2`) or a failed PR-open (`1`), and a rate-limited `source-collector` was coerced into a valid empty result set (`sources = {"prs": [], "jira_issues": []}`), so "prevented from judging" became indistinguishable from "judged: nothing to do."
+- **Decision: reference-aware batching, rejected (2026-08-13)** — The knowledge-graph extraction over `docs/superpowers/{specs,plans}` was
 - **Graphify Semantic-Extraction Findings (2026-08-13)** — **PR:** #216
 - **CCE-134: Citation Exempt Token, Not Example Prefix** — Nightly run 31275900434 went `partial`. `citation_exists` (Tier-1, block)
 - **CCE-127: A Failed App-Token Mint Degrades the Nightly to `partial`, It No Longer Kills the Job** — The dogfood nightly in `theoju/engineering-docs-agent` failed 15 nights running, from
@@ -50,9 +55,9 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **Auth-tier migration: drop explicit API key threading** — **PR #91 · merged 2026-06-09 · non-breaking**
 - **Measurements archive** — _Auto-generated; 7 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **Nightly partial-run banner now matches the actual `partial` flag** — PR #177 fixes a display bug: a clean, auto-merge-eligible nightly run could still
-- **Plans archive** — _Auto-generated; 74 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Plans archive** — _Auto-generated; 75 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
-- **Specs archive** — _Auto-generated; 68 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Specs archive** — _Auto-generated; 69 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_43 pages · regenerated nightly_
+_48 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/55
+  - https://github.com/theoju/engineering-docs-agent/pull/227
 synthesized_into: []
 ---
 
@@ -33,7 +34,11 @@ On a successful run you get the forensic bundle as confirmation. On a failure it
 
 Enabling `DOCS_AGENT_DEBUG_DIR` is not free. The switch to `stream-json` mode adds 3–6 seconds per subagent invocation, with outliers reaching ~74 seconds. A pipeline with 6–8 subagents accumulates several minutes of overhead.
 
-The 90-minute job timeout has headroom for this (it was 60 when this was written; CCE-140 raised it). The spec explicitly accepts the cost for a once-daily cron: the diagnostic value outweighs a fixed per-run overhead. Note that since CCE-152 the job timeout is no longer the binding ceiling on a run — the GitHub App installation token's 1h TTL is, and this overhead is spent inside it. See [Orchestrator](../architecture/orchestrator.md).
+The 90-minute job timeout has headroom for this (it was 60 when this was written; CCE-140 raised it). The spec explicitly accepts the cost for a once-daily cron: the diagnostic value outweighs a fixed per-run overhead. Note that since CCE-152 the job timeout is no longer the binding ceiling on a run — the GitHub App installation token's 1-hour TTL (`GITHUB_APP_TOKEN_TTL_SECONDS`, 3600s) is, and this overhead is spent inside it. See [Orchestrator](../architecture/orchestrator.md).
+
+CCE-152 also changed how a run behaves once it runs long enough to hit that TTL pressure. The authoring loop now completes a PR's batches oldest-first and checks the soft deadline only at PR boundaries, so a run that overruns finishes the PR it is mid-way through instead of splitting it across nights. `resolve_authoring_hard_cap` (`scripts/orchestrator_runner.py:resolve_authoring_hard_cap`) bounds how far past the soft `run.time_budget_seconds` budget that PR-boundary finish is allowed to run, computed as the token TTL minus the merge-check poll (`merge.checks_timeout_seconds`, 900s by default on an auto-merge host) minus a fixed `AUTHORING_TTL_SAFETY_SECONDS` tail reserve (285s) — 3600 − 900 − 285 = 2415s.
+
+That ceiling interacts with the forensic-capture overhead this page measures: at the default 2700s budget, 2415s already sits below the budget itself, so the resolver reports the SQUEEZED outcome — the hard cap holds at the budget with zero overrun, and this page's per-subagent latency tax comes entirely out of a fixed window with no PR-boundary cushion. A 2100s-budget host instead gets the NORMAL outcome: the cap resolves to `int(2100 * 1.15) = 2415`s, which lands exactly on the ceiling, so a run with `DOCS_AGENT_DEBUG_DIR` set retains its full 315s of overrun to finish a PR's page batches. The other two outcomes — CLAMPED (an explicit `run.authoring_hard_cap_seconds` or the computed ratio resolves above the ceiling and is narrowed down to it) and REJECTED (an explicit override at or below the budget, refused as a config error) — are both pinned by `tests/orchestrator/test_authoring_hard_cap_bounds.py`. All four outcomes are info-only or config-validation concerns; only REJECTED aborts the run before authoring starts, and CLAMPED/SQUEEZED never flip a run `partial`.
 
 If the latency becomes a concern at higher subagent counts, the most targeted fix is scoping `DOCS_AGENT_DEBUG_DIR` to failure-only paths rather than unconditional capture. That is deferred until SP-1 produces CI evidence to scope it against.
 

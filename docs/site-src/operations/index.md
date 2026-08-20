@@ -28,6 +28,7 @@ _Operations: deployment workflows, configuration guides, and runbooks._
 - **Nightly docs-agent CI** — The nightly authoring pipeline runs automatically at 07:07 UTC via `.github/workflows/docs-agent-nightly.yml`. It computes the change window against `state.json`, dispatches the subagent pipeline, and opens or appends a commit to a `docs-agent/YYYY-MM-DD` branch. A partial run still opens the PR with `partial: true` in the body — no run goes silent.
 - **Nightly Workflow Operations** — The nightly authoring pipeline runs via `.github/workflows/docs-agent-nightly.yml`. It fires daily at 07:07 UTC on a cron schedule and accepts manual `workflow_dispatch` triggers.
 - **Nightly Workflow Run Summary** — The nightly workflow writes a run summary to `$GITHUB_STEP_SUMMARY` after every execution. This gives you a fast read on what the last nightly did — state snapshot, partial status, any errors — without downloading the forensics artifact.
+- **Nightly workflow: finding partial-run reasons** — When a nightly `docs-agent-nightly` run misbehaves, the run's reasons live in
 - **Nightly Workflow: GitHub App Token** — The `docs-agent-nightly` workflow authenticates as the `docs-agent-bot` GitHub App rather than using the default `GITHUB_TOKEN`. This page explains why that matters and what you need to configure.
 - **Nightly workflow: Jira authentication** — The nightly docs-agent workflow authenticates to Jira using two repo credentials — one Secret, one Variable — forwarded as job-level environment variables in `.github/workflows/docs-agent-nightly.yml`. Without them, every run operates in partial mode.
 - **Orchestrator Observability** — `scripts/orchestrator_runner.py` emits structured log lines at startup, after each stage, and at the end of every run. This page covers the four signals and how to use them when debugging a nightly run.
@@ -42,5 +43,5 @@ _Operations: deployment workflows, configuration guides, and runbooks._
 - **Step summary observability** — When a nightly run encounters a partial or hard-failed subagent, the runner writes a formatted digest to GitHub Actions' built-in step summary. You can read this digest directly in the workflow run UI without downloading any forensics artifact.
 - **The nightly workflow** — Every onboarded host runs `docs-agent-nightly` — rendered from `templates/workflow-run.yml` at scaffold time into `.github/workflows/docs-agent-nightly.yml` — on a schedule, plus two extra triggers. `scripts/scaffold_workflow.py` rewrites the cron minute per host so 100 onboarded repos don't all fire at the same instant; the template default is a `7 7 * * *` off-minute cron, and setup picks a deterministic minute in `[5, 55]` for each new host.
 
-_31 pages · regenerated nightly_
+_32 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

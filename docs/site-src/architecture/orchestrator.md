@@ -1,5 +1,5 @@
 ---
-description: "Documents architecture orchestrator: the CCE-109/CCE-114 soft time-budget check bounds every expensive loop in the nightly run, CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages, CCE-125 makes a gap-detector 'couldn't judge' verdict an info-only advisory outcome, and CCE-127 degrades a failed GitHub App token mint to a blocking partial reason instead of killing the job."
+description: "Documents architecture orchestrator: the CCE-109/CCE-114 soft time-budget check bounds every expensive loop in the nightly run, CCE-152 changes the page-authoring cut point to land only on a PR boundary and bounds the resulting overrun with a computed hard cap, CCE-159 caches pr-summarizer output per merge_sha so an unchanged PR is never re-summarized, CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages, CCE-125 makes a gap-detector 'couldn't judge' verdict an info-only advisory outcome, and CCE-127 degrades a failed GitHub App token mint to a blocking partial reason instead of killing the job."
 source_files:
   - CHANGELOG.md
   - scripts/orchestrator_runner.py
@@ -8,11 +8,16 @@ source_files:
   - agents/schemas/gap_detector.schema.json
   - scripts/lint/description_quality.py
   - templates/workflow-run.yml
+  - templates/config.schema.json
+  - templates/state.schema.json
   - tests/orchestrator/test_enforce_agent_frontmatter.py
   - tests/orchestrator/test_agent_authored_create_frontmatter.py
   - tests/orchestrator/test_gap_detector_unjudged.py
+  - tests/orchestrator/test_pr_boundary_authoring_cut.py
+  - tests/orchestrator/test_authoring_hard_cap_bounds.py
+  - tests/orchestrator/test_pr_summary_reuse.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-08-08"
+last_reviewed: "2026-08-20"
 status: draft
 doc_kind: architecture
 ---
@@ -22,7 +27,7 @@ doc_kind: architecture
 `run()` in `scripts/orchestrator_runner.py:run` is the nightly pipeline entry point. It runs as a straight-line sequence of stages against one window of merged PRs (`last_successful_run.head_sha` to the current `HEAD`):
 
 1. **source-collector** dispatch — pulls PRs (and Jira context, if configured) for the window.
-2. **PR admission loop** — dispatches `pr-summarizer` once per PR, oldest-first (`scripts/orchestrator_runner.py`).
+2. **PR admission loop** — dispatches `pr-summarizer` once per PR, oldest-first (`scripts/orchestrator_runner.py`), serving a cached summary instead of a fresh dispatch when one is valid (see PR-summary caching below).
 3. **Page-authoring fan-out** — batches `doc_targets` by `(lens, page_hint)` and dispatches `page-author` once per batch (`scripts/orchestrator_runner.py`).
 4. **content-validator** — Tier-1 lint over every authored page; `block`-severity failures are reverted or unlinked.
 5. **fact-checker warn layer** — one dispatch per authored page that cites a resolvable repo source (`scripts/orchestrator_runner.py`).
@@ -31,6 +36,21 @@ doc_kind: architecture
 8. What's New composition and `last_successful_run.head_sha` promotion.
 
 Each stage that dispatches a subagent accumulates `partial_reasons` on failure via `add_partial`; a run with any non-`info_only` reason is marked `partial: true` and — per CCE-101 — never auto-merges.
+
+## PR-summary caching
+
+A merged PR's content cannot change once its `merge_sha` is fixed, so re-summarizing it every night the collection window still overlaps it is pure waste. CCE-159 caches `pr-summarizer` output in `state.json` under a `pr_summaries` key, keyed by `deferral_key` (`scripts/orchestrator_runner.py:deferral_key` — `{owner}/{name}#{pr}`, the same key shape `deferral_counts` and `dismissed_gap_flags` already use, so an operator reading `state.json` sees one PR-identity vocabulary across all three).
+
+Before dispatching `pr-summarizer` for PR *i*, the admission loop (`scripts/orchestrator_runner.py:run`) checks `cached_pr_summary` (`scripts/orchestrator_runner.py:cached_pr_summary`) against the stored entry. A cache hit requires both:
+
+- the entry's `merge_sha` matches the PR's — a mismatch means the PR number now points at different content (rewritten history, a reopened-and-remerged PR), so the cache cannot be trusted, and
+- the entry's `fingerprint` matches `pr_summarizer_fingerprint()` (`scripts/orchestrator_runner.py:pr_summarizer_fingerprint`), a hash of `agents/pr-summarizer.md`. Editing the agent's own instructions invalidates every cached entry automatically — there's no version constant anyone has to remember to bump. An unreadable agent file hashes to `""`, which matches no stored entry, so the cache fails closed to a full re-summarize rather than serving a summary it cannot prove is current.
+
+Either mismatch forces a fresh dispatch, same as an entirely uncached PR. `run.authoring_hard_cap_seconds`'s sibling here is `run.reuse_pr_summaries` (default `true`) — the kill switch: set it `false` on a host and every PR is re-summarized regardless of what's stored.
+
+Eviction is by `last_seen_at`, not by window membership: `next_pr_summaries` (`scripts/orchestrator_runner.py:next_pr_summaries`) drops an entry only once it has gone `PR_SUMMARY_RETENTION_DAYS` (`scripts/orchestrator_runner.py:PR_SUMMARY_RETENTION_DAYS` — 30 days) unseen. A PR that keeps getting deferred night after night has its `last_seen_at` refreshed on every run that still asks for it, whether or not that run reuses its summary — that PR is exactly the one that benefits most from staying cached, and pruning by window membership instead would evict it while it's still active.
+
+The saving is visible in the digest, not silent: a run that reused at least one summary records an info-only `pr_summaries_reused: n/m` reason (`n` cache hits out of `m` PRs in the window, `n` `pr-summarizer` dispatches skipped). `info_only=True` because reuse describes an optimization, not a degradation — it must never cost a run its CCE-101 auto-merge eligibility. The motivating case: on the ADIS host, 52 of 58 PRs summarized on one night's run had been summarized identically the night before — 90% repeat work, roughly 1.53M redundant input tokens, purely because the window still overlapped them ahead of the cursor advancing past them.
 
 ## Soft time budget
 

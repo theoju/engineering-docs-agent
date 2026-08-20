@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/55
+  - https://github.com/theoju/engineering-docs-agent/pull/227
 synthesized_into: []
 ---
 
@@ -33,7 +34,7 @@ On a successful run you get the forensic bundle as confirmation. On a failure it
 
 Enabling `DOCS_AGENT_DEBUG_DIR` is not free. The switch to `stream-json` mode adds 3–6 seconds per subagent invocation, with outliers reaching ~74 seconds. A pipeline with 6–8 subagents accumulates several minutes of overhead.
 
-The 90-minute job timeout has headroom for this (it was 60 when this was written; CCE-140 raised it). The spec explicitly accepts the cost for a once-daily cron: the diagnostic value outweighs a fixed per-run overhead. Note that since CCE-152 the job timeout is no longer the binding ceiling on a run — the GitHub App installation token's 1h TTL is, and this overhead is spent inside it. See [Orchestrator](../architecture/orchestrator.md).
+Neither the workflow's `timeout-minutes: 90` (it was 60 when this was written; CCE-140 raised it) nor a stock host's `time_budget_seconds` (2700s) is the ceiling this overhead actually has to fit inside. Since CCE-152, the binding bound is the GitHub App installation token's `GITHUB_APP_TOKEN_TTL_SECONDS` (1h) minus the merge poll minus a fixed post-run tail — computed by `resolve_authoring_hard_cap` (`scripts/orchestrator_runner.py:resolve_authoring_hard_cap`), not asserted from the job timeout. A stock 2700s-budget host is squeezed flat against that ceiling: it earns zero authoring overrun, so forensic-mode overhead spent during authoring competes directly with the page batches CCE-152 exists to protect, not with idle headroom under a 90-minute job kill. The spec explicitly accepts the cost for a once-daily cron: the diagnostic value outweighs a fixed per-run overhead. See [Orchestrator](../architecture/orchestrator.md) for the full arithmetic.
 
 If the latency becomes a concern at higher subagent counts, the most targeted fix is scoping `DOCS_AGENT_DEBUG_DIR` to failure-only paths rather than unconditional capture. That is deferred until SP-1 produces CI evidence to scope it against.
 

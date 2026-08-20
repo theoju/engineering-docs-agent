@@ -1,7 +1,243 @@
 {
   "version": "1",
   "last_successful_run": {
-    "head_sha": "956144f6c5c1562151c070a190bd1e8e2af607e3",
-    "completed_at": "2026-08-13T08:40:09.992105+00:00"
+    "head_sha": "ab2a1e827975685fd23501d29e828e76d2009fee",
+    "completed_at": "2026-08-20T07:48:33.140075+00:00"
+  },
+  "pr_summaries": {
+    "theoju/engineering-docs-agent#219": {
+      "merge_sha": "aea9fe0799b53c41bbdb4bb7ae89f4dcd639ff28",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-08-20T08:24:16.833694+00:00",
+      "summary": {
+        "pr_number": 219,
+        "what_changed": "Records the outcome of running the reference-aware batching experiment for graphify's extraction pipeline (dispatching each spec together with the code files it cites): it rescues 84 previously-dropped code-concept nodes but drives per-doc node yield down from 1.02 to 0.55 due to prompt-capacity crowding, so it was deliberately not merged (quarantined as a .rejected extraction). Also adds a durable `.graphifyignore` file to exclude a git-tracked minified fixture (`tests/fixtures/diagrams/render/mermaid.min.js`) that AST extraction was expanding into 2,167 nodes \u2014 35% of the whole graph \u2014 a problem that kept recurring because the post-commit `graphify update` hook silently undid a prior one-off manual filter.",
+        "why": "The team needed a durable, citable record that reference-aware batching was tried and rejected (to stop the idea from being re-proposed and re-run without cause) and a mechanism-level fix for the minified-fixture node-count regression, since any fix applied to the graph output rather than the inputs gets overwritten by the next commit's automatic graphify run.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-08-13-reference-aware-batching-rejected.md",
+            "doc_kind": "decision",
+            "notes": "Documents the experiment result (1.02 vs 0.55 nodes/doc, 84 rescued code nodes, not merged) as a decision record so the approach isn't re-tried without new evidence."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "operations/2026-08-13-graphifyignore-minified-fixtures.md",
+            "notes": "Documents the .graphifyignore mechanism and why the fix had to live in the extraction inputs (not a one-off graph edit) given the post-commit graphify hook."
+          }
+        ],
+        "notes": "PR is docs/config-only (no production code changes) within the engineering-docs-agent repo's own graphify tooling; the changed docs/runbooks/graphify-extraction-findings.md file is outside the core lens's known section structure (no 'runbooks' section in available_sections), so doc_targets instead propose lens-native pages capturing the same findings for the core lens's archive/operations sections.",
+        "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#220": {
+      "merge_sha": "12c3125c1ede54cfa3678f19c02281c4137889cd",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-08-20T08:24:16.833694+00:00",
+      "summary": {
+        "pr_number": 220,
+        "what_changed": "Added .gitignore entries for graphify-out/ (38 MB of regenerable knowledge-graph build output: graph.json, graph.html, extraction JSONLs, caches, backups) and uv.lock, so they no longer show as untracked and can't be accidentally swept into a commit via git add -A.",
+        "why": "graphify-out/ was never meant to be tracked \u2014 the findings worth keeping already live in docs/runbooks/graphify-extraction-findings.md \u2014 and uv.lock currently has no consumer in any workflow or template, so ignoring it is the lower-commitment choice pending an actual uv sync adoption.",
+        "breaking": false,
+        "doc_targets": [],
+        "notes": "Pure config change (.gitignore only), no code or docs changes, no user-visible behavior change \u2014 consistent with the forbidden-outputs \u00a74 exception for internal, non-documentation-relevant changes.",
+        "error": null,
+        "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#221": {
+      "merge_sha": "37f288581f2cf1987e5a531b1477bdb48385a9b9",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-08-20T08:24:16.833694+00:00",
+      "summary": {
+        "pr_number": 221,
+        "what_changed": "A controlled A/B test isolating only the extraction system prompt (via graphify/llm.py:_extraction_system) showed the stock prompt was capping doc-layer node extraction at ~1 node/doc; adding a 'DOCUMENT MODE' clause with an attribution instruction lifted that to 6-8 nodes/doc for +11% output tokens, with the load-bearing mechanism being the attribution clause (letting the model set source_file directly, which the out-of-scope filter reads) rather than any 'emit more nodes' instruction. The PR also corrects an earlier runbook claim: graphify/llm.py:expand_oversized_files slices oversized files into N FileSlices that are each fully seen by the model across N requests, rather than truncating content as previously documented. Findings, the reproduced DOCUMENT MODE prompt, and a discarded n=1 outlier run are recorded in docs/runbooks/graphify-extraction-findings.md, and a correction note was appended (not a rewrite) to the existing PR #216 changelog entry in docs/site-src/whats-new.md to fix its now-false truncation-mechanism and 'untried reference-aware batching' claims.",
+        "why": "CCE-146 left the prompt-ceiling hypothesis for graphify's low doc-node yield explicitly untested; this PR (CCE-148) runs the controlled experiment to resolve that open question, and in doing so also caught and corrected a second false claim (truncation vs. slicing) that had propagated into a previously-published changelog entry. Corpus-scale application remains out of scope pending confirmation the per-file gain survives multi-file chunking, and daily free-tier request budget constraints.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "whats-new.md",
+            "doc_kind": "decision",
+            "notes": "Append/verify the correction note for the PR #216 entry (truncation-vs-slicing mechanism; the reference-aware batching fix was tried and rejected under CCE-146, not merely 'untried'). Keep as an appended correction, not a rewrite, since it's a dated changelog entry."
+          }
+        ],
+        "notes": "The primary findings artifact (docs/runbooks/graphify-extraction-findings.md) is deliberately kept outside docs/site-src to stay out of Tier-1 citation lint scope, so no doc_target is proposed for it \u2014 it is not part of the core lens's managed doc tree (not among available_sections['core']). n=2 treatment / n=1 control on similarly-sized files; corpus-scale validation is explicitly out of scope and unresolved.",
+        "error": null,
+        "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#222": {
+      "merge_sha": "52881a6aaaf516e7b11248f5920a0e374c1f6da6",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-08-20T08:24:16.833694+00:00",
+      "summary": {
+        "pr_number": 222,
+        "what_changed": "Updated the graphify extraction-findings runbook to reflect the switch from the Gemini backend to a claude-cli/Haiku backend. Corrected three claims that had gone false (untested-at-scale is now discharged with an 81-document run; the 20-requests/day quota framing is marked historical rather than deleted; crowding is reclassified as a property of the Gemini model rather than of batching, since Haiku shows none). Added a new head-to-head 'Haiku backend' section (node/edge counts, wall clock) plus four operational traps that fail silently (env-key-presence backend selection, an exact-match parallel-mode env check, an unset model var defaulting to Opus, and a shell inheriting stale env vars). Corrected an earlier ~10x-low cost estimate with measured token counts. Documented and explicitly rejected a tempting `.graphifyignore` fix for 'log files producing no nodes', showing the real variable is file size, not type, plus a residual unexplained inconsistency in the same warning.",
+        "why": "The runbook's job is to be a reliable source of truth about graphify extraction behavior, and it was written against a backend (Gemini) that is no longer in use. Several of its claims had silently gone false after the switch to Haiku, which risked misleading the next reader relying on it for extraction decisions or cost estimates. CCE-149 records the backend switch, the corrected measurements, and the newly discovered operational traps so the document stays accurate.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "2026-08-14-graphify-haiku-backend-switch.md",
+            "doc_kind": "decision",
+            "notes": "Primary content already lives directly in docs/runbooks/graphify-extraction-findings.md, which is intentionally kept outside docs.lens_paths (CCE-143) to avoid Tier-1 citation lint. This lens-side entry is a short pointer/decision digest noting the Gemini\u2192Haiku backend switch, corrected cost figures, and the rejected .graphifyignore fix, for readers browsing the lens docs rather than the runbook directly."
+          }
+        ],
+        "notes": "No lens page was directly edited by this PR; the actual runbook update lives outside the lens system by design. The single doc_target above satisfies the non-empty-doc_targets contract for a documentation-relevant change without duplicating the runbook's full content into the lens.",
+        "error": null,
+        "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#223": {
+      "merge_sha": "537c97ab2b109ee4d409528cf96347fe623ee7cb",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-08-20T08:24:16.833694+00:00",
+      "summary": {
+        "pr_number": 223,
+        "what_changed": "This PR archived the CCE-144 blind-run-detection spec and plan onto main with 'design approved \u2014 NOT IMPLEMENTED' banners, reflecting an operator decision to abandon a 20-commit unmerged implementation branch (feat/CCE-144-blind-run-detection) and keep only the design record. Nine minutes after this PR merged, the operator reversed that decision: PR #224 pushed the same branch, merged the actual implementation to main (squash commit 087bfbc), and removed the 'NOT IMPLEMENTED' banners this PR had added. The PR's own body was retroactively rewritten with a large supersession banner confirming every factual claim in the original body is false as of 2026-08-14T07:25:23Z, and explicitly instructs that re-applying the original banners would damage the published docs.",
+        "why": "The branch reached a green suite but was never pushed, so deleting it outright would have destroyed the only copy of the incident analysis and blind-vs-degraded classification underlying CCE-144. The operator chose to preserve the design docs while discarding the code \u2014 a decision reversed minutes later once the implementation was in fact pushed and merged via #224. CCE-144 (blind-run detection) and CCE-140 (cursor-backed auto-merge) are both Done on main; CCE-150 (this archiving ticket) is itself marked Done-but-superseded, existing only as a historical record of the reversed decision.",
+        "breaking": false,
+        "doc_targets": [],
+        "notes": "No doc_targets emitted: the spec/plan banners this PR added were already reverted by the later PR #224, which is the authoritative source for current documented state (orchestrator_runner.run exits 1 on blind runs, state_io.add_partial carries the blind flag, _maybe_auto_merge has the blind gate ahead of the CCE-140 carve-out). Re-adding 'NOT IMPLEMENTED' banners per this PR's original content would misrepresent main as of 2026-08-20 and is explicitly warned against in the PR's own supersession banner. If a durable record of this reversed-decision episode is wanted, it belongs as a `decision`-kind archive page summarizing PR #223 vs #224 together, not as an edit driven by PR #223 alone.",
+        "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#224": {
+      "merge_sha": "087bfbc42badc9decb8442760e990e68395ab007",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-08-20T08:24:16.833694+00:00",
+      "summary": {
+        "pr_number": 224,
+        "what_changed": "Splits the orchestrator's overloaded `partial` flag into two distinct signals: `blind` (a blocking agent was prevented from judging its input, e.g. rate-limited or dispatch failure) and `degraded` (the pipeline judged input and rejected specific content). `state_io.add_partial` gains a `degraded` keyword with precedence: `info_only=True` touches neither flag, `degraded=True` flips only `partial`, and specifying neither flips both `partial` and `blind` (the loud, default-safe path). Three consumers now read `blind`: `_exit_code` returns 1 instead of 0, `_should_advance_watermark` freezes the cursor, and `_maybe_auto_merge` skips merging via a new `blind` kwarg gate placed ahead of the CCE-140 cursor-backed carve-out (since that carve-out's `if partial and not advance_cursor_backed` no longer alone protects against a blind+cursor-backed run auto-merging). Also fixes the nightly workflow's 'Print partial-run reasons' step, which was grepping the wrong state file (`state.json` instead of the ephemeral `current_run.json`) and always printed nothing while exiting 0.",
+        "why": "Two production nightly runs (2026-08-11 and 2026-08-12) reported `conclusion: success` while every subagent was rate-limited (zero calls made), and the second run advanced the consume-once watermark past three real feature PRs whose content was never authored \u2014 permanently losing that window with no alarm. The prior `partial` flag conflated 'pipeline judged and rejected' with 'pipeline was prevented from judging at all', so a fully-blind run looked identical to a normal partial run and both passed CI green. This PR also supersedes CCE-150, which had incorrectly archived this design as abandoned before the operator reversed that call nine minutes later; PR #224 lands the implementation CCE-150 assumed was dead.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "architecture/blind-vs-degraded-runs.md",
+            "doc_kind": "architecture",
+            "notes": "Document the blind/degraded/info_only classification on add_partial, the three consumers (_exit_code, _should_advance_watermark, _maybe_auto_merge), and the call-site classification convention (blind is the loud default; degraded/info_only are explicit opt-outs)."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-08-13-cce144-blind-run-detection.md",
+            "doc_kind": "decision",
+            "notes": "Decision record: the 2026-08-11/12 rate-limit incident, the CCE-150 supersession history, and the rationale for gating on the computed blind flag rather than extending the hand-listed merge-veto reason allowlist."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "operations/nightly-workflow-partial-reasons.md",
+            "doc_kind": "architecture",
+            "notes": "Note the fix to the nightly workflow's partial-reasons print step (was reading save_persistent_state's stripped state.json instead of current_run.json) so operators know where to look when triaging a red run."
+          }
+        ],
+        "notes": "PR touches scripts/orchestrator_runner.py, scripts/state_io.py, scripts/verify_runner.py, and two workflow files (dogfood + template) plus spec/plan docs already checked in under docs/superpowers/. No existing-page inventory was provided beyond top-level section names, so all targets use `create`; if an orchestrator architecture page already exists under core/architecture, prefer editing it instead of creating a new one.",
+        "error": null,
+        "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#228": {
+      "merge_sha": "b87d77d2d871efe62a1c05fe264375eea2db80bd",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-08-20T08:24:16.833694+00:00",
+      "summary": {
+        "pr_number": 228,
+        "what_changed": "Adds two net-new documentation files with no code changes: CONTEXT.md, a glossary defining the orchestrator's watermark-advance vocabulary (window, baseline, cursor, window head, promotion, ephemeral advance, admission gate, deferral, owed page, forgiveness, held back, partial run, truncation, batch, block, drift) in one place, distinguishing in particular baseline (the committed lower bound of the next window) from cursor (the in-run position that produces it); and ADR 0001, which records the decision that the on-disk baseline is allowed to advance even for a partial run, per the CCE-40 ephemeral-advance model, and documents why an earlier attempt to clamp the advance at computation time was implemented and then reverted (it broke a pinned CCE-40 invariant test).",
+        "why": "CCE-153 originally proposed clamping the baseline advance whenever a run owes pages, believing the existing time-truncation clamp was mis-scoped. That change was reverted because it violated CCE-40's model that the on-disk advance is ephemeral and refusal belongs at promotion, not computation. Investigating the incident (three runs on theoju/claude-code-self-assessment dropped pages to citation_exists blocks, advanced on disk as designed, and were then merged by a human) revealed the real gap: _maybe_auto_merge's promotion refusal is advisory only and has no standing with GitHub. CCE-153 was retargeted at making that gate enforceable via a required PR-time status check, and this PR captures the rejected-alternative reasoning (including that re-running an old window is not a safe retry mechanism, since page slugs aren't deterministic) as ADR 0001, plus a supporting glossary so the advance-path vocabulary is defined once instead of re-derived from code on every incident.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "architecture/glossary.md",
+            "doc_kind": "architecture",
+            "notes": "Domain glossary for the watermark/advance vocabulary (window, baseline, cursor, window head, promotion, ephemeral advance, admission gate, deferral, owed page, forgiveness, held back, partial run, truncation, batch, block, drift), ported from the repo's new top-level CONTEXT.md. Glossary content only, no decision rationale."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/0001-baseline-advances-on-disk-for-partial-runs.md",
+            "doc_kind": "decision",
+            "notes": "ADR 0001: baseline advances on disk even when a run is partial (ephemeral per CCE-40); records the reverted clamp-at-computation alternative and the non-deterministic-slug reason re-running an old window isn't a valid retry. Cross-reference CCE-153's follow-on enforceable-promotion-gate work once it lands its own doc."
+          }
+        ],
+        "notes": "Source PR adds CONTEXT.md at repo root and docs/adr/0001-*.md in the host's own tree; those are source-tree locations, not lens-relative page paths, so doc_targets re-home the same content under the core lens's existing architecture/ and archive/ sections rather than echoing the source paths. CCE-153's enforceable promotion-gate implementation is tracked as future work, not part of this documentation-only PR."
+      }
+    },
+    "theoju/engineering-docs-agent#227": {
+      "merge_sha": "fc65ab816d0b0eece8fe5ffcaaa053568ced7318",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-08-20T08:24:16.833694+00:00",
+      "summary": {
+        "pr_number": 227,
+        "what_changed": "The authoring loop's soft time-budget deadline could previously cut mid-way through a PR's set of page batches, since batches are keyed by (lens, page_hint) and one PR's pages can be scattered across many batches. When the oldest PR in a window fanned out to more pages than a run's authoring budget allowed, that PR never fully completed, held_back kept swallowing it, advance_cursor_list broke at index 0, and the state cursor could never move forward. This PR changes the cut point to only ever land on a PR boundary (iterate admitted PRs oldest-first, author all of a PR's batches before checking the deadline again), guaranteeing a complete prefix of PRs is left behind the cut so the cursor can advance to the last PR whose pages all landed. Because cutting at a PR boundary is otherwise unbounded (a PR fanning out to many pages could run past the GitHub App installation token's 1h TTL), the change adds resolve_authoring_hard_cap, which computes a hard ceiling from the token TTL, the merge-check poll term, and a fixed safety margin, and resolves to one of four outcomes (NORMAL, CLAMPED, SQUEEZED, REJECTED) depending on how the configured/derived cap relates to that ceiling and the run's time budget. run.authoring_hard_cap_seconds is now a declared, validated field in the config schema. Docs and CHANGELOG were updated to remove stale arithmetic and a stale timeout-minutes citation invalidated by this and the earlier CCE-140 change.",
+        "why": "Closes a 20.6-day baseline stall on a host repo (tracked host-side as ADIS-515): four consecutive nightlies each authored only a handful of pages and ended in no_advance_no_cursor because the deadline check happened at batch granularity instead of PR granularity, letting the run repeatedly re-split the oldest PR's page group without ever completing it. The fix restores forward progress by only ever cutting between PRs, and bounds that change with a computed (not merely asserted) hard cap so a large PR's page group can't hold a run open past the installation token's expiry.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "doc_kind": "architecture",
+            "notes": "Update the authoring-loop deadline/cut-point description and the new resolve_authoring_hard_cap outcomes (NORMAL/CLAMPED/SQUEEZED/REJECTED)."
+          },
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "operations/2026-05-28-subagent-forensics.md",
+            "notes": "Correct stale arithmetic/timeout citations this change invalidated, per PR notes."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-08-17-cce152-pr-boundary-authoring-cut.md",
+            "doc_kind": "decision",
+            "notes": "Record the PR-boundary cut design and the derived hard-cap ceiling formula/outcomes as a decision record; ties CCE-109 doom-loop history to CCE-140 and this fix."
+          }
+        ],
+        "notes": "PR also touches .engineering-docs-agent/config.yml, templates/config.schema.json, templates/workflow-run.yml, and scripts/orchestrator_runner.py, which are source/config surfaces reflected via the architecture and operations page edits above rather than as separate targets. The PR explicitly defers a follow-up fix (splitting the no_advance_no_cursor message) and notes docs-agent-nightly.md / nightly-cron-cadence.md still carry pre-existing unrelated debt about merge-check-poll windows \u00e2\u20ac\u201d both are out of scope here.",
+        "error": null,
+        "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#231": {
+      "merge_sha": "b979e7366200e37ba516ef529a6c7cac1bf3f3ca",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-08-20T08:24:16.833694+00:00",
+      "summary": {
+        "pr_number": 231,
+        "what_changed": "The nightly orchestrator now caches a merged PR's summarizer output in state.json (new `pr_summaries` key, keyed `{owner}/{name}#{pr}`) instead of re-dispatching pr-summarizer against the same immutable merge commit every night. A cached entry is served only when both the PR's `merge_sha` and a fingerprint of `agents/pr-summarizer.md` match the stored values; any mismatch, or an unreadable agent file (empty fingerprint), forces a fresh summarization rather than risking a stale or unprovenanced result. Entries are evicted by 30-day `last_seen_at`, not by window membership, so a PR deferred night after night keeps its cached summary alive instead of aging out the entry that benefits most from reuse. A new `run.reuse_pr_summaries` boolean (default true) in config.schema.json lets a host disable the cache, and the digest gains an info-only `pr_summaries_reused: n/m` reason to make the saving visible.",
+        "why": "On the advanced-data-import-system host, 90% of a night's pr-summarizer dispatches (52 of 58 PRs) were repeat work re-derived from the prior night purely because the collection window overlaps until the cursor advances past a PR \u2014 about 1.53M redundant input tokens per night, including PRs the run went on to discard. Since a merged PR's content is immutable once its merge_sha is fixed, its summary can be cached exactly rather than heuristically, as long as invalidation covers both ways the premise can break: the commit being reachable under the number changing, and the summarizer's own instructions changing.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "doc_kind": "architecture",
+            "notes": "Document the new pr_summaries state cache: merge_sha + agent-fingerprint invalidation, 30-day last_seen_at eviction (refreshed for deferred PRs), and the run.reuse_pr_summaries kill switch."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-08-18-cce159-pr-summary-reuse-decision.md",
+            "doc_kind": "decision",
+            "notes": "Record the design rationale: why the cache is exact (dual invalidation) not heuristic, why eviction is by last-seen rather than window-pruning, and why the digest reason is info_only (not partial) to avoid costing CCE-140 auto-merge eligibility."
+          }
+        ],
+        "notes": "Config/state schema changes (templates/config.schema.json, templates/state.schema.json) are source-tree artifacts, not doc pages; their public-facing shape should surface through the architecture edit above rather than a separate doc_target.",
+        "error": null,
+        "partial": false
+      }
+    }
   }
 }

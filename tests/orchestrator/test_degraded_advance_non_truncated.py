@@ -1,55 +1,64 @@
 # tests/orchestrator/test_degraded_advance_non_truncated.py
-"""CCE-151: a degraded run advances the watermark on the NON-truncated path.
+"""CCE-151: a degraded run must not advance the watermark past an undocumented PR.
 
-`deferred_pages_by_pr` is only read inside `if time_truncated:`. The `else`
-branch assigns `advance_sha = state["current_run"]["head_sha"]` — the full
-window HEAD — without consulting it, so a run that admitted a PR, wrote no page
-for it, and was never truncated still walks the cursor past that PR. The cursor
-is consume-once: the window is never re-read and the content is lost for good.
+`deferred_pages_by_pr` used to be read only inside `if time_truncated:`. The
+`else` branch assigned `advance_sha = state["current_run"]["head_sha"]` — the
+full window HEAD — without consulting it, so a run that admitted a PR, wrote no
+page for it, and was never truncated still walked the cursor past that PR. The
+cursor is consume-once: the window is never re-read and the content is lost for
+good.
 
 The run exits 0, so no failure signal fires and nobody investigates. That
 invisibility is the same mode that let 15 consecutive nightlies rot in CCE-127.
 
 Observed in production twice on 2026-08-21 against
 `theoju/claude-code-self-assessment`: runs 32460602658 and 32495019606 each
-blocked a page on lint and still advanced. The second one advanced past the
-very page the first one had stranded.
+blocked a page on lint and still advanced. The second one advanced past the very
+page the first one had stranded.
 
-## Two tests, on purpose
+## The fix
 
-`test_..._characterization` PASSES today. It pins the defect's exact shape so a
-future change cannot alter it silently — including a change that "fixes" it
-without noticing the blast radius.
+Structural, not a new veto. The held-back set and `partition_deferrals` are now
+computed unconditionally, and the cursor-walk branch is entered on
+`time_truncated or held_back`. A run that holds pages back therefore takes the
+same cursor-backed advance a truncated run takes: it advances only as far as the
+last PR it actually documented, and only when doing so strands nothing behind
+the cursor.
 
-`test_..._invariant` is `xfail(strict=True)`: the property CCE-151 says must
-hold, which does not hold yet. Strict is what makes this self-cleaning — the
-day the fix lands, this file turns RED and forces whoever fixed it to drop the
-marker rather than leaving a stale xfail behind.
-
-## Read this before "fixing" it
-
-Two traps, both load-bearing:
+Two traps this deliberately avoids, both load-bearing:
 
 1. **The obvious fix is wrong.** Extending `_should_advance_watermark` to refuse
-   when `partial and not advance_cursor_backed` freezes the cursor on every
+   whenever `partial and not advance_cursor_backed` freezes the cursor on every
    `lint_block` and reinstates the CCE-109 doom loop that CCE-140 exists to
-   prevent. CCE-151 records the structural fix instead: hoist the held-back set
-   out of `if time_truncated:` and populate `deferred_pages_by_pr` on the
-   non-truncated path too.
+   prevent. Gating on `held_back` emptiness instead leaves clean runs on the
+   plain window-HEAD advance, byte for byte.
 
-2. **A sibling test pins the OPPOSITE and is green.**
-   `test_state_advancement_invariant.py::test_partial_run_via_lint_block_advances_state`
-   asserts the watermark MUST advance for `lint_block`, per CCE-40 §7 row 4 and
-   reaffirmed by CCE-144. That case has the identical shape as this one — one PR
-   admitted, zero pages surviving, watermark advanced — so it is not a different
-   scenario, it is the same scenario with a different reason string. Whichever
-   way CCE-151 is resolved, BOTH tests change together or the suite contradicts
-   itself.
+2. **`partition_deferrals` had to be hoisted too, not just the read.** With
+   `still_deferred` defaulting to `[]`, every non-truncated run silently CLEARED
+   the deferral counts of the PRs it had held back, so no PR could ever
+   accumulate enough deferrals to reach the skip threshold. Hoisting it arms
+   that release valve, which is what stops a permanently-unlintable page from
+   wedging the cursor forever.
 
-CCE-151 leaves one decision explicitly open: the reproduction must "exit
-non-zero **or** leave the watermark unadvanced — decide which, explicitly, and
-record the reasoning." The invariant below is written as that disjunction, so it
-does not pre-empt the choice: either fix satisfies it.
+## The decision CCE-151 left open
+
+The ticket required the run to "exit non-zero **or** leave the watermark
+unadvanced — decide which, explicitly, and record the reasoning."
+
+**Resolved: leave the watermark unadvanced.** Exiting non-zero would fail the
+nightly on a condition that is routine and self-healing — one page blocked, the
+rest published — which trains operators to ignore red runs, the exact failure
+CCE-127 was made of. Holding the cursor preserves the only property that
+actually matters (the window stays re-readable next run) while
+`partial_reasons` and the CCE-140 merge gate carry the visibility.
+
+## Sibling test that had to change with this one
+
+`test_state_advancement_invariant.py::test_partial_run_via_lint_block_holds_state_when_nothing_was_documented`
+pinned the opposite — watermark MUST advance for `lint_block`, per CCE-40 §7 row
+4. That case has the identical shape as this one (one PR admitted, zero pages
+surviving, watermark advanced), so it was not a different scenario but the same
+scenario with a different reason string. It moves in lockstep with this file.
 """
 
 from __future__ import annotations
@@ -114,25 +123,27 @@ def degraded_run(tmp_path, init_host, read_current_run):
     }
 
 
-def test_degraded_non_truncated_run_advances_past_an_undocumented_pr_characterization(
+def test_degraded_non_truncated_run_holds_the_cursor_for_an_undocumented_pr(
     degraded_run,
 ):
-    """Pins the defect exactly as it stands. Expected to PASS until CCE-151.
+    """The full shape of the fixed behavior, asserted field by field.
 
-    Every assertion here is a statement about today's behavior, not about
-    desired behavior. When CCE-151 lands, this test must be rewritten in the
-    same commit — it is the inventory of what that fix changes.
+    This replaces the pre-fix characterization test. Every assertion is a
+    statement about the contract CCE-151 established, so a regression that
+    reintroduces the advance fails here rather than silently in production.
     """
     d = degraded_run
     cr = d["current_run"]
 
-    # The run is degraded, not blind — CCE-144 classifies page-stage failures
-    # as degraded, which is what routes it past _should_advance_watermark.
+    # Still classified degraded, not blind — CCE-144 classifies page-stage
+    # failures as degraded, and the fix must NOT have changed that. If this
+    # flips to blind, the advance is being suppressed by the wrong mechanism
+    # (`_should_advance_watermark`), which is the CCE-109 doom loop.
     assert cr["partial"] is True
     assert not cr.get("blind"), (
-        "page_author_invalid is classified degraded, so `blind` must be falsy; "
-        "if this fails, the classification changed and the advance gate moved "
-        f"with it. current_run={cr}"
+        "page_author_invalid must stay degraded; a blind classification here "
+        "means the fix moved to _should_advance_watermark and reinstated the "
+        f"CCE-109 doom loop. current_run={cr}"
     )
     assert any("page_author_invalid" in r for r in cr["partial_reasons"]), (
         f"expected page_author_invalid in reasons: {cr['partial_reasons']}"
@@ -143,42 +154,36 @@ def test_degraded_non_truncated_run_advances_past_an_undocumented_pr_characteriz
         f"fixture is meant to produce no surviving page; got {d['pages']}"
     )
 
-    # And the run is green, so nothing alerts anyone.
+    # The run stays green. Blocking one page is routine and self-healing; the
+    # visibility lives in partial_reasons and the CCE-140 merge gate, not in a
+    # red nightly. See the module docstring for why this was chosen over exit 1.
     assert d["result"].returncode == 0, (
-        f"expected a green exit today; got {d['result'].returncode}: "
+        f"expected a green exit; got {d['result'].returncode}: "
         f"{d['result'].stderr[-600:]}"
     )
 
-    # The defect: the cursor walks to full window HEAD anyway.
-    assert d["state"]["last_successful_run"]["head_sha"] == d["head"], (
-        "CCE-151: the non-truncated branch assigns advance_sha = window HEAD "
-        "without consulting deferred_pages_by_pr, so the cursor moves past a PR "
-        "that produced no documentation. Found "
-        f"{d['state']['last_successful_run']['head_sha']}, expected {d['head']}"
+    # The fix: the cursor stays put, so the window is re-readable next run.
+    assert d["state"]["last_successful_run"]["head_sha"] == SEEDED_BASELINE, (
+        "CCE-151: with every admitted PR held back, there is no documented PR "
+        "to anchor a cursor-backed advance on, so the baseline must not move. "
+        f"Found {d['state']['last_successful_run']['head_sha']}, expected "
+        f"{SEEDED_BASELINE}"
+    )
+    assert d["state"]["last_successful_run"]["head_sha"] != d["head"], (
+        "the window HEAD must not be reachable on this path at all — that "
+        "assignment is what CCE-151 removed"
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "CCE-151 unfixed: a degraded non-truncated run consumes a PR, writes no "
-        "page, exits 0, and still advances the consume-once cursor past it. "
-        "Remove this marker in the commit that fixes it."
-    ),
-)
 def test_degraded_non_truncated_run_must_not_silently_consume_a_pr_invariant(
     degraded_run,
 ):
-    """The property CCE-151 requires. Written as a disjunction on purpose.
+    """The property CCE-151 requires, stated independently of the mechanism.
 
-    CCE-151's acceptance leaves the mechanism open — "exits non-zero **or**
-    leaves the watermark unadvanced — decide which, explicitly". Asserting the
-    disjunction means this test passes under either resolution and does not
-    quietly decide it here.
-
-    The invariant itself is not negotiable in either form: a window whose PR
-    produced no page must remain re-readable, or the run must be loud enough
-    that a human looks before the branch is merged.
+    Deliberately written as the disjunction the ticket allowed rather than as
+    an assertion about the watermark specifically. The test above pins the
+    mechanism we chose; this one pins the property, so a future redesign that
+    switches to the loud-exit option still satisfies it without a rewrite.
     """
     d = degraded_run
     advanced = d["state"]["last_successful_run"]["head_sha"] != SEEDED_BASELINE

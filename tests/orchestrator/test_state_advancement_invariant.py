@@ -7,7 +7,11 @@ the contract has two branches:
   - Subagent crash/timeout: orchestrator continues; PR opens with
     "(partial)" body. Per CCE-40 §7 row 4, `last_successful_run.head_sha`
     intentionally advances on the docs-agent branch — operators see the
-    partial flag and decide whether to merge.
+    partial flag and decide whether to merge. **CCE-151 narrows this**: the
+    advance is now cursor-backed, reaching only as far as the last PR the run
+    actually documented. A degraded run that documented nothing has no anchor,
+    so it holds the cursor. "Partial still advances" remains true whenever any
+    PR produced a surviving page; it is no longer unconditional.
 
   - PR create/update fails: hard fail (`run()` returns 1). The on-disk
     advance in the runner's working tree is acknowledged as ephemeral per
@@ -66,13 +70,15 @@ def test_blind_run_via_source_collector_error_does_not_advance_state(
     must NOT advance last_successful_run.head_sha.
 
     CCE-40 §7 row 4 originally held that a partial run still advances the
-    watermark, back when `partial` was undifferentiated. CCE-144 narrows
-    that rule: a degraded partial still advances (see
-    test_partial_run_via_lint_block_advances_state, which now carries the
-    CCE-40 rule forward for the degraded case); a blind partial does not.
-    source_collector_error is classified blind, and last_successful_run is
-    a consume-once cursor — a window it skips past is never re-read, so
-    advancing it here would silently lose the run's content forever.
+    watermark, back when `partial` was undifferentiated. Two tickets have
+    narrowed it since. CCE-144: a blind partial does not advance, a degraded
+    one may. CCE-151: a degraded partial advances only as far as it documented
+    (see test_partial_run_via_lint_block_holds_state_when_nothing_was_documented,
+    which pins the zero-pages end of that rule).
+
+    source_collector_error is classified blind, and last_successful_run is a
+    consume-once cursor — a window it skips past is never re-read, so advancing
+    it here would silently lose the run's content forever.
     """
     seeded = {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
     state_path = init_host(seeded)
@@ -103,12 +109,31 @@ def test_blind_run_via_source_collector_error_does_not_advance_state(
     )
 
 
-def test_partial_run_via_lint_block_advances_state(
+def test_partial_run_via_lint_block_holds_state_when_nothing_was_documented(
     tmp_path, init_host, read_current_run
 ):
     """Lint-block path: content-validator returns a block-severity failure.
-    The blocked file is unlinked, current_run.partial=True, but state.json
-    on disk still advances last_successful_run.head_sha.
+    The blocked file is unlinked and current_run.partial=True.
+
+    This test previously asserted the opposite — that the watermark advances to
+    full HEAD regardless — on a literal reading of CCE-40 §7 row 4. CCE-151
+    inverted it, and the inversion is the whole point of that ticket rather
+    than collateral damage, so the reasoning is recorded here rather than in a
+    commit message:
+
+    FAKES_BLOCK holds exactly one PR whose only page is blocked. Every admitted
+    PR is therefore held back, the run documents nothing, and there is no
+    documented PR to anchor a cursor-backed advance on. Advancing to HEAD here
+    consumed the PR's window permanently — the cursor is consume-once, so the
+    content was unrecoverable without a hand-written baseline rewind. That is
+    exactly what happened in production on 2026-08-21 (runs 32460602658 and
+    32495019606).
+
+    What CCE-40 §7 row 4 was protecting is preserved: a run that documents SOME
+    PRs still advances past them, which is what keeps a permanently-unlintable
+    page from wedging the cursor forever (the CCE-109 doom loop). See
+    test_cursor_backed_merge.py for that half, and
+    test_degraded_advance_non_truncated.py for the full CCE-151 rationale.
     """
     seeded = {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
     state_path = init_host(seeded)
@@ -118,10 +143,15 @@ def test_partial_run_via_lint_block_advances_state(
     assert result.returncode == 0, f"runner failed: {result.stderr}"
 
     written = json.loads(state_path.read_text())
-    assert written["last_successful_run"]["head_sha"] == head_sha, (
-        "partial-via-lint-block must STILL advance last_successful_run.head_sha "
-        "per CCE-40 §7 row 4. Found: "
-        f"{written['last_successful_run']['head_sha']}, expected {head_sha}"
+    assert written["last_successful_run"]["head_sha"] == "old_sha_000", (
+        "CCE-151: a degraded run that documented nothing has no PR to anchor a "
+        "cursor-backed advance on, so the baseline must hold and the window "
+        "must stay re-readable. Found: "
+        f"{written['last_successful_run']['head_sha']}, expected old_sha_000"
+    )
+    assert written["last_successful_run"]["head_sha"] != head_sha, (
+        "the full window HEAD must be unreachable on this path — that "
+        "assignment is what CCE-151 removed"
     )
     assert "current_run" not in written, (
         f"current_run leaked into persistent state.json: {written}"
@@ -129,6 +159,11 @@ def test_partial_run_via_lint_block_advances_state(
 
     cr = read_current_run(state_path)
     assert cr["partial"] is True
+    assert not cr.get("blind"), (
+        "lint_block must stay DEGRADED, not blind — if this flips, the hold is "
+        "coming from _should_advance_watermark instead of the cursor walk, "
+        f"which reinstates the CCE-109 doom loop. current_run={cr}"
+    )
     assert any("lint_block" in r for r in cr["partial_reasons"]), (
         f"partial_reasons must contain lint_block: {cr['partial_reasons']}"
     )

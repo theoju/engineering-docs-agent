@@ -1,0 +1,10 @@
+{
+  "pr_number": 1,
+  "what_changed": "Adds one",
+  "why": "demand",
+  "breaking": false,
+  "doc_targets": [
+    { "lens": "core", "action": "create", "page_hint": "connectors/one.md" }
+  ],
+  "notes": null
+}

@@ -8,11 +8,18 @@ correctly finds nothing at the repo root and blocks the page; post-CCE-140 the
 deferral skip then abandons the PR, so the page is silently never written.
 
 This module repairs the observable defect regardless of what causes it. The
-safety argument is that a path is always a suffix of itself: if the page cited
-`X` and now cites `suffix(X)`, that suffix necessarily matches `X`, so a UNIQUE
-match is provably `X`. Repair cannot silently retarget a citation. Ambiguity
-and zero-match both leave the page untouched and blocking, so repair can only
-ever convert a block into a correct citation — never into a silent pass.
+safety claim is set-invariance, NOT correctness: repair never introduces a
+reference to a file the pipeline had not already accepted a reference to. The
+set of files the finished page points at is invariant under repair; only the
+spelling of an existing pointer changes.
+
+Uniqueness alone does not deliver that. A unique suffix match establishes only
+that the candidate exists — never that the cited token was a shortening of it —
+and "does not resolve" is exactly the confabulation population citation_exists
+exists to block. Corroboration is therefore the ENTRY CONDITION: the candidate
+must already be vouched for by a source the authoring agent did not write.
+Ambiguity, zero-match and uncorroborated all leave the page untouched and
+blocking.
 
 Spec: docs/superpowers/specs/2026-08-21-cce141-citation-path-repair-design.md
 """
@@ -165,9 +172,28 @@ def repair_text(
     repo_root: Path,
     config: dict,
     files: set[str],
+    corroborators: set[str],
     prior_text: str | None = None,
-) -> tuple[str, list[tuple[str, str]]]:
-    """Repair shortened citations in `text`. Returns (new_text, repairs).
+) -> tuple[str, list[tuple[str, str]], list[tuple[str, str, str]]]:
+    """Repair shortened citations. Returns (new_text, repairs, declines).
+
+    Corroboration is the ENTRY CONDITION, not an ambiguity tiebreak. A unique
+    suffix match establishes only that the candidate exists — never that the
+    cited token was a shortening of it, and the sole entry condition ("does
+    not resolve") is exactly the confabulation population citation_exists
+    exists to block. See the spec's "Why uniqueness is necessary but NOT
+    sufficient".
+
+    The invariant this delivers: repair never introduces a reference to a file
+    the pipeline had not already accepted a reference to. The set of files the
+    finished page points at is invariant under repair; only the spelling of an
+    existing pointer changes.
+
+    `prior_text` is retained but no longer participates in candidate selection:
+    the prior committed page now reaches this decision only through
+    `build_corroborators`, which the caller applies before calling in. It is
+    deliberately NOT a second, weaker tiebreak — reinstating one here would
+    re-open the entry condition this signature exists to close.
 
     The skip order mirrors `citation_exists.check_path` deliberately. Every
     class it declines to check is a class repair must decline to touch: an
@@ -180,9 +206,9 @@ def repair_text(
     prefixes = example_prefixes(config)
     exempt = exempt_tokens(config)
     roots = source_roots(config)
-    prior_cited = set(extract_citations(prior_text)["paths"]) if prior_text else set()
 
     repairs: list[tuple[str, str]] = []
+    declines: list[tuple[str, str, str]] = []
     for cited in extract_citations(text)["paths"]:
         if cited in exempt:
             continue
@@ -197,18 +223,20 @@ def repair_text(
             continue
 
         candidates = suffix_candidates(rel, files)
-        if len(candidates) > 1:
-            # Ambiguity tiebreak: the version this page shipped with before the
-            # author touched it. Only a single surviving candidate counts —
-            # two prior citations are no more decisive than none.
-            narrowed = [c for c in candidates if c in prior_cited]
-            if len(narrowed) == 1:
-                candidates = narrowed
         if len(candidates) != 1:
+            # Ambiguity and zero-match both fail closed. Corroboration narrows
+            # the entry condition; it does not resolve ambiguity, so a second
+            # candidate still leaves the page untouched and blocking.
             continue
-        repairs.append((cited, candidates[0]))
+        candidate = candidates[0]
+        if candidate not in corroborators:
+            # Match the CANDIDATE, never the cited token: the token is what the
+            # agent wrote, so corroborating it would be circular.
+            declines.append((cited, candidate, "uncorroborated"))
+            continue
+        repairs.append((cited, candidate))
 
     new_text = text
     for old, new in repairs:
         new_text = rewrite_token(new_text, old, new)
-    return new_text, repairs
+    return new_text, repairs, declines

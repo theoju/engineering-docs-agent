@@ -149,13 +149,17 @@ def repo(tmp_path):
 
 
 CFG: dict = {}
+# The one tracked file the `repo` fixture commits under a nested prefix — the
+# candidate every ADIS-shaped fixture below repairs to, and so the corroborator
+# those fixtures must supply for repair to be entered at all.
+FULL = ".claude/skills/connector-builder/references/checklist.md"
 
 
 def test_shortened_citation_is_repaired(repo):
     """The ADIS case, end to end."""
     text = "See `references/checklist.md` for the steps.\n"
     files = cr.tracked_files(repo)
-    out, repairs = cr.repair_text(text, repo, CFG, files)
+    out, repairs, _ = cr.repair_text(text, repo, CFG, files, corroborators={FULL})
     assert repairs == [
         (
             "references/checklist.md",
@@ -173,13 +177,17 @@ def test_confabulated_path_is_left_alone(repo):
     """
     text = "See `docs/invented-by-the-model.md`.\n"
     files = cr.tracked_files(repo)
-    out, repairs = cr.repair_text(text, repo, CFG, files)
+    out, repairs, _ = cr.repair_text(text, repo, CFG, files, corroborators=set())
     assert repairs == []
     assert out == text
 
 
 def test_ambiguous_suffix_is_left_alone(repo):
-    """Two candidates, no prior version to disambiguate -> fail closed."""
+    """Two candidates -> fail closed.
+
+    Corroboration narrows the entry condition; it never resolves ambiguity, so
+    the `len(candidates) != 1` guard still decides this case on its own.
+    """
     second = repo / "other/references"
     second.mkdir(parents=True)
     (second / "checklist.md").write_text("# other\n")
@@ -187,35 +195,18 @@ def test_ambiguous_suffix_is_left_alone(repo):
     _git(repo, "commit", "-qm", "second")
 
     text = "See `references/checklist.md`.\n"
-    out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
+    out, repairs, _ = cr.repair_text(
+        text, repo, CFG, cr.tracked_files(repo), corroborators=set()
+    )
     assert repairs == []
     assert out == text
 
 
-def test_ambiguity_is_broken_by_the_previous_version(repo):
-    """When the prior page cited exactly one candidate, that one wins."""
-    second = repo / "other/references"
-    second.mkdir(parents=True)
-    (second / "checklist.md").write_text("# other\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "second")
-
-    prior = "See `.claude/skills/connector-builder/references/checklist.md`.\n"
-    text = "See `references/checklist.md`.\n"
-    out, repairs = cr.repair_text(
-        text, repo, CFG, cr.tracked_files(repo), prior_text=prior
-    )
-    assert repairs == [
-        (
-            "references/checklist.md",
-            ".claude/skills/connector-builder/references/checklist.md",
-        )
-    ]
-
-
 def test_resolving_citation_is_byte_identical(repo):
     text = "See `README.md`.\n"
-    out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
+    out, repairs, _ = cr.repair_text(
+        text, repo, CFG, cr.tracked_files(repo), corroborators=set()
+    )
     assert repairs == []
     assert out == text
 
@@ -223,8 +214,8 @@ def test_resolving_citation_is_byte_identical(repo):
 def test_repair_is_idempotent(repo):
     text = "See `references/checklist.md`.\n"
     files = cr.tracked_files(repo)
-    once, _ = cr.repair_text(text, repo, CFG, files)
-    twice, repairs = cr.repair_text(once, repo, CFG, files)
+    once, _, _ = cr.repair_text(text, repo, CFG, files, corroborators={FULL})
+    twice, repairs, _ = cr.repair_text(once, repo, CFG, files, corroborators={FULL})
     assert repairs == []
     assert twice == once
 
@@ -233,7 +224,11 @@ def test_exempt_token_is_never_repaired(repo):
     """Exclusion row 1. The host declared this unverifiable on purpose."""
     cfg = {"lint": {"citation_exempt_tokens": ["references/checklist.md"]}}
     text = "See `references/checklist.md`.\n"
-    out, repairs = cr.repair_text(text, repo, cfg, cr.tracked_files(repo))
+    # Corroborated on purpose: without the exempt check the candidate would be
+    # repaired, so this stays discriminating. corroborators=set() would defang it.
+    out, repairs, _ = cr.repair_text(
+        text, repo, cfg, cr.tracked_files(repo), corroborators={FULL}
+    )
     assert repairs == []
     assert out == text
 
@@ -260,7 +255,14 @@ def test_example_namespace_token_is_never_repaired(repo):
     _git(repo, "commit", "-qm", "ex")
 
     text = "See `example/auth/session.py`.\n"
-    out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
+    # Corroborated on purpose — see the exempt-token test for why.
+    out, repairs, _ = cr.repair_text(
+        text,
+        repo,
+        CFG,
+        cr.tracked_files(repo),
+        corroborators={"docs/example/auth/session.py"},
+    )
     assert repairs == []
     assert out == text
 
@@ -289,7 +291,14 @@ def test_gitignored_path_is_never_repaired(repo):
     _git(repo, "commit", "-qm", "ignore")
 
     text = "See `generated/output.md`.\n"
-    out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
+    # Corroborated on purpose — see the exempt-token test for why.
+    out, repairs, _ = cr.repair_text(
+        text,
+        repo,
+        CFG,
+        cr.tracked_files(repo),
+        corroborators={"docs/generated/output.md"},
+    )
     assert repairs == []
     assert out == text
 
@@ -307,7 +316,9 @@ def test_absolute_path_outside_repo_is_never_repaired(repo):
     contrived unreachable case.
     """
     text = "See `/etc/nginx/nginx.conf`.\n"
-    out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
+    out, repairs, _ = cr.repair_text(
+        text, repo, CFG, cr.tracked_files(repo), corroborators=set()
+    )
     assert repairs == []
     assert out == text
 
@@ -363,3 +374,102 @@ def test_rung2_excludes_glob_entries():
 
 def test_no_prior_and_no_sources_corroborates_nothing():
     assert cr.build_corroborators(None, set(), {"a/b.md"}) == set()
+
+
+def test_uncorroborated_candidate_is_declined_not_repaired(repo):
+    """THE CORE GUARD. A unique suffix match with no corroboration must NOT
+    be repaired — uniqueness alone establishes nothing about whether the
+    token was ever a shortening of anything."""
+    text = "See `references/checklist.md`.\n"
+    files = cr.tracked_files(repo)
+    out, repairs, declines = cr.repair_text(text, repo, CFG, files, corroborators=set())
+    assert repairs == []
+    assert out == text
+    assert declines == [
+        (
+            "references/checklist.md",
+            ".claude/skills/connector-builder/references/checklist.md",
+            "uncorroborated",
+        )
+    ]
+
+
+def test_corroborated_candidate_is_repaired(repo):
+    """The ADIS shape, once the candidate is corroborated."""
+    full = ".claude/skills/connector-builder/references/checklist.md"
+    text = "See `references/checklist.md`.\n"
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, cr.tracked_files(repo), corroborators={full}
+    )
+    assert repairs == [("references/checklist.md", full)]
+    assert declines == []
+    assert full in out
+
+
+def test_corroboration_matches_the_candidate_not_the_cited_token(repo):
+    """Corroborating the TOKEN would be circular — the token is what the
+    agent wrote. Only the candidate's provenance counts."""
+    text = "See `references/checklist.md`.\n"
+    out, repairs, declines = cr.repair_text(
+        text,
+        repo,
+        CFG,
+        cr.tracked_files(repo),
+        corroborators={"references/checklist.md"},
+    )
+    assert repairs == []
+    assert len(declines) == 1
+
+
+def test_confabulated_path_that_uniquely_suffix_matches_is_declined(repo):
+    """THE REGRESSION PROOF. This is the defect that produced Revision 2.
+
+    Write it against the PRE-FIX code first and watch it FAIL: today a
+    unique suffix match is repaired regardless of provenance, so a page
+    citing an invented path is silently re-pointed at a real file and the
+    lint block becomes a pass."""
+    nested = repo / "tests/fixtures/setup_repos/js_docusaurus/.github/workflows"
+    nested.mkdir(parents=True)
+    (nested / "ci.yml").write_text("on: push\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "fixture")
+
+    text = "The workflow lives at `.github/workflows/ci.yml`.\n"
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, cr.tracked_files(repo), corroborators=set()
+    )
+    assert repairs == [], (
+        "an invented path that happens to uniquely suffix-match a test "
+        "fixture must never be repaired"
+    )
+    assert out == text
+
+
+def test_ambiguous_candidate_is_declined_even_when_corroborated(repo):
+    """Corroboration narrows; it does not resolve ambiguity. Two candidates
+    still fail closed."""
+    second = repo / "other/references"
+    second.mkdir(parents=True)
+    (second / "checklist.md").write_text("# other\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "second")
+
+    both = {
+        ".claude/skills/connector-builder/references/checklist.md",
+        "other/references/checklist.md",
+    }
+    text = "See `references/checklist.md`.\n"
+    out, repairs, _ = cr.repair_text(
+        text, repo, CFG, cr.tracked_files(repo), corroborators=both
+    )
+    assert repairs == []
+    assert out == text
+
+
+def test_corroborators_has_no_default(repo):
+    """An un-threaded call site must fail loudly, never silently revert to
+    unconditional repair."""
+    import inspect
+
+    sig = inspect.signature(cr.repair_text)
+    assert sig.parameters["corroborators"].default is inspect.Parameter.empty

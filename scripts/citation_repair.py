@@ -159,7 +159,7 @@ def suffix_candidates(cited: str, files: set[str]) -> list[str]:
 
 
 def _closed_fence_lines(text: str) -> set[int]:
-    """Line indices inside a CLOSED fence — the lines strip_fenced_blocks cuts.
+    r"""Line indices inside a CLOSED fence — the lines strip_fenced_blocks cuts.
 
     Mirrors that function's bookkeeping on purpose, including the awkward
     part: an UNTERMINATED fence strips nothing there, so its lines stay
@@ -198,7 +198,7 @@ def _closed_fence_lines(text: str) -> set[int]:
 
 
 def rewrite_token(text: str, old: str, new: str) -> str:
-    """Replace bare path `old` with `new` inside matching inline code spans.
+    r"""Replace bare path `old` with `new` inside matching inline code spans.
 
     Matching is on the token's BARE path (suffix stripped), but the replacement
     happens inside the original token, so `path.py:Class.method` keeps its

@@ -1563,6 +1563,55 @@ def _enforce_agent_frontmatter(path: Path, agent_fields: dict) -> None:
     path.write_text(fmc.agent_authored_frontmatter_text(**agent_fields) + body)
 
 
+def _prior_page_text(repo_root: Path, path: Path) -> str | None:
+    """The page as HEAD has it, or None for a new page / no commit."""
+    try:
+        rel = path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return None
+    r = subprocess.run(
+        ["git", "-C", str(repo_root), "show", f"HEAD:{rel}"],
+        capture_output=True,
+        text=True,
+    )
+    return r.stdout if r.returncode == 0 else None
+
+
+def _repair_citation_paths(
+    path: Path, repo_root: Path, config: dict, state: dict
+) -> None:
+    """CCE-141: repair citations the author shortened into unresolvable paths.
+
+    Runs beside _enforce_agent_frontmatter so content-validator only ever sees
+    an already-correct page. Reported info_only: nothing was lost, so the run
+    is not degraded — but the digest line is the only signal that would ever
+    justify revisiting the author prompt, so it must not be silent.
+    """
+    import citation_repair
+
+    try:
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError):
+        return
+    files = citation_repair.tracked_files(repo_root)
+    new_text, repairs = citation_repair.repair_text(
+        text, repo_root, config, files, prior_text=_prior_page_text(repo_root, path)
+    )
+    if not repairs:
+        return
+    path.write_text(new_text)
+    try:
+        label = path.relative_to(repo_root).as_posix()
+    except ValueError:
+        label = path.name
+    for old, new in repairs:
+        add_partial(
+            state,
+            f"citation_path_repaired: {label}: '{old}' -> '{new}'",
+            info_only=True,
+        )
+
+
 def _resolve_docs_dir(config: dict) -> str | None:
     """The docs root for core pages: prefer ``site.docs_dir`` (what the manifest
     code and the source-map stage use), fall back to ``docs.source_dir`` for
@@ -2383,6 +2432,12 @@ def run(
                     # above wrote it). Runs on both paths; a no-op when the write
                     # already matches.
                     _enforce_agent_frontmatter(target_path, agent_fields)
+                if target_path.exists():
+                    # CCE-141: repair shortened citations before content-validator
+                    # runs. Deliberately NOT nested under the agent_fields guard —
+                    # a shortened citation blocks any page, not only the
+                    # agent-authored-frontmatter ones.
+                    _repair_citation_paths(target_path, repo_root, config, state)
 
         # Content validation
         if authored:

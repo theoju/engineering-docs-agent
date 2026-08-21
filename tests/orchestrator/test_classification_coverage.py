@@ -101,10 +101,22 @@ def test_orchestrator_has_the_expected_call_site_population():
     against the spec's Classification section and update the number here in
     the same commit that adds them."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 40, (
-        f"expected 40 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 41, (
+        f"expected 41 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
+    # 40 -> 41: CCE-141 added `citation_path_repaired` in the new
+    # `_repair_citation_paths`, called beside `_enforce_agent_frontmatter` for
+    # every authored page. It reports each citation path the deterministic
+    # repairer rewrote from an unresolvable relative path to a resolvable one.
+    #
+    # Classification: info_only=True. A repair is a successful rescue, not a
+    # degradation — nothing was lost, so `partial` must not flip. Flipping it
+    # would veto auto-merge for a self-correction through CCE-140's `partial
+    # and not advance_cursor_backed` gate, punishing the run for fixing the
+    # very problem it fixed. It is recorded at all because the digest line is
+    # the only signal that would ever justify revisiting the author prompt
+    # that produced the shortened citation in the first place.
     # 39 -> 40: CCE-159 added `pr_summaries_reused` in run(), reporting how
     # many PRs were served from the summary cache instead of re-dispatched.
     #

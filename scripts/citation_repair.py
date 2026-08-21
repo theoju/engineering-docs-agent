@@ -46,7 +46,46 @@ from citation_exists import (  # noqa: E402
     tracked_files,
 )
 
-__all__ = ["suffix_candidates", "rewrite_token", "repair_text", "tracked_files"]
+__all__ = [
+    "suffix_candidates",
+    "rewrite_token",
+    "repair_text",
+    "tracked_files",
+    "build_corroborators",
+]
+
+
+_GLOB_CHARS = ("*", "?", "[", "{")
+
+
+def build_corroborators(
+    prior_text: str | None, source_paths: set[str], files: set[str]
+) -> set[str]:
+    """Tracked paths corroborated by a source the authoring agent did not write.
+
+    Rung 1 (edits, git-authoritative): a RAW substring scan of the prior
+    committed page. Deliberately not extract_citations — that reads only
+    backticked spans in unfenced prose and on this repo's 108-page corpus sees
+    69.9% of path tokens, missing frontmatter-only and link-target-only ones.
+    A raw scan does not violate the imported-never-reimplemented contract: it
+    is not deciding what a citation IS, only whether a known-tracked path was
+    already present.
+
+    Rung 2 (every authoring, orchestrator-authoritative): the batch's source
+    set. On a create _enforce_agent_frontmatter writes this into the page's own
+    source_files, OVERWRITING the agent — so every action has a corroborator
+    the agent did not author. Glob entries are excluded: expanding them would
+    make the gate ceremony.
+
+    evidence.files_read is deliberately NOT a source — an author that
+    confabulates a citation can equally confabulate a files_read entry.
+    """
+    out = {
+        p for p in source_paths if p in files and not any(c in p for c in _GLOB_CHARS)
+    }
+    if prior_text:
+        out |= {f for f in files if f in prior_text}
+    return out
 
 
 def suffix_candidates(cited: str, files: set[str]) -> list[str]:

@@ -310,3 +310,43 @@ def test_absolute_path_outside_repo_is_never_repaired(repo):
     out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
     assert repairs == []
     assert out == text
+
+
+def test_rung1_raw_scan_sees_frontmatter_and_table_sites():
+    """The ADIS incident cited the full path in frontmatter (line 6), prose
+    (27) and a table (92). extract_citations sees only backticked spans in
+    unfenced prose, so a rung built on it could miss the very evidence this
+    ticket exists for. The scan must be raw."""
+    full = ".claude/skills/connector-builder/references/checklist.md"
+    prior = (
+        "---\n"
+        f"sources:\n  - {full}\n"
+        "---\n\n"
+        f"| step | ref |\n| --- | --- |\n| 1 | {full} |\n"
+    )
+    got = cr.build_corroborators(prior, set(), {full})
+    assert full in got
+
+
+def test_rung1_only_admits_tracked_paths():
+    """A raw scan must not admit arbitrary strings from the prior page."""
+    prior = "See totally/invented/thing.md for details.\n"
+    assert cr.build_corroborators(prior, set(), {"real/file.md"}) == set()
+
+
+def test_rung2_admits_the_batch_source_set():
+    got = cr.build_corroborators(None, {"a/b/c.md"}, {"a/b/c.md"})
+    assert got == {"a/b/c.md"}
+
+
+def test_rung2_excludes_glob_entries():
+    """Manifest source_files carry globs (core/**). Expanding them would make
+    the gate ceremony while the diff still reads `if candidate in corroborated`."""
+    got = cr.build_corroborators(
+        None, {"core/**", "docs/superpowers/**"}, {"core/x.md"}
+    )
+    assert got == set()
+
+
+def test_no_prior_and_no_sources_corroborates_nothing():
+    assert cr.build_corroborators(None, set(), {"a/b.md"}) == set()

@@ -187,15 +187,42 @@ then the `len(candidates) == 1` gate carries zero bits of information about
 whether a shortening occurred, and the mechanism collapses to "is this string a
 tail of some tracked file."
 
-Measured on the plugin's own tree (886 tracked files): **2109 distinct
-non-resolving proper-tail tokens have a unique match.** The set of invented
-strings that would flip block into pass is *larger than the repository*. A
-citation-shape-filtered count puts it at 1281 with zero ambiguous cases; both
-counts support the same conclusion, and the unfiltered one is worse.
+Re-measured 2026-08-21 on the plugin's own tree, **887 tracked files**
+(`git ls-files | wc -l`): **2086 distinct non-resolving proper-tail tokens have
+a unique match.** The set of invented strings that would flip block into pass is
+*larger than the repository*. A citation-shape-filtered count — restricted to
+the tails `_REPO_PATH_RE` can actually emit, which is the only population that
+ever reaches repair — puts it at **1387 unique out of 1388 non-resolving shaped
+tails, one ambiguous**; both counts support the same conclusion, and the
+unfiltered one is worse.
 
 The gradient runs the wrong way, too: the deeper and more specific-looking the
-invented path, the more likely it is accepted (1-segment 80.0% unique,
-2-segment 99.5%, 3-segment 100%).
+invented path, the more likely it is accepted — unfiltered, 1-segment 94.9%
+unique, 2-segment 99.7%, 3-segment and deeper 100%.
+
+Every figure in this section, and the surface figure under "Measured cost" in
+Revision 2, comes from one command:
+
+```bash
+PYTHONPATH=scripts:scripts/lint .venv/bin/python -c '
+from pathlib import Path
+from citation_exists import (_REPO_PATH_RE, _build_dir, _docs_dir, _relativize,
+                             _resolves, source_roots, tracked_files)
+from citation_repair import suffix_candidates
+root = Path(".").resolve(); files = tracked_files(root)
+d, b, r = _docs_dir({}), _build_dir(root), source_roots({})
+tails = {"/".join(f.split("/")[-k:]) for f in files for k in range(1, len(f.split("/")))}
+assert all(_relativize(t, root) is not None for t in tails)
+nr = [t for t in tails if not _resolves(t, root, files, d, b, r)]
+uniq = [t for t in nr if len(suffix_candidates(t, files)) == 1]
+sh = [t for t in nr if _REPO_PATH_RE.match(t)]
+shu = [t for t in sh if len(suffix_candidates(t, files)) == 1]
+print("tracked", len(files), "| non-resolving tails", len(nr), "| unique", len(uniq))
+print("citation-shaped", len(sh), "unique", len(shu), "ambiguous", len(sh) - len(shu))
+print("surface: unfiltered", len({suffix_candidates(t, files)[0] for t in uniq}),
+      "| citation-shaped", len({suffix_candidates(t, files)[0] for t in shu}))
+'
+```
 
 Read the table as bounding ambiguity **among genuine shortenings only**. It says
 nothing about the population that breaks the design, because it samples only
@@ -465,8 +492,13 @@ corroborated repair is a genuine rescue and must not veto auto-merge.
   deeply-nested support files, which are exactly what a PR diff does not contain.
 - **Residual retained: ~56%** of the files in a real batch's source set still
   expose a unique non-resolving suffix. Corroboration narrows the confabulation
-  surface by roughly two orders of magnitude — 812 tracked files down to a
-  per-page set of 5–15 — but does **not** close it.
+  surface by roughly two orders of magnitude — **788** tracked files down to a
+  per-page set of 5–15 — but does **not** close it. 788 is a **different set**
+  from the 887 above, not a drifted copy of it: 887 is every tracked file,
+  while 788 is the subset actually reachable as a repair target — the distinct
+  tracked files that are the unique match of some non-resolving,
+  `_REPO_PATH_RE`-shaped tail. Same command, its
+  `surface: … | citation-shaped` field.
 - **Host shape dominates.** Pooled across three hosts: 65% creates / 35% edits.
   On `claude-extensions` specifically it is 82% create, and all four measured
   "edits" were the agent re-authoring its own hours-old pages after a baseline
@@ -517,3 +549,89 @@ Unchanged from Revision 1: frontmatter, markdown link targets (`internal_links`)
 the author prompt, and CCE-167. `run_bootstrap_core` (`orchestrator_runner.py:3145`)
 has no PRs by construction, so core-authoring pages get no repair coverage — that
 is correct, and is stated rather than papered over.
+
+---
+
+# Post-implementation correction 3 — the shipped module, re-audited (2026-08-21)
+
+**Status:** correction, applied in code and in `CLAUDE.md`
+**Reason:** a second adversarial review of what actually shipped.
+
+Two of this round's three code fixes already carry an in-place note above — the
+candidate-side exclusions under "Exclusions the repair MUST honour", and the
+rung-1 revert under "The corroborator ladder". Neither is repeated here. This
+section records the round as a whole, the one fix that had no note, and the
+figures that turned out not to survive re-derivation. **The earlier corrections
+stay exactly as written**; having been wrong twice is part of the record.
+
+## The fence mirror was decorative until this round
+
+`_closed_fence_lines` exists so `rewrite_token` never edits a line that
+`extract_citations` could not see. It iterated `text.split("\n")` while
+`strip_fenced_blocks` iterates `text.splitlines()`, and those are **not** the
+same walk: six characters survive `Path.read_text()`'s universal-newline
+translation yet ARE `splitlines()` boundaries — U+2028, U+2029, `\x85`, `\x0b`,
+`\x0c`, `\x1c`. With any of them on the page, the `split("\n")` walk sees a
+fence opener glued to the end of the preceding line, never opens the fence, and
+returns an empty set — while `extract_citations`, on `splitlines()`, strips that
+fence correctly. `rewrite_token` then rewrote the deliberate fenced
+illustration, turning an example into a false claim about real code, and
+`repair_text` reported a repair at a site the linter never checked. Both
+functions now iterate `splitlines()`, and `rewrite_token` rejoins using each
+line's OWN terminator from `splitlines(keepends=True)` — `"\n".join()` would
+silently rewrite all six of those bytes on every page it touched.
+
+## The "≥2-segment suffix floor" is not a check
+
+The rung-2 row of the corroborator ladder above describes a **≥2-segment suffix
+floor**. There is no such guard anywhere in `scripts/citation_repair.py` —
+`repair_text` tests `_resolves`, `_excluded_reason` on both ends,
+`len(candidates) != 1` and `candidate not in corroborators`, and nothing counts
+segments except the suffix arithmetic inside `suffix_candidates` itself.
+
+The floor holds today as a **property of the extractor**, not as a property of
+the repairer: `_REPO_PATH_RE` (`scripts/lint/citation_exists.py`) is
+`^[\w.\-/]+/[\w.\-]+\.\w{1,8}(?::…)?$` and requires a literal `/`, so
+`extract_citations` never yields a slash-free token and `repair_text` never sees
+one. Verified both halves rather than assumed: 0 of the 887 tracked basenames
+match `_REPO_PATH_RE`, and running `extract_citations` over a line that spans
+`checklist.md`, `README.md` and `scripts/citation_repair.py` returns
+`['scripts/citation_repair.py']` alone — the two slash-free tokens are
+dropped before repair ever sees them. But
+`suffix_candidates` is in `__all__` and accepts one happily —
+`suffix_candidates("citation_repair.py", files)` returns
+`['scripts/citation_repair.py']`. **A future caller of the exported function
+does not inherit the floor.** Stated as the contingent fact it is; if the floor
+is ever wanted as a guarantee, it has to be written down as a check.
+
+## Figures that did not survive re-derivation
+
+- **887 vs 886 vs 812.** This spec carried 886 tracked files in one place and
+  812 in another for the same tree. Both are gone. The tracked count is 887
+  today and the two sentences measure genuinely different sets — see the
+  re-derived numbers and the single command under "Measured ambiguity", and the
+  set distinction spelled out under "Measured cost". Re-derived, not picked.
+- **The citation-visibility split is unreproducible.** The superseded rung-1
+  paragraph reports `extract_citations` seeing 69.9% of path tokens over the
+  108-page `docs/site-src` corpus, missing 19.7% bare-prose, 5.0%
+  frontmatter-only and 2.5% link-target-only. No method was recorded with it. A
+  reconstruction — raw substring scan of every tracked path over all 108 pages,
+  each of the 673 resulting page/path mentions classified by the region its
+  occurrences fall in — lands at **54.8% visible, 12.0% bare-prose-only, 22.1%
+  link-target-only, 3.7% frontmatter-only**, with the remainder fenced-only,
+  inside spans the linter skips, or mixed. That is a different split, so the
+  original numbers are not carried anywhere. The paragraph itself is preserved
+  unchanged: it is the record of the reasoning that was backwards, and the
+  numbers in it were never what made it wrong.
+
+## What `CLAUDE.md` now says
+
+Its CCE-141 bullet describes rung 1 as the linter's own view of the prior
+committed page intersected with the tracked set, names **why** the raw scan was
+wrong (the invisible
+remainder is invisible *because* the linter never validates it, so it cannot
+evidence acceptance — it admitted a fenced-only mention as a corroborator and
+restored the block-becomes-pass defect), names all three miss-buckets including
+the link-target-only one it had dropped, states the segment floor as a property
+of `_REPO_PATH_RE` rather than a guard, and records the candidate-side
+exclusions and the `splitlines()` fence mirror.

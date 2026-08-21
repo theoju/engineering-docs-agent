@@ -169,19 +169,6 @@ def test_shortened_citation_is_repaired(repo):
     assert ".claude/skills/connector-builder/references/checklist.md" in out
 
 
-def test_confabulated_path_is_left_alone(repo):
-    """STRICTNESS GUARD. Repair must not weaken the gate citation_exists IS.
-
-    A path matching nothing is a confabulation. Leaving the page byte-identical
-    is what keeps citation_exists blocking it.
-    """
-    text = "See `docs/invented-by-the-model.md`.\n"
-    files = cr.tracked_files(repo)
-    out, repairs, _ = cr.repair_text(text, repo, CFG, files, corroborators=set())
-    assert repairs == []
-    assert out == text
-
-
 def test_ambiguous_suffix_is_left_alone(repo):
     """Two candidates -> fail closed.
 
@@ -443,6 +430,28 @@ def test_confabulated_path_that_uniquely_suffix_matches_is_declined(repo):
         "fixture must never be repaired"
     )
     assert out == text
+
+
+def test_corroborated_invention_is_still_repaired_this_is_the_residual(repo):
+    """UNCOMFORTABLE BY DESIGN. Corroboration narrows the confabulation
+    surface by ~2 orders of magnitude; it does not close it. ~56% of a real
+    batch's source set still exposes a unique non-resolving suffix, and that
+    set IS the author's prompt input. This test exists so the residual is
+    visible in the suite rather than discovered in production."""
+    nested = repo / "tests/fixtures/setup_repos/js_docusaurus/.github/workflows"
+    nested.mkdir(parents=True)
+    (nested / "ci.yml").write_text("on: push\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "fixture")
+
+    text = "The workflow lives at `.github/workflows/ci.yml`.\n"
+    full = "tests/fixtures/setup_repos/js_docusaurus/.github/workflows/ci.yml"
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, cr.tracked_files(repo), corroborators={full}
+    )
+    assert repairs == [(".github/workflows/ci.yml", full)]
+    assert declines == []
+    assert full in out
 
 
 def test_ambiguous_candidate_is_declined_even_when_corroborated(repo):

@@ -173,7 +173,6 @@ def repair_text(
     config: dict,
     files: set[str],
     corroborators: set[str],
-    prior_text: str | None = None,
 ) -> tuple[str, list[tuple[str, str]], list[tuple[str, str, str]]]:
     """Repair shortened citations. Returns (new_text, repairs, declines).
 
@@ -188,12 +187,6 @@ def repair_text(
     the pipeline had not already accepted a reference to. The set of files the
     finished page points at is invariant under repair; only the spelling of an
     existing pointer changes.
-
-    `prior_text` is retained but no longer participates in candidate selection:
-    the prior committed page now reaches this decision only through
-    `build_corroborators`, which the caller applies before calling in. It is
-    deliberately NOT a second, weaker tiebreak — reinstating one here would
-    re-open the entry condition this signature exists to close.
 
     The skip order mirrors `citation_exists.check_path` deliberately. Every
     class it declines to check is a class repair must decline to touch: an

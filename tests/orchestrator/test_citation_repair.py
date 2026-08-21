@@ -382,6 +382,108 @@ def test_absolute_path_outside_repo_is_never_repaired(repo):
     assert out == text
 
 
+# --- Exclusions on the CANDIDATE side ---------------------------------------
+# The four rows above test the CITED token. Testing only that end let a repair
+# MOVE a citation INTO an excluded class instead of out of one: every class
+# below is a place check_path never verifies, so a page rewritten into one
+# reads `(True, 'ok')` forever. Each row gets its own reason string so the
+# digest distinguishes it from a plain `uncorroborated` decline.
+
+
+def test_candidate_in_the_example_namespace_is_declined(repo):
+    """THE REPRODUCED CASE. Cited `auth/session.py`, corroborated candidate
+    `example/auth/session.py`: the repair used to fire and park the citation in
+    the reserved illustrative namespace, where check_path skips it permanently.
+    check_path went (False, 'cites nonexistent path ...') -> (True, 'ok').
+    """
+    ex = repo / "example/auth"
+    ex.mkdir(parents=True)
+    (ex / "session.py").write_text("# ex\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "example ns")
+
+    text = "See `auth/session.py`.\n"
+    out, repairs, declines = cr.repair_text(
+        text,
+        repo,
+        CFG,
+        cr.tracked_files(repo),
+        corroborators={"example/auth/session.py"},
+    )
+    assert repairs == []
+    assert out == text
+    assert declines == [
+        ("auth/session.py", "example/auth/session.py", "candidate_example_namespace")
+    ]
+
+
+def test_candidate_that_is_an_exempt_token_is_declined(repo):
+    """The host declared this exact path unverifiable on purpose. Repairing
+    INTO it parks a live citation on a token check_path never checks."""
+    cfg = {"lint": {"citation_exempt_tokens": [FULL]}}
+    text = "See `references/checklist.md`.\n"
+    out, repairs, declines = cr.repair_text(
+        text, repo, cfg, cr.tracked_files(repo), corroborators={FULL}
+    )
+    assert repairs == []
+    assert out == text
+    assert declines == [("references/checklist.md", FULL, "candidate_exempt_token")]
+
+
+def test_candidate_that_is_gitignored_is_declined(repo):
+    """Tracked AND gitignored is reachable: git keeps tracking a file added
+    before the ignore rule, so it is in `git ls-files` AND `check-ignore` says
+    ignored. CCE-145 downgrades such a path to an advisory because it is absent
+    from a fresh checkout -- so repairing INTO it converts a hard block into a
+    permanent advisory, which is not a fix.
+
+    The cited token stays clean: `docs/generated/output.md` has a non-trailing
+    internal slash, so the pattern is anchored at the repo root and does NOT
+    ignore the bare `generated/output.md` the page cites.
+    """
+    docs_generated = repo / "docs/generated"
+    docs_generated.mkdir(parents=True)
+    (docs_generated / "output.md").write_text("# generated\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "tracked first")
+    (repo / ".gitignore").write_text("docs/generated/output.md\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-qm", "ignored after tracking")
+
+    files = cr.tracked_files(repo)
+    assert "docs/generated/output.md" in files, "the candidate must stay tracked"
+
+    text = "See `generated/output.md`.\n"
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, files, corroborators={"docs/generated/output.md"}
+    )
+    assert repairs == []
+    assert out == text
+    assert declines == [
+        ("generated/output.md", "docs/generated/output.md", "candidate_gitignored")
+    ]
+
+
+def test_candidate_outside_the_repo_is_declined(repo):
+    """`_relativize` rejects an absolute path that does not resolve inside the
+    repo -- an environment reference, not a repo citation.
+
+    `git ls-files` never emits one, but `files` is a PARAMETER of repair_text,
+    so this guard is a contract on the parameter rather than on git's output: a
+    candidate that escapes the repo must never be written into a page.
+    """
+    files = cr.tracked_files(repo) | {"/etc/nginx/nginx.conf"}
+    text = "See `nginx/nginx.conf`.\n"
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, files, corroborators={"/etc/nginx/nginx.conf"}
+    )
+    assert repairs == []
+    assert out == text
+    assert declines == [
+        ("nginx/nginx.conf", "/etc/nginx/nginx.conf", "candidate_outside_repo")
+    ]
+
+
 def test_rung1_admits_a_path_the_linter_validated_in_prose():
     """Rung 1 is the LINTER'S view of the prior page: an inline code span in
     unfenced prose is exactly what citation_exists validated there, so it is

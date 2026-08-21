@@ -105,6 +105,37 @@ def build_corroborators(
     return out
 
 
+def _excluded_reason(
+    token: str,
+    rel: str,
+    repo_root: Path,
+    exempt: set[str],
+    prefixes: tuple[str, ...],
+) -> str | None:
+    """Which class `citation_exists` declines to CHECK this path as, if any.
+
+    ONE definition, applied to BOTH ends of a repair: the cited token and the
+    candidate it would be rewritten to. Every class here is unresolvable BY
+    DESIGN, so a path in one of them evidences nothing and must never be
+    written into a page.
+
+    `_resolves` is deliberately not one of these classes. On the cited side it
+    is the entry condition (a token that resolves needs no repair); on the
+    candidate side it is vacuous (a candidate comes from the tracked set, so it
+    always resolves). Callers apply it themselves.
+
+    Ordering: on the cited side this runs AFTER `_resolves`, so the
+    `_is_gitignored` subprocess is only paid for paths that do not resolve.
+    """
+    if token in exempt:
+        return "exempt_token"
+    if any(rel.startswith(p) for p in prefixes):
+        return "example_namespace"
+    if _is_gitignored(repo_root, rel):
+        return "gitignored"
+    return None
+
+
 def suffix_candidates(cited: str, files: set[str]) -> list[str]:
     """Tracked paths of which `cited` is a strict segment-boundary suffix.
 
@@ -227,6 +258,11 @@ def repair_text(
     exempt token, a reserved `example/` path, and a gitignored path are all
     unresolvable BY DESIGN, and "fixing" one would convert a deliberate
     illustration into a false claim about real code.
+
+    Those classes are tested on BOTH ends of a repair — see _excluded_reason.
+    Testing the cited token alone let a repair MOVE a citation into an excluded
+    class rather than out of one, which is the same harm in the other
+    direction.
     """
     docs_dir = _docs_dir(config)
     build_dir = _build_dir(repo_root)
@@ -237,16 +273,12 @@ def repair_text(
     repairs: list[tuple[str, str]] = []
     declines: list[tuple[str, str, str]] = []
     for cited in extract_citations(text)["paths"]:
-        if cited in exempt:
-            continue
         rel = _relativize(cited, repo_root)
         if rel is None:
             continue
-        if any(rel.startswith(p) for p in prefixes):
-            continue
         if _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
             continue
-        if _is_gitignored(repo_root, rel):
+        if _excluded_reason(cited, rel, repo_root, exempt, prefixes) is not None:
             continue
 
         candidates = suffix_candidates(rel, files)
@@ -256,6 +288,23 @@ def repair_text(
             # candidate still leaves the page untouched and blocking.
             continue
         candidate = candidates[0]
+
+        # The same exclusions, applied to the CANDIDATE. Testing only the
+        # cited token let a repair MOVE a citation into an excluded class:
+        # cited `auth/session.py` with a corroborated `example/auth/session.py`
+        # was rewritten into the reserved namespace, where check_path skips it
+        # permanently and it is never verified again. A candidate in any
+        # excluded class is declined, never repaired, under its own reason.
+        cand_rel = _relativize(candidate, repo_root)
+        why = (
+            "outside_repo"
+            if cand_rel is None
+            else _excluded_reason(candidate, cand_rel, repo_root, exempt, prefixes)
+        )
+        if why is not None:
+            declines.append((cited, candidate, f"candidate_{why}"))
+            continue
+
         if candidate not in corroborators:
             # Match the CANDIDATE, never the cited token: the token is what the
             # agent wrote, so corroborating it would be circular.

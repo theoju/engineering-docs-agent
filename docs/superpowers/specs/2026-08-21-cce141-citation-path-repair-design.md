@@ -228,6 +228,20 @@ Getting this wrong would be worse than the original defect: it would rewrite a
 deliberately-illustrative token into a real path, making a fictional example
 silently claim to cite real code.
 
+**Post-implementation correction (2026-08-21, adversarial review): the table
+applies to BOTH ends of a repair, not just the cited token.** The shipped code
+tested only `rel`, so a repair could move a citation *into* an excluded class
+rather than out of one. Reproduced: cited `auth/session.py` with a corroborated
+candidate `example/auth/session.py` was repaired, and the page then claimed a
+path in the reserved namespace — where `check_path` skips it permanently and it
+is never verified again. `check_path` went `(False, "cites nonexistent path …")`
+→ `(True, 'ok')`, which is the same harm the table exists to prevent, in the
+other direction. A candidate in any excluded class is now **declined**, under
+its own reason string (`candidate_exempt_token`, `candidate_example_namespace`,
+`candidate_gitignored`, `candidate_outside_repo`) so the digest distinguishes it
+from a plain `uncorroborated` decline. One predicate helper,
+`_excluded_reason`, serves both ends — there is no second copy.
+
 ## Placement
 
 A new `_repair_citation_paths(target_path, repo_root, config, files)` runs in

@@ -135,15 +135,27 @@ def _closed_fence_lines(text: str) -> set[int]:
     visible to extract_citations and must stay rewritable here. Any divergence
     would let repair_text report a repair that rewrite_token never applied.
 
-    Indices are over text.split("\n") — the same split rewrite_token uses —
-    so the two always align. _INLINE_CODE_RE excludes newlines, so no code
-    span can straddle a line and per-line rewriting is equivalent.
+    Indices are over text.splitlines() — what strip_fenced_blocks iterates and
+    what rewrite_token iterates — so the mirror is real. splitlines() is NOT
+    text.split("\n"): six characters survive Path.read_text()'s universal-
+    newline translation yet ARE splitlines() boundaries (U+2028, U+2029,
+    \x85, \x0b, \x0c, \x1c; \r is safe, read_text normalises it). With any of
+    them present, a split("\n") walk sees a fence opener glued to the end of
+    the preceding line, never opens the fence, and returns nothing — while
+    extract_citations, on splitlines(), strips that fence correctly. The
+    divergence let rewrite_token rewrite the fenced illustration, turning a
+    deliberate example into a false claim about real code.
+
+    _INLINE_CODE_RE excludes newlines, so no code span the LINTER sees can
+    straddle a line and per-line rewriting is equivalent: strip_fenced_blocks
+    rejoins its surviving lines with "\n", so a span straddling one of the six
+    reads as containing a newline there too, and matches in neither place.
     """
     fenced: set[int] = set()
     in_fence = False
     fence = ""
     start = 0
-    for i, line in enumerate(text.split("\n")):
+    for i, line in enumerate(text.splitlines()):
         stripped = line.lstrip()
         if not in_fence and (stripped.startswith("```") or stripped.startswith("~~~")):
             in_fence, fence, start = True, stripped[:3], i
@@ -161,6 +173,14 @@ def rewrite_token(text: str, old: str, new: str) -> str:
     happens inside the original token, so `path.py:Class.method` keeps its
     symbol. Every other byte of the document is preserved — this must never
     reflow or normalise the author's prose.
+
+    Lines come from splitlines(), which is what _closed_fence_lines indexes and
+    what strip_fenced_blocks iterates. They are rejoined by concatenating each
+    line with its OWN terminator, taken from splitlines(keepends=True) —
+    "\n".join() would be lossy, because splitlines() also splits on U+2028,
+    U+2029, \x85, \x0b, \x0c and \x1c, and joining with "\n" would silently
+    rewrite every one of those bytes. A line this function does not rewrite is
+    emitted verbatim, so byte identity holds for pages that contain them.
     """
 
     def _sub(match: re.Match[str]) -> str:
@@ -170,11 +190,15 @@ def rewrite_token(text: str, old: str, new: str) -> str:
         return "`" + token.replace(old, new, 1) + "`"
 
     fenced = _closed_fence_lines(text)
-    lines = text.split("\n")
-    for i, line in enumerate(lines):
-        if i not in fenced:
-            lines[i] = _INLINE_CODE_RE.sub(_sub, line)
-    return "\n".join(lines)
+    bodies = text.splitlines()
+    raws = text.splitlines(keepends=True)
+    out: list[str] = []
+    for i, body in enumerate(bodies):
+        if i in fenced:
+            out.append(raws[i])
+            continue
+        out.append(_INLINE_CODE_RE.sub(_sub, body) + raws[i][len(body) :])
+    return "".join(out)
 
 
 def repair_text(

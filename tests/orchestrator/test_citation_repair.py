@@ -125,6 +125,61 @@ def test_rewrite_still_applies_inside_an_unterminated_fence():
     assert "a/b/references/checklist.md" in out
 
 
+# The six characters that survive Path.read_text()'s universal-newline
+# translation yet ARE str.splitlines() boundaries. Written as escapes on
+# purpose: four are invisible and two are zero-width in most editors, so a
+# literal here would be unreviewable. "\r" is deliberately absent -- read_text
+# normalises it, so it never reaches this code.
+SPLITLINES_ONLY = "\N{LINE SEPARATOR}\N{PARAGRAPH SEPARATOR}\x85\x0b\x0c\x1c"
+
+
+def test_rewrite_skips_a_fence_opened_after_a_u2028_line_break():
+    """strip_fenced_blocks iterates splitlines(), so U+2028 puts this fence
+    opener at the start of its own line and the fenced token is invisible to
+    extract_citations. A split("\\n") walk sees `Example:<U+2028>```` as ONE
+    line, never opens the fence, reports no fenced lines at all, and rewrites
+    the illustration -- turning a deliberate example into a false claim about
+    real code, which repair_text's own docstring calls worse than the defect
+    this module fixes.
+    """
+    text = "Example:\N{LINE SEPARATOR}```\ncite `references/checklist.md`\n```\n"
+    out = cr.rewrite_token(
+        text, "references/checklist.md", "a/b/references/checklist.md"
+    )
+    assert out == text
+
+
+def test_rewrite_skips_a_fence_opened_after_a_vertical_tab_line_break():
+    """The same divergence via \\x0b. Two of the six are covered so a partial
+    revert of either iteration site is caught, not just a wholesale one."""
+    text = "Example:\x0b```\ncite `references/checklist.md`\n```\n"
+    out = cr.rewrite_token(
+        text, "references/checklist.md", "a/b/references/checklist.md"
+    )
+    assert out == text
+
+
+def test_rewrite_preserves_splitlines_only_terminators_byte_for_byte():
+    """Iterating splitlines() is only half the fix: "\\n".join() would then
+    normalise all six characters into newlines on every page containing one.
+    Lines are rejoined with their OWN terminators, so a line this function did
+    not rewrite comes back verbatim and only the cited span changes."""
+    text = (
+        "alpha\N{LINE SEPARATOR}beta\N{PARAGRAPH SEPARATOR}gamma\x85"
+        "delta\x0bepsilon\x0czeta\x1ceta\n"
+        "See `references/checklist.md`.\n"
+        "tail\N{LINE SEPARATOR}end\n"
+    )
+    out = cr.rewrite_token(
+        text, "references/checklist.md", "a/b/references/checklist.md"
+    )
+    assert out == text.replace(
+        "`references/checklist.md`", "`a/b/references/checklist.md`"
+    )
+    for ch in SPLITLINES_ONLY:
+        assert out.count(ch) == text.count(ch)
+
+
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
@@ -196,6 +251,23 @@ def test_resolving_citation_is_byte_identical(repo):
     )
     assert repairs == []
     assert out == text
+
+
+def test_repair_preserves_splitlines_only_terminators_on_the_rest_of_the_page(repo):
+    """The byte-identity contract, end to end, on a page carrying every
+    splitlines()-only boundary character. A repair must change the cited span
+    and NOTHING else — a "\n".join() round-trip would silently rewrite six
+    distinct characters on every page that contains one."""
+    text = (
+        "alpha\u2028beta\u2029gamma\x85delta\x0bepsilon\x0czeta\x1ceta\n"
+        "\n"
+        "See `references/checklist.md`.\n"
+    )
+    out, repairs, _ = cr.repair_text(
+        text, repo, CFG, cr.tracked_files(repo), corroborators={FULL}
+    )
+    assert repairs == [("references/checklist.md", FULL)]
+    assert out == text.replace("`references/checklist.md`", f"`{FULL}`")
 
 
 def test_repair_is_idempotent(repo):

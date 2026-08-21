@@ -129,15 +129,77 @@ The tracked-file set is the same `files` set `check_path` already receives, so
 repair and the lint rule agree on what exists by construction rather than by
 convention.
 
-### Why a unique match is provably correct
+### Why uniqueness is necessary but NOT sufficient
 
-If the page previously cited `X` and now cites `suffix(X)`, then `suffix(X)`
-necessarily matches `X` itself — a path is always a suffix of itself. So when a
-suffix matches exactly one tracked file, that file **is** `X`. The repair cannot
-silently retarget a citation to a different file. Ambiguity is the only failure
-mode, and it fails closed.
+**This section previously claimed a proof. The proof was wrong, and the error is
+the reason this design was revised. The original text is preserved in git
+(`0f6b224`) rather than quietly replaced.**
 
-### Measured ambiguity
+The original argument: if the page previously cited `X` and now cites
+`suffix(X)`, then `suffix(X)` necessarily matches `X` — a path is always a suffix
+of itself — so a unique match **is** `X`.
+
+Every step of that is true. It is also **conditional on the token having been a
+shortening of something**, and the code never establishes that antecedent.
+`repair_text`'s only entry condition is that the token does not resolve — which
+is precisely the confabulation population `citation_exists` exists to block. An
+invented path is also a path that does not resolve.
+
+Uniqueness is therefore necessary but not sufficient. Reproduced against the
+plugin's own tree at `5c72145`:
+
+```
+does .github/workflows/ci.yml exist here?  False
+BEFORE: (False, "cites nonexistent path '.github/workflows/ci.yml'")
+repairs: [('.github/workflows/ci.yml'
+           -> 'tests/fixtures/setup_repos/js_docusaurus/.github/workflows/ci.yml')]
+AFTER : (True, 'ok')
+```
+
+A brand-new page writing an ordinary sentence — "the workflow lives at
+`.github/workflows/ci.yml`" — is silently re-pointed at a Docusaurus **test
+fixture**, and the block becomes a pass. No shortening occurs anywhere in that
+story.
+
+### The invariant that IS true
+
+Repair never introduces a reference to a file the pipeline had not already
+accepted a reference to. **The set of files the finished page points at is
+invariant under repair; only the spelling of an existing pointer changes.**
+
+That is a testable property rather than a conditional whose antecedent nothing
+checks, and it is what the corroboration precondition below delivers. It is
+deliberately weaker than the original claim: it does not say the repaired
+citation is correct, only that the reference was pipeline-sanctioned. A page can
+still be re-pointed at a real, batch-touched file while the surrounding sentence
+is wrong. That residual is bounded to files the batch demonstrably touched, and
+it is the same residual `citation_exists` already tolerates for every
+correctly-spelled citation.
+
+### Measured ambiguity — and why it was read backwards
+
+**The table below is accurate. The conclusion originally drawn from it was
+exactly inverted, and that inversion is the second defect in this design.**
+
+The original text presented near-zero ambiguity as evidence of safety. It is
+evidence of **inertness**. If a tail-shaped token is essentially always unique,
+then the `len(candidates) == 1` gate carries zero bits of information about
+whether a shortening occurred, and the mechanism collapses to "is this string a
+tail of some tracked file."
+
+Measured on the plugin's own tree (886 tracked files): **2109 distinct
+non-resolving proper-tail tokens have a unique match.** The set of invented
+strings that would flip block into pass is *larger than the repository*. A
+citation-shape-filtered count puts it at 1281 with zero ambiguous cases; both
+counts support the same conclusion, and the unfiltered one is worse.
+
+The gradient runs the wrong way, too: the deeper and more specific-looking the
+invented path, the more likely it is accepted (1-segment 80.0% unique,
+2-segment 99.5%, 3-segment 100%).
+
+Read the table as bounding ambiguity **among genuine shortenings only**. It says
+nothing about the population that breaks the design, because it samples only
+from the population where the antecedent already holds.
 
 Proper suffixes (those that are genuinely a shortening of a longer tracked
 path), over citation-shaped file types:
@@ -273,3 +335,143 @@ All deterministic — this is the reason for choosing repair over prompt guidanc
   caused by something that also produces _non_-suffix corruption, repair will
   not catch that class. Nothing in the observed evidence suggests it, but the
   ADIS case was never reproduced locally.
+
+---
+
+# Revision 2 — corroborated repair (2026-08-21)
+
+**Status:** design, supersedes the mechanism above
+**Reason:** the safety proof in Revision 1 was conditional on an antecedent the
+code never checks. See "Why uniqueness is necessary but NOT sufficient" above.
+
+## Decision
+
+Corroboration becomes the **entry condition**, not the ambiguity tiebreak.
+
+A unique suffix match is accepted only if the **candidate path** — never the
+cited token — can be corroborated from a source the authoring agent did not
+write. Uncorroborated matches are declined, the page stays blocked, and the
+decline is reported loudly enough to act on.
+
+Two changes make this cheap, and both were verified in the current tree:
+
+- `_prior_page_text` (`orchestrator_runner.py:1566`) already runs and is already
+  passed into `repair_text`. It is merely wired to the `len(candidates) > 1`
+  branch. Promoting it to a precondition is moving an existing filter, not new
+  plumbing.
+- `grounding = _pr_changed_files(batch_prs)` (`orchestrator_runner.py:2347`) is
+  already computed unconditionally — outside the create/edit branch — and handed
+  to page-author as `source_paths`. It is live and unshadowed at the repair call
+  site.
+
+## The corroborator ladder
+
+Ranked, computed in `_repair_citation_paths`:
+
+| Rung | Source | Available on | Authored by |
+| --- | --- | --- | --- |
+| 1 | Raw substring scan of the prior committed page, plus its frontmatter `sources:` / `source_files:` | edits | git |
+| 2 | Membership in the batch's `grounding` set, with a **≥2-segment suffix floor** | every authoring | the orchestrator |
+| 3 | *(optional)* the same path cited in full **and resolving** elsewhere on the page | same-page | the agent — weakest rung |
+| 4 | *(additive)* for a `path:symbol` token, `_symbol_defined` on the candidate | symbol citations | the target file's contents |
+
+**Rung 1 must use a raw substring scan, not `extract_citations`.** This is the
+one non-obvious implementation requirement. `extract_citations` reads only
+backticked spans in unfenced prose; measured on this repo's 108-page corpus it
+sees 69.9% of path tokens and misses 19.7% bare-prose, 5.0% frontmatter-only and
+2.5% link-target-only. The originating incident's three sites include frontmatter
+and a table cell, so an `extract_citations`-based rung 1 could fail the very case
+this ticket exists for. A raw scan does not violate the imported-never-
+reimplemented contract: it is not deciding what a citation *is*, only whether a
+known-tracked path was already present.
+
+**Circularity is closed.** On a create, `_enforce_agent_frontmatter` writes
+`grounding` into the page's `source_files`, **overwriting whatever the agent
+wrote**. On an edit, rung 1 is `git show HEAD:`. Every action therefore has at
+least one corroborator the agent did not author. `evidence.files_read` is
+deliberately **excluded** as a source: an author that confabulates a citation can
+equally confabulate a files_read entry.
+
+**Globs are excluded from corroboration.** `docs/site-src/.doc-core-manifest.json`
+carries glob `source_files` (`core/**`, `docs/superpowers/**`). Expanding them
+would make the gate ceremony while the diff still reads `if candidate in
+corroborated`. Literal paths only, stated here so it is a decision rather than an
+oversight.
+
+## Declines must be loud
+
+An uncorroborated citation blocks the page. Left silent, that reproduces the
+CCE-141 harm in a narrower band: block → deferral → forgiveness → page never
+written.
+
+So `repair_text` returns `(new_text, repairs, declines)`, and each decline is
+reported as a **non-`info_only`** partial naming the candidate it refused:
+
+```
+citation_repair_declined: <page>: '<old>' -> candidate '<new>' (uncorroborated)
+```
+
+The same string threads into the `lint_block` partial and into a new `reason`
+field on the `skipped_prs` record. Successful repairs stay `info_only=True` — a
+corroborated repair is a genuine rescue and must not veto auto-merge.
+
+## Measured cost, stated plainly
+
+- **Coverage lost: ~38%** of genuine resolving citations on real authored pages
+  are absent from their batch's source set. On a create there is no second arm.
+  Those pages block. The bias is adverse: the shortening pathology targets
+  deeply-nested support files, which are exactly what a PR diff does not contain.
+- **Residual retained: ~56%** of the files in a real batch's source set still
+  expose a unique non-resolving suffix. Corroboration narrows the confabulation
+  surface by roughly two orders of magnitude — 812 tracked files down to a
+  per-page set of 5–15 — but does **not** close it.
+- **Host shape dominates.** Pooled across three hosts: 65% creates / 35% edits.
+  On `claude-extensions` specifically it is 82% create, and all four measured
+  "edits" were the agent re-authoring its own hours-old pages after a baseline
+  rewind — genuine edits of a pre-existing curated page: zero. Rung 1 contributes
+  essentially nothing there; rung 2 is the whole gate.
+
+## The uncomfortable number
+
+Measured against the complete production record — 19 archived PRs, 15 distinct
+blocked citations in `.engineering-docs-agent/stale-prs-archive/` — **this
+feature would have fired zero times.** The four genuine `architecture/*.md`
+shortenings already resolve via the `docs_dir` branch added in CCE-139/145, so
+repair never reaches them. Measured harm on one plausible page in the same repo:
+three wrong repairs.
+
+This is recorded because it is the strongest argument for a smaller change, and
+whoever revisits this should see it without having to re-derive it.
+
+## Downstream-owner audit
+
+No layer below repair catches a wrong repair. This is what makes an unsound
+repair unrecoverable rather than merely wrong:
+
+- `verify_citations` is pin-based and never sees a bare repaired path.
+- `source_drift` matches on frontmatter globs.
+- **Drift** as defined in `CONTEXT.md` structurally cannot classify it — the page
+  matches the source it cites, because repair changed what it cites.
+- `fact-checker` is non-gating, is explicitly scoped away from citation existence,
+  and is handed the **repaired** `cited_sources` — so repair steers the only agent
+  that opens the file onto the wrong file, where it returns a silent
+  `unverifiable`.
+
+## Reconciliation with CCE-139
+
+`templates/config.schema.json` still rejects any `citation_source_roots` entry
+containing a slash, because "a nested tail like `backend/storage` is
+suffix-matching in disguise and admits confabulated paths."
+
+Revision 1 contradicted that ruling and inverted the consent boundary: an
+operator opting into *one* narrow suffix match is schema-refused, while the agent
+performed unbounded suffix matching with no declaration and no opt-out. Under
+corroborated repair the two are consistent. Stated explicitly so the next reader
+does not have to rediscover the conflict.
+
+## Out of scope, still
+
+Unchanged from Revision 1: frontmatter, markdown link targets (`internal_links`),
+the author prompt, and CCE-167. `run_bootstrap_core` (`orchestrator_runner.py:3145`)
+has no PRs by construction, so core-authoring pages get no repair coverage — that
+is correct, and is stated rather than papered over.

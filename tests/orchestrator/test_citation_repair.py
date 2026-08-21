@@ -77,12 +77,31 @@ def test_rewrite_preserves_a_symbol_suffix():
 
 
 def test_rewrite_leaves_other_tokens_untouched():
-    text = "Both `references/checklist.md` and `README.md` are cited.\n"
+    """The bare-path equality check in `_sub`.
+
+    The old fixture paired the old token with `README.md`, which does not
+    CONTAIN the old token -- so deleting the check could not fail it:
+    `token.replace(old, new, 1)` is a no-op on a string the old token does not
+    occur in. A LONGER VALID citation containing the old token as a substring
+    is the discriminating case. Without the equality check,
+    `docs/references/checklist.md` becomes `docs/a/b/references/checklist.md`
+    -- a path invented by the repair itself, on a citation that was already
+    correct.
+    """
+    text = (
+        "Both `references/checklist.md` and `docs/references/checklist.md` "
+        "are cited.\n"
+    )
     out = cr.rewrite_token(
         text, "references/checklist.md", "a/b/references/checklist.md"
     )
-    assert "`README.md`" in out
     assert "`a/b/references/checklist.md`" in out
+    assert "`docs/references/checklist.md`" in out, (
+        "a longer citation that merely contains the old token must be left alone"
+    )
+    assert out == text.replace(
+        "`references/checklist.md`", "`a/b/references/checklist.md`", 1
+    )
 
 
 def test_rewrite_ignores_a_prose_mention_outside_backticks():
@@ -241,6 +260,42 @@ def test_ambiguous_suffix_is_left_alone(repo):
         text, repo, CFG, cr.tracked_files(repo), corroborators=set()
     )
     assert repairs == []
+    assert out == text
+
+
+def test_a_resolving_citation_is_never_retargeted(repo):
+    """THE `_resolves` GUARD, in isolation.
+
+    Deleting `if _resolves(...): continue` from repair_text left the whole
+    suite green. The tests that name this case
+    (test_resolving_citation_is_byte_identical, test_repair_is_idempotent) have
+    fixtures with ZERO strict suffix candidates, so `len(candidates) != 1`
+    decided them first and `_resolves` was never consulted.
+
+    Here the cited `docs/index.md` RESOLVES and also has exactly one strict
+    suffix candidate, `vendor/pkg/docs/index.md`, which IS corroborated. Every
+    other guard passes, so `_resolves` is the only thing standing between a
+    working citation and being silently retargeted at a different tracked file.
+    """
+    (repo / "docs").mkdir()
+    (repo / "docs/index.md").write_text("# index\n")
+    vendored = repo / "vendor/pkg/docs"
+    vendored.mkdir(parents=True)
+    (vendored / "index.md").write_text("# a different index\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "two index pages")
+
+    files = cr.tracked_files(repo)
+    # Fixture guard: without exactly one candidate this test would be decided
+    # by `len(candidates) != 1` and would stop exercising `_resolves` at all.
+    assert cr.suffix_candidates("docs/index.md", files) == ["vendor/pkg/docs/index.md"]
+
+    text = "See `docs/index.md`.\n"
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, files, corroborators={"vendor/pkg/docs/index.md"}
+    )
+    assert repairs == []
+    assert declines == []
     assert out == text
 
 

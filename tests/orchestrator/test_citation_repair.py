@@ -340,8 +340,21 @@ def test_rung2_admits_the_batch_source_set():
 
 
 def test_rung2_excludes_glob_entries():
-    """Manifest source_files carry globs (core/**). Expanding them would make
-    the gate ceremony while the diff still reads `if candidate in corroborated`."""
+    """Glob characters in source paths must be filtered even when the path is
+    tracked. The old fixture (`source_paths={"core/**"}`, `files={"core/x.md"}`)
+    was vacuous: "core/**" is never in files, so it was excluded by the pre-existing
+    `p in files` check before the glob filter ever ran. This fixture exercises
+    the glob filter directly: a path that IS in files but contains a glob character.
+
+    Manifest source_files can carry globs (core/**). Expanding them would make the
+    gate ceremony while the diff still reads `if candidate in corroborated`, so we
+    exclude them at filter time instead.
+    """
+    # Discriminating case: path is in files but contains glob char
+    got = cr.build_corroborators(None, {"weird[x].md"}, {"weird[x].md"})
+    assert got == set()
+
+    # Original manifest case: glob patterns not in files (now a regression test)
     got = cr.build_corroborators(
         None, {"core/**", "docs/superpowers/**"}, {"core/x.md"}
     )

@@ -101,10 +101,28 @@ def test_orchestrator_has_the_expected_call_site_population():
     against the spec's Classification section and update the number here in
     the same commit that adds them."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 41, (
-        f"expected 41 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 42, (
+        f"expected 42 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
+    # 41 -> 42: CCE-141 revision 2 added `citation_repair_declined` in
+    # `_repair_citation_paths`. Corroboration is now the ENTRY CONDITION for a
+    # repair, so the repairer has a second outcome: a unique suffix candidate
+    # that no source outside the authoring agent vouches for is refused. The
+    # site reports each refusal with the cited token, the candidate it refused,
+    # and why.
+    #
+    # Classification: degraded=True — explicitly NOT info_only. A decline is not
+    # a rescue; it is a page that does not ship. The unresolvable citation
+    # survives, `citation_exists` blocks it, the lint-block revert discards the
+    # page and CCE-140 holds its PRs out of the advance cursor, so the next run
+    # re-authors it. That is exactly the shape the sibling test's assertion
+    # message calls held-back-and-self-healing, and it is the same
+    # classification the `lint_block` site it feeds already carries. Silence
+    # here would reproduce the very harm this revision exists to fix, one band
+    # narrower: block -> deferral -> forgiveness -> the page is never written
+    # and nothing in the digest ever says so. It is emphatically not blind
+    # (degraded=False): the run JUDGED this citation and rejected it.
     # 40 -> 41: CCE-141 added `citation_path_repaired` in the new
     # `_repair_citation_paths`, called beside `_enforce_agent_frontmatter` for
     # every authored page. It reports each citation path the deterministic

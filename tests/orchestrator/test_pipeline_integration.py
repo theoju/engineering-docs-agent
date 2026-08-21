@@ -476,12 +476,19 @@ def test_orchestrator_uses_gh_client_for_pr_create(
     # 120s check-grace window (the gate has its own wiring test).
     cfg = tmp_path / ".engineering-docs-agent" / "config.yml"
     cfg.write_text(cfg.read_text() + "\nmerge: { policy: manual }\n")
-    # Have to make git work for commit/push: stub push to succeed
-    monkeypatch.setattr(
-        runner.subprocess,
-        "run",
-        lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
-    )
+
+    # Have to make git work for commit/push: stub push to succeed.
+    # The fake mirrors subprocess's own contract — bytes unless the caller
+    # asked for text. A str-always fake silently lied to every bytes-mode
+    # caller in the runner (CCE-141's _prior_page_text is one).
+    def _fake_run(*a, **kw):
+        decoded = bool(
+            kw.get("text") or kw.get("universal_newlines") or kw.get("encoding")
+        )
+        empty = "" if decoded else b""
+        return type("R", (), {"returncode": 0, "stdout": empty, "stderr": empty})()
+
+    monkeypatch.setattr(runner.subprocess, "run", _fake_run)
     rc = runner.run(tmp_path, dry_run_dir=FAKES, no_pr=False)
     assert any(c[0] == "pr_create" for c in fake.calls)
 

@@ -1572,20 +1572,31 @@ def _prior_page_text(repo_root: Path, path: Path) -> str | None:
     r = subprocess.run(
         ["git", "-C", str(repo_root), "show", f"HEAD:{rel}"],
         capture_output=True,
-        text=True,
     )
-    return r.stdout if r.returncode == 0 else None
+    if r.returncode != 0:
+        return None
+    # errors="replace", not text=True: git show's stdout is decoded with the
+    # locale codec under text=True, so one non-UTF-8 byte in a committed page
+    # raises out of subprocess.run itself — outside the caller's try — and
+    # takes down the whole run. Under corroborated repair this is on the hot
+    # path for every edit.
+    return r.stdout.decode("utf-8", errors="replace")
 
 
 def _repair_citation_paths(
-    path: Path, repo_root: Path, config: dict, state: dict
+    path: Path, repo_root: Path, config: dict, state: dict, source_paths: set[str]
 ) -> None:
     """CCE-141: repair citations the author shortened into unresolvable paths.
 
     Runs beside _enforce_agent_frontmatter so content-validator only ever sees
-    an already-correct page. Reported info_only: nothing was lost, so the run
-    is not degraded — but the digest line is the only signal that would ever
-    justify revisiting the author prompt, so it must not be silent.
+    an already-correct page. A repair is reported info_only: nothing was lost,
+    so the run is not degraded — but the digest line is the only signal that
+    would ever justify revisiting the author prompt, so it must not be silent.
+
+    `source_paths` is the batch's grounding set and is REQUIRED — it is half of
+    the corroborator ladder. A default would let an un-threaded call site fall
+    back to unconditional repair, which is exactly the defect this signature
+    exists to prevent.
     """
     import citation_repair
 
@@ -1594,16 +1605,30 @@ def _repair_citation_paths(
     except (OSError, UnicodeDecodeError):
         return
     files = citation_repair.tracked_files(repo_root)
-    new_text, repairs = citation_repair.repair_text(
-        text, repo_root, config, files, prior_text=_prior_page_text(repo_root, path)
+    corroborators = citation_repair.build_corroborators(
+        _prior_page_text(repo_root, path), source_paths, files
     )
-    if not repairs:
-        return
-    path.write_text(new_text)
+    new_text, repairs, declines = citation_repair.repair_text(
+        text, repo_root, config, files, corroborators
+    )
     try:
         label = path.relative_to(repo_root).as_posix()
     except ValueError:
         label = path.name
+    for old, new, why in declines:
+        # NOT info_only: a decline means the page does not ship. citation_exists
+        # still blocks it, the lint-block revert discards it, and CCE-140 defers
+        # its PRs — the same shape as `lint_block`, so the same classification.
+        # Silent here reproduces exactly the CCE-141 harm this feature exists to
+        # fix, one band narrower.
+        add_partial(
+            state,
+            f"citation_repair_declined: {label}: '{old}' -> candidate '{new}' ({why})",
+            degraded=True,
+        )
+    if not repairs:
+        return
+    path.write_text(new_text)
     for old, new in repairs:
         add_partial(
             state,
@@ -2437,7 +2462,9 @@ def run(
                     # runs. Deliberately NOT nested under the agent_fields guard —
                     # a shortened citation blocks any page, not only the
                     # agent-authored-frontmatter ones.
-                    _repair_citation_paths(target_path, repo_root, config, state)
+                    _repair_citation_paths(
+                        target_path, repo_root, config, state, source_paths=grounding
+                    )
 
         # Content validation
         if authored:

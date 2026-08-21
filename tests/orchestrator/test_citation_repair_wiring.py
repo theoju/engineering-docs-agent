@@ -40,7 +40,13 @@ def test_repair_rewrites_the_page_and_reports_info_only(repo):
     page.write_text("See `references/checklist.md` for the steps.\n")
     state = _state()
 
-    runner._repair_citation_paths(page, repo, {}, state)
+    runner._repair_citation_paths(
+        page,
+        repo,
+        {},
+        state,
+        source_paths={".claude/skills/connector-builder/references/checklist.md"},
+    )
 
     assert (
         ".claude/skills/connector-builder/references/checklist.md" in page.read_text()
@@ -61,7 +67,59 @@ def test_no_repair_leaves_the_page_and_state_untouched(repo):
     page.write_text(original)
     state = _state()
 
-    runner._repair_citation_paths(page, repo, {}, state)
+    runner._repair_citation_paths(page, repo, {}, state, source_paths=set())
 
     assert page.read_text() == original
     assert state["current_run"]["partial_reasons"] == []
+
+
+def test_uncorroborated_repair_is_declined_and_reported_loudly(repo):
+    """A silent decline reproduces the CCE-141 harm in a narrower band:
+    block -> deferral -> forgiveness -> page never written."""
+    page = repo / "page.md"
+    page.write_text("See `references/checklist.md`.\n")
+    state = _state()
+
+    runner._repair_citation_paths(page, repo, {}, state, source_paths=set())
+
+    assert page.read_text() == "See `references/checklist.md`.\n"
+    cr_ = state["current_run"]
+    assert any("citation_repair_declined" in r for r in cr_["partial_reasons"])
+    assert cr_["partial"] is True, (
+        "a decline must NOT be info_only — it means a page did not ship"
+    )
+
+
+def test_corroborated_repair_fires_and_stays_info_only(repo):
+    full = ".claude/skills/connector-builder/references/checklist.md"
+    page = repo / "page.md"
+    page.write_text("See `references/checklist.md`.\n")
+    state = _state()
+
+    runner._repair_citation_paths(page, repo, {}, state, source_paths={full})
+
+    assert full in page.read_text()
+    assert state["current_run"]["partial"] is False
+    assert any(
+        "citation_path_repaired" in r for r in state["current_run"]["partial_reasons"]
+    )
+
+
+def test_prior_page_text_survives_a_non_utf8_page_at_head(repo):
+    """A single non-UTF-8 byte in a committed page must not take down the run.
+    Under corroborated repair this is on the hot path for every edit."""
+    page = repo / "page.md"
+    page.write_bytes(b"# Caf\xe9\n\nSee `references/checklist.md`.\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "latin1")
+    page.write_text("# Cafe\n\nSee `references/checklist.md`.\n")
+
+    got = runner._prior_page_text(repo, page)  # must not raise
+    assert got is None or isinstance(got, str)
+
+
+def test_source_paths_has_no_default():
+    import inspect
+
+    sig = inspect.signature(runner._repair_citation_paths)
+    assert sig.parameters["source_paths"].default is inspect.Parameter.empty

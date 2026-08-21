@@ -1,0 +1,10 @@
+{
+  "pr_number": 2,
+  "what_changed": "Adds two",
+  "why": "demand",
+  "breaking": false,
+  "doc_targets": [
+    { "lens": "core", "action": "create", "page_hint": "connectors/two.md" }
+  ],
+  "notes": null
+}

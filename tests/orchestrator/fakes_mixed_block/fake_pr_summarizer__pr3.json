@@ -1,0 +1,10 @@
+{
+  "pr_number": 3,
+  "what_changed": "Adds three",
+  "why": "demand",
+  "breaking": false,
+  "doc_targets": [
+    { "lens": "core", "action": "create", "page_hint": "connectors/three.md" }
+  ],
+  "notes": null
+}

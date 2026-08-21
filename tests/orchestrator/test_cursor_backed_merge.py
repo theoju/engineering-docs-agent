@@ -2,10 +2,16 @@
 """CCE-140: a partial run may merge only when its advance is cursor-backed.
 
 The dangerous case first. A run that is partial for a reason UNRELATED to the
-time budget (a lint block, a failed dispatch) is not time-truncated, so its
-advance falls through to full HEAD. Merging that run promotes a baseline past
-work whose pages were reverted -- the silent-loss bug, automated nightly. It
-must stay blocked.
+time budget (a lint block, a failed dispatch) used to fall through to a full
+HEAD advance. Merging that run promotes a baseline past work whose pages were
+reverted -- the silent-loss bug, automated nightly. It must stay blocked.
+
+**CCE-151 amendment.** That fall-through is gone: any run holding pages back now
+takes the same cursor-backed walk a time-truncated run takes, whatever made it
+partial. The merge gate this file exists to pin is unchanged and still load-
+bearing -- see test_lint_block_partial_run_holds_the_cursor_and_is_not_cursor_backed
+for why the two layers are not redundant -- but the advance it guards is now
+bounded at the source rather than only at merge time.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ import orchestrator_runner as runner  # noqa: E402
 
 FAKES_BLOCK = Path(__file__).parent / "fakes_block"
 FAKES_MULTI = Path(__file__).parent / "fakes_multi"
+FAKES_MIXED = Path(__file__).parent / "fakes_mixed_block"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -38,13 +45,29 @@ def _fake_clock(values):
     return lambda: next(it, last)
 
 
-def test_lint_block_partial_run_advances_to_head_and_is_not_cursor_backed(
+def test_lint_block_partial_run_holds_the_cursor_and_is_not_cursor_backed(
     tmp_path, init_host, read_current_run
 ):
-    """THE DANGEROUS CASE. A lint-block partial run is not time-truncated, so
-    it advances to full HEAD (pinned by test_state_advancement_invariant).
-    This test pins the OTHER half: that advance is not cursor-backed, so the
-    Task-3 gate will refuse to merge it."""
+    """WAS THE DANGEROUS CASE. Now defense in depth, and both layers are pinned.
+
+    Before CCE-151 this test read: a lint-block partial is not time-truncated,
+    so it advances to full HEAD, and the `_LAST_ADVANCE_CURSOR_BACKED is False`
+    flag is "the only thing standing between a lint-block partial and an
+    automatic merge". That framing was accurate and the containment was real —
+    but it was a single point of failure, and it only ever stopped the AUTO-MERGE.
+    The watermark advance itself still landed on disk. A human merging the PR
+    manually, as happened on 2026-08-21, consumed the window anyway.
+
+    CCE-151 removes the advance at its source, so there are now two independent
+    layers and this test pins both:
+
+      1. the baseline holds (the window stays re-readable), and
+      2. the flag stays False (the CCE-140 merge gate still refuses).
+
+    Layer 2 must not be deleted as redundant. It is what catches a partial run
+    that DID document some PRs and therefore legitimately advanced its cursor —
+    that advance is real but still shouldn't auto-merge.
+    """
     state_path = init_host(
         {"version": "1", "last_successful_run": {"head_sha": "old_sha_000"}}
     )
@@ -54,11 +77,16 @@ def test_lint_block_partial_run_advances_to_head_and_is_not_cursor_backed(
     cr = read_current_run(state_path)
     assert cr["partial"] is True
     written = json.loads(state_path.read_text())
-    assert written["last_successful_run"]["head_sha"] == head_sha
+    assert written["last_successful_run"]["head_sha"] == "old_sha_000", (
+        "CCE-151 layer 1: every admitted PR was held back, so nothing anchors "
+        "an advance and the baseline must not move. Found "
+        f"{written['last_successful_run']['head_sha']}"
+    )
+    assert written["last_successful_run"]["head_sha"] != head_sha
     assert runner._LAST_ADVANCE_CURSOR_BACKED is False, (
-        "a run that advanced to full HEAD must never report a cursor-backed "
-        "advance -- that flag is the only thing standing between a lint-block "
-        "partial and an automatic merge"
+        "CCE-151 layer 2: a run that did not take a verified cursor-backed "
+        "advance must never report one -- that flag is what the CCE-140 merge "
+        "gate reads to refuse an automatic merge"
     )
 
 
@@ -337,3 +365,89 @@ def test_app_token_veto_blocks_the_merge_end_to_end(
     assert any("merge_vetoed" in r for r in cr["partial_reasons"]), cr[
         "partial_reasons"
     ]
+
+
+def test_mixed_window_advances_to_the_last_fully_documented_pr(
+    tmp_path, init_host, read_current_run
+):
+    """CCE-151's release valve: a held-back run still advances past what landed.
+
+    THE REGRESSION THIS EXISTS TO CATCH is not the silent-loss bug -- it is the
+    overcorrection. Freezing the cursor whenever a run is partial reinstates the
+    CCE-109 doom loop: one page that can never satisfy the linter wedges the
+    baseline forever, every subsequent night re-collects the same window, and
+    the agent stops making progress entirely. CCE-140 chose merge-as-promotion
+    precisely to avoid that, and CCE-151 had to preserve the property while
+    removing the unbounded advance.
+
+    So the assertion that matters most here is the one in the middle: the
+    baseline MOVED. Three PRs, three distinct pages, PR 3 blocked on lint. The
+    cursor lands on PR 2's merge_sha -- strictly past the two PRs that produced
+    surviving pages, strictly short of the blocked one, whose window stays
+    re-readable next run.
+
+    This is also the first test to exercise the per-PR fixture override
+    (`fake_pr_summarizer__pr<N>.json`). Before it, every PR in a dry run read the
+    same summarizer fixture and therefore shared one page batch, so a window
+    could only land or fail as a whole -- and the CCE-140 mixed case had no
+    end-to-end coverage at all. See fakes_mixed_block/README.md.
+    """
+    repo = tmp_path
+    state_path = init_host(
+        {"version": "1", "last_successful_run": {"head_sha": "seed"}}
+    )
+    base = _git(repo, "rev-parse", "HEAD")
+    shas = []
+    for i in range(1, 4):
+        (repo / "f.txt").write_text(f"c{i}")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", f"c{i}")
+        shas.append(_git(repo, "rev-parse", "HEAD"))
+    state_path.write_text(
+        json.dumps({"version": "1", "last_successful_run": {"head_sha": base}})
+    )
+    c1, c2, c3 = shas
+
+    fakes = tmp_path.parent / f"fakes_mixed_{tmp_path.name}"
+    fakes.mkdir(parents=True, exist_ok=True)
+    for f in FAKES_MIXED.iterdir():
+        if f.suffix == ".json":
+            (fakes / f.name).write_text(f.read_text())
+    sc = json.loads((FAKES_MIXED / "fake_source_collector.json").read_text())
+    for pr, sha in zip(sc["prs"], [c1, c2, c3]):
+        pr["merge_sha"] = sha
+    (fakes / "fake_source_collector.json").write_text(json.dumps(sc))
+
+    # No time budget: this is the NON-truncated path, which is the whole point.
+    rc = runner.run(repo, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0
+
+    core = repo / "docs" / "site-src" / "core" / "connectors"
+    assert (core / "one.md").exists(), "PR 1's page should have survived"
+    assert (core / "two.md").exists(), "PR 2's page should have survived"
+    assert not (core / "three.md").exists(), (
+        "PR 3's page was block-severity and must have been reverted"
+    )
+
+    cr = read_current_run(state_path)
+    assert cr["partial"] is True
+    written = json.loads(state_path.read_text())
+    advanced = written["last_successful_run"]["head_sha"]
+
+    assert advanced != base, (
+        "CCE-151 must not have reinstated the CCE-109 doom loop: a run that "
+        "documented two of three PRs has to advance past them, or one "
+        "permanently-unlintable page wedges the baseline forever and every "
+        "future night re-collects the identical window"
+    )
+    assert advanced == c2, (
+        "the advance must stop at the last PR whose pages ALL landed (PR 2), "
+        f"leaving PR 3's window re-readable. Found {advanced[:12]}; "
+        f"c1={c1[:12]} c2={c2[:12]} c3={c3[:12]}"
+    )
+    assert advanced != c3, "PR 3 was blocked; its window must not be consumed"
+    assert runner._LAST_ADVANCE_CURSOR_BACKED is True, (
+        "this advance came from the cursor walk, so the flag must say so -- "
+        "the CCE-140 merge gate reads it to decide whether a partial run may "
+        "auto-merge, and a bounded advance is exactly the case it permits"
+    )

@@ -1,0 +1,14 @@
+{
+  "passed": [
+    { "path": "docs/site-src/core/connectors/one.md", "rules": ["frontmatter_schema"] },
+    { "path": "docs/site-src/core/connectors/two.md", "rules": ["frontmatter_schema"] }
+  ],
+  "failed": [
+    {
+      "path": "docs/site-src/core/connectors/three.md",
+      "rule": "frontmatter_schema",
+      "severity": "block",
+      "message": "missing required field: status"
+    }
+  ]
+}

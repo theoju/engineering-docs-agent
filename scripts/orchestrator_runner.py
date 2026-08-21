@@ -2729,58 +2729,91 @@ def run(
         # main; until then the advance lives only on the docs-agent branch
         # and on disk locally. If PR open fails, nothing reaches main and
         # the next run reads the unchanged committed state.
-        if time_truncated:
+        # CCE-140: decide which deferred PRs this run abandons, BEFORE the
+        # cursor walk — forgiveness is what lets the walk continue past them.
+        # `counts` is the PRIOR map, so a stored count equal to the threshold
+        # means this run is the (threshold+1)-th.
+        #
+        # CCE-151: hoisted out of `if time_truncated:`. It used to live inside
+        # that branch, so a run that was merely DEGRADED — a page blocked by
+        # lint, a page-author dispatch that returned nothing — fell through to
+        # `advance_sha = head_sha` and walked the consume-once cursor straight
+        # past a PR that had produced no documentation. Exit code 0, so nothing
+        # alarmed. Observed twice in production on 2026-08-21 (runs
+        # 32460602658, 32495019606) against theoju/claude-code-self-assessment;
+        # the second advanced past the very page the first had stranded.
+        #
+        # Hoisting `partition_deferrals` WITH it is what keeps this safe rather
+        # than catastrophic. Holding a PR back with no forgiveness path would
+        # freeze the baseline the moment any page failed repeatedly — the
+        # CCE-109 doom loop CCE-140 exists to prevent. The skip hatch is the
+        # release valve, and it only arms because `still_deferred` now reaches
+        # `next_deferral_counts` on this path too: it used to be left at its
+        # `[]` default here, which silently CLEARED the count of every
+        # held-back PR on every non-truncated run, so nothing could ever reach
+        # the threshold.
+        _deferral_counts = state.get("deferral_counts", {}) or {}
+        _threshold = resolve_deferral_threshold(config)
+        _deferred_all = list(admission_deferred) + [
+            pr_by_number[n] for n in sorted(deferred_pages_by_pr) if n in pr_by_number
+        ]
+        _skipped_prs, _still_deferred = partition_deferrals(
+            _deferred_all,
+            counts=_deferral_counts,
+            repo=repo,
+            threshold=_threshold,
+        )
+        skipped_numbers = {p.get("number") for p in _skipped_prs}
+        # CCE-140: hold every PR this run did not finish out of the cursor
+        # prefix. On a run with no skips `skipped_numbers` is empty and
+        # `held_back` is exactly "everything unfinished".
+        held_back = (
+            set(deferred_pages_by_pr) | {p.get("number") for p in admission_deferred}
+        ) - skipped_numbers
+        still_deferred = _still_deferred
+        if time_truncated or held_back:
             # CCE-109 Component 4: never advance to a cursor we cannot confirm
             # is forward-of-baseline and reachable from HEAD, never advance
             # past an unanchorable deferred PR, and persist only the canonical
             # full SHA. Every refusal keeps the baseline — partial, retried
             # next run, but no silent regression and no lost PR.
-            # CCE-140: decide which deferred PRs this run abandons, BEFORE the
-            # cursor walk — forgiveness is what lets the walk continue past
-            # them. `counts` is the PRIOR map, so a stored count equal to the
-            # threshold means this run is the (threshold+1)-th.
-            _deferral_counts = state.get("deferral_counts", {}) or {}
-            _threshold = resolve_deferral_threshold(config)
-            _deferred_all = list(admission_deferred) + [
-                pr_by_number[n]
-                for n in sorted(deferred_pages_by_pr)
-                if n in pr_by_number
-            ]
-            _skipped_prs, _still_deferred = partition_deferrals(
-                _deferred_all,
-                counts=_deferral_counts,
-                repo=repo,
-                threshold=_threshold,
-            )
-            skipped_numbers = {p.get("number") for p in _skipped_prs}
+            #
+            # CCE-151: `or held_back` is the whole fix. Gating on that set
+            # being non-empty rather than on `partial` is deliberate and
+            # load-bearing — a run can be partial for reasons that cost no
+            # content (an advisory agent that could not judge, a notifier that
+            # could not post), and freezing the cursor for those reinstates the
+            # doom loop. What must hold the baseline is unfinished CONTENT,
+            # which is exactly what `held_back` names.
             advance_sha = prior_baseline_sha
             advance_cursor_backed = False
-            # CCE-140: hold every PR this run did not finish out of the cursor
-            # prefix. `skipped_numbers` is populated in the deferral-skip block
-            # below; on a run with no skips it is empty and `held_back` is
-            # exactly "everything unfinished".
-            held_back = (
-                set(deferred_pages_by_pr)
-                | {p.get("number") for p in admission_deferred}
-            ) - skipped_numbers
-            still_deferred = _still_deferred
             cursor_prs = advance_cursor_list(
                 prs, admission_deferred, held_back=held_back
             )
             cursor = _last_processed_merge_sha(cursor_prs)
             window = f"{(prior_baseline_sha or '(root)')[:8]}..{head_sha[:8]}"
             full_cursor = _rev_parse_commit(repo_root, cursor) if cursor else None
+            # CCE-151: the walk now runs for two different causes, so the
+            # reason has to name the one that actually applies. A run that was
+            # never truncated reporting `time_budget_no_advance_*` would be a
+            # false statement in the operator digest — and the digest is the
+            # only place most of these are ever read. The `time_budget_` family
+            # is preserved verbatim on the truncated path: those exact strings
+            # are asserted by test_time_budget.py and test_deferral_skip.py,
+            # and are what the CCE-109/CCE-140 runbooks tell operators to grep.
+            _rsn = "time_budget" if time_truncated else "held_back"
+            _kind = "truncated run" if time_truncated else "degraded run"
             if cursor is None:
                 add_partial(
                     state,
-                    "time_budget_no_advance_no_cursor: truncated run had no "
+                    f"{_rsn}_no_advance_no_cursor: {_kind} had no "
                     "admitted PR with a usable merge_sha; baseline unchanged",
                     degraded=True,
                 )
             elif any(not (p.get("merge_sha") or "").strip() for p in still_deferred):
                 add_partial(
                     state,
-                    f"time_budget_no_advance_unanchored_deferred: a deferred "
+                    f"{_rsn}_no_advance_unanchored_deferred: a deferred "
                     f"PR has no merge_sha and would be stranded behind cursor "
                     f"{cursor[:8]}; baseline unchanged",
                     degraded=True,
@@ -2788,7 +2821,7 @@ def run(
             elif full_cursor is None:
                 add_partial(
                     state,
-                    f"time_budget_advance_out_of_window: cursor {cursor[:8]} "
+                    f"{_rsn}_advance_out_of_window: cursor {cursor[:8]} "
                     f"unresolvable in repo ({window}); baseline unchanged",
                     degraded=True,
                 )
@@ -2820,13 +2853,30 @@ def run(
                     )
         else:
             advance_sha = state["current_run"]["head_sha"]
-            # A non-truncated run advances to the full window HEAD. That is
-            # correct when the run is clean, and it is exactly the advance the
-            # CCE-140 merge gate must refuse to merge when the run is partial.
+            # An untruncated run with nothing held back advances to the full
+            # window HEAD.
+            #
+            # CCE-151: this branch is now reached ONLY when `held_back` is
+            # empty, which is what keeps clean-run behaviour identical. That
+            # matters — the alternative (always walk the cursor) would land the
+            # baseline on the last PR's merge_sha even on a clean run, leaving
+            # direct-push commits after it permanently outside every window.
+            # Gating on emptiness buys the fix without paying that.
             advance_cursor_backed = False
+            # Nothing was held back, so the walk would have covered the whole
+            # window. The deferral-skip recorder below intersects against this
+            # to decide which forgiven PRs the cursor actually crossed.
+            cursor_prs = list(prs)
         global _LAST_ADVANCE_CURSOR_BACKED
         _LAST_ADVANCE_CURSOR_BACKED = advance_cursor_backed
-        if time_truncated:
+        if _skipped_prs:
+            # CCE-151: was `if time_truncated:`. `_skipped_prs` is now computed
+            # on every path, and a forgiven PR must be alarmed and durably
+            # recorded wherever the forgiveness happened — otherwise the skip
+            # hatch could abandon content on an untruncated run with no entry
+            # in `skipped_prs` and no digest line. On a clean run the list is
+            # empty and this block is skipped exactly as before.
+            #
             # CCE-140 / spec Decision 3. Record the loss loudly and durably.
             # The reason is deliberately NOT info_only: it is content the
             # pipeline chose to abandon, and `partial` is what routes it into

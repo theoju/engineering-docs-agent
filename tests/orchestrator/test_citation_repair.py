@@ -1,6 +1,9 @@
 from __future__ import annotations
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
@@ -122,11 +125,6 @@ def test_rewrite_still_applies_inside_an_unterminated_fence():
     assert "a/b/references/checklist.md" in out
 
 
-import subprocess
-
-import pytest
-
-
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
@@ -245,8 +243,17 @@ def test_example_namespace_token_is_never_repaired(repo):
 
     Rewriting it into a real path would make an illustration silently claim to
     cite real code — worse than the defect this module fixes.
+
+    The tracked file lives at `docs/example/auth/session.py`, NOT at the cited
+    path itself: `example/auth/session.py` does not resolve on its own, but it
+    IS a unique suffix of the tracked file. That makes this test discriminating
+    — without the example_prefixes check, suffix_candidates would find exactly
+    one match and repair_text WOULD rewrite it. A tracked file at the cited
+    path itself (the original fixture) made the prefix check provably
+    unreachable: _resolves() already short-circuits before it, so deleting the
+    check could not fail that version of the test.
     """
-    ex = repo / "example/auth"
+    ex = repo / "docs/example/auth"
     ex.mkdir(parents=True)
     (ex / "session.py").write_text("# ex\n")
     _git(repo, "add", "-A")
@@ -259,12 +266,47 @@ def test_example_namespace_token_is_never_repaired(repo):
 
 
 def test_gitignored_path_is_never_repaired(repo):
-    """Exclusion row 3 (CCE-145): declared but absent from a fresh checkout."""
-    (repo / ".gitignore").write_text("build/\n")
+    """Exclusion row 3 (CCE-145): declared but absent from a fresh checkout.
+
+    The gitignore pattern `generated/output.md` has a non-trailing internal
+    slash, so it is anchored to the repo root: it ignores ONLY a top-level
+    `generated/output.md`, not the tracked `docs/generated/output.md` this
+    test commits (verified empirically — `git check-ignore` returns 1/not
+    ignored for the nested path and 0/ignored for the top-level one). That
+    keeps the test discriminating: `generated/output.md` does not resolve on
+    its own, but it IS a unique suffix of `docs/generated/output.md`, so
+    without the _is_gitignored check, suffix_candidates would find exactly
+    one match and repair_text WOULD rewrite it. The original fixture cited a
+    path with no tracked file suffix-matching it at all, so suffix_candidates
+    already returned [] regardless of this check — deleting the check could
+    not fail that version of the test.
+    """
+    (repo / ".gitignore").write_text("generated/output.md\n")
+    docs_generated = repo / "docs/generated"
+    docs_generated.mkdir(parents=True)
+    (docs_generated / "output.md").write_text("# generated\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "ignore")
 
-    text = "See `build/output.md`.\n"
+    text = "See `generated/output.md`.\n"
+    out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
+    assert repairs == []
+    assert out == text
+
+
+def test_absolute_path_outside_repo_is_never_repaired(repo):
+    """Exclusion row 4: `_relativize` returns None for a path outside the repo.
+
+    `citation_exists._relativize` treats an absolute path that does not
+    resolve inside `repo_root` as an environment reference, not a repo
+    citation — there is nothing repo-relative to check it against. Verified
+    (via a standalone script, not guessed): `/etc/nginx/nginx.conf` matches
+    `_REPO_PATH_RE`, is not filtered by `_is_placeholder`, so
+    `extract_citations` DOES surface it as a path citation and it genuinely
+    reaches this branch through `repair_text`'s own call path — this is not a
+    contrived unreachable case.
+    """
+    text = "See `/etc/nginx/nginx.conf`.\n"
     out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
     assert repairs == []
     assert out == text

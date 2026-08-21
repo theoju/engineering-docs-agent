@@ -613,7 +613,7 @@ Expected: PASS, 21 passed
 Then confirm nothing else broke:
 
 Run: `PYTHONPATH=scripts .venv/bin/python -m pytest -q`
-Expected: PASS, 1480 passed, 4 skipped
+Expected: PASS, 1481 passed, 4 skipped
 
 - [ ] **Step 5: Commit**
 
@@ -806,7 +806,7 @@ Expected: PASS, 2 passed
 Then the full suite:
 
 Run: `PYTHONPATH=scripts .venv/bin/python -m pytest -q`
-Expected: PASS, 1482 passed, 4 skipped
+Expected: PASS, 1483 passed, 4 skipped
 
 - [ ] **Step 5: Commit**
 
@@ -846,7 +846,7 @@ Expected: PASS, 4 passed
 - [ ] **Step 3: Run the full suite**
 
 Run: `PYTHONPATH=scripts .venv/bin/python -m pytest -q`
-Expected: PASS, 1482 passed, 4 skipped
+Expected: PASS, 1483 passed, 4 skipped
 
 - [ ] **Step 4: Commit**
 
@@ -912,4 +912,4 @@ Expected: `repairs` shows one pair, and `citation_exists` reports `"ok": true`.
 - **Do not touch `internal_links`.** Markdown link targets are a different rule with a different failure mode, already fixed separately on 2026-08-21.
 - **CCE-167** (extraction-layer defects in `_REPO_PATH_RE` / `_relativize`) is out of scope. If a test seems to need those changed, stop and re-read the spec's Scope section rather than widening.
 - If the ambiguity tiebreak proves hard to trigger in a real run, that is expected — the measured 2-segment ambiguity rate is 0.6%. It is tested at the unit level and needs no live reproduction.
-- The expected test counts (1480, then 1482) assume a 1459-test baseline. If your baseline differs, the deltas per task are +5, +7, +9, +2, +0.
+- The expected full-suite counts (1481 after Task 3, 1483 after Task 4) assume the measured 1459-passed / 4-skipped baseline. Note the arithmetic is **not** simply the new tests: `tests/ci/test_docstring_flag_value_lint.py` parametrizes over every `scripts/*.py`, so creating `scripts/citation_repair.py` in Task 1 adds one case there as well. Verified after Task 1: baseline 1463 collected → 1469 collected (+5 new tests, +1 parametrized). New tests per task: +5, +7, +9, +2, +0.

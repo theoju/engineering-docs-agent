@@ -70,13 +70,23 @@ def build_corroborators(
 ) -> set[str]:
     """Tracked paths corroborated by a source the authoring agent did not write.
 
-    Rung 1 (edits, git-authoritative): a RAW substring scan of the prior
-    committed page. Deliberately not extract_citations — that reads only
-    backticked spans in unfenced prose and on this repo's 108-page corpus sees
-    69.9% of path tokens, missing frontmatter-only and link-target-only ones.
-    A raw scan does not violate the imported-never-reimplemented contract: it
-    is not deciding what a citation IS, only whether a known-tracked path was
-    already present.
+    Rung 1 (edits, git-authoritative): the LINTER'S OWN VIEW of the prior
+    committed page — `extract_citations(prior_text)["paths"]` intersected with
+    the tracked set. Only a path `citation_exists` actually VALIDATED on that
+    page evidences that the pipeline accepted a reference to that file.
+
+    Deliberately NOT a raw substring scan of the prior text. A raw scan sees
+    more path tokens than extract_citations does, and that surplus is exactly
+    what disqualifies it: those tokens are invisible to extract_citations
+    BECAUSE citation_exists never validates them — inside fenced blocks
+    ("fenced examples are legitimately hypothetical", its own docstring),
+    inside URL bodies, inside HTML comments, and as substrings of longer
+    paths. A token the linter never checked evidences nothing about
+    acceptance. Concretely: a prior page naming a path only inside a ```text
+    fence would corroborate a new page's invented citation of the same tail,
+    turning a block into a pass — the defect this module exists to prevent.
+    Calling extract_citations also inherits the linter's fence semantics for
+    free, satisfying import-never-reimplement rather than straining it.
 
     Rung 2 (every authoring, orchestrator-authoritative): the batch's source
     set. On a create _enforce_agent_frontmatter writes this into the page's own
@@ -91,7 +101,7 @@ def build_corroborators(
         p for p in source_paths if p in files and not any(c in p for c in _GLOB_CHARS)
     }
     if prior_text:
-        out |= {f for f in files if f in prior_text}
+        out |= set(extract_citations(prior_text)["paths"]) & files
     return out
 
 

@@ -370,7 +370,7 @@ Ranked, computed in `_repair_citation_paths`:
 
 | Rung | Source | Available on | Authored by |
 | --- | --- | --- | --- |
-| 1 | Raw substring scan of the prior committed page, plus its frontmatter `sources:` / `source_files:` | edits | git |
+| 1 | `extract_citations` over the prior committed page, intersected with the tracked set | edits | git |
 | 2 | Membership in the batch's `grounding` set, with a **≥2-segment suffix floor** | every authoring | the orchestrator |
 | 3 | *(optional)* the same path cited in full **and resolving** elsewhere on the page | same-page | the agent — weakest rung |
 | 4 | *(additive)* for a `path:symbol` token, `_symbol_defined` on the candidate | symbol citations | the target file's contents |
@@ -384,6 +384,34 @@ and a table cell, so an `extract_citations`-based rung 1 could fail the very cas
 this ticket exists for. A raw scan does not violate the imported-never-
 reimplemented contract: it is not deciding what a citation *is*, only whether a
 known-tracked path was already present.
+
+> **Post-implementation correction (2026-08-21, adversarial review).** The
+> paragraph above is **wrong and was reverted in code**. Rung 1 is
+> `set(extract_citations(prior_text)["paths"]) & files`.
+>
+> The coverage argument is backwards. The ~30% of path tokens
+> `extract_citations` does not see is invisible *precisely because
+> `citation_exists` never validates it* — fenced blocks ("fenced examples are
+> legitimately hypothetical", its own docstring), URL bodies, HTML comments,
+> and substrings of longer paths. A token the linter never checked cannot
+> evidence that the pipeline **accepted** a reference to that file, which is
+> the only thing rung 1 is allowed to assert.
+>
+> Reproduced twice: a prior page naming
+> `tests/fixtures/setup_repos/js_docusaurus/.github/workflows/ci.yml` **only
+> inside a ```` ```text ```` fence** corroborated that path, and a new page
+> citing an invented `.github/workflows/ci.yml` was silently repointed at the
+> fixture — `check_path` went from `(False, "cites nonexistent path …")` to
+> `(True, 'ok')`. That is the exact defect the corroboration gate exists to
+> prevent.
+>
+> Losing the frontmatter/table sites is the correct trade: those sites are
+> unvalidated, and an unvalidated mention is evidence of nothing. Rung 1 now
+> also inherits the linter's fence semantics for free rather than duplicating
+> them, which is what *import, never reimplement* actually asks for. Tests:
+> `test_rung1_ignores_a_path_named_only_inside_a_fence`,
+> `test_rung1_ignores_sites_the_linter_never_validates`,
+> `test_a_fenced_mention_on_the_prior_page_does_not_corroborate`.
 
 **Circularity is closed.** On a create, `_enforce_agent_frontmatter` writes
 `grounding` into the page's `source_files`, **overwriting whatever the agent

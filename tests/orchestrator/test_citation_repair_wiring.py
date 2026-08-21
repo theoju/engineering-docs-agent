@@ -105,6 +105,36 @@ def test_corroborated_repair_fires_and_stays_info_only(repo):
     )
 
 
+def test_a_fenced_mention_on_the_prior_page_does_not_corroborate(repo):
+    """THE CRITICAL CASE, end to end. citation_exists deliberately never
+    validates fenced regions, so a path named only inside a fence on the prior
+    commit is not evidence the pipeline accepted a reference to it. Under a
+    raw substring scan of the prior page it corroborated anyway, and a new
+    page citing an invented `.github/workflows/ci.yml` was silently repointed
+    at a Docusaurus test fixture — block became pass."""
+    fixture = repo / "tests/fixtures/setup_repos/js_docusaurus/.github/workflows"
+    fixture.mkdir(parents=True)
+    (fixture / "ci.yml").write_text("on: push\n")
+    full = "tests/fixtures/setup_repos/js_docusaurus/.github/workflows/ci.yml"
+
+    page = repo / "page.md"
+    page.write_text("Example only:\n\n```text\n" f"cite it as `{full}`\n" "```\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "prior")
+
+    cited = "The workflow lives at `.github/workflows/ci.yml`.\n"
+    page.write_text(cited)
+    state = _state()
+
+    runner._repair_citation_paths(page, repo, {}, state, source_paths=set())
+
+    assert page.read_text() == cited
+    assert any(
+        "citation_repair_declined" in r
+        for r in state["current_run"]["partial_reasons"]
+    )
+
+
 def test_prior_page_text_survives_a_non_utf8_page_at_head(repo):
     """A single non-UTF-8 byte in a committed page must not take down the run.
     Under corroborated repair this is on the hot path for every edit."""

@@ -310,11 +310,21 @@ def test_absolute_path_outside_repo_is_never_repaired(repo):
     assert out == text
 
 
-def test_rung1_raw_scan_sees_frontmatter_and_table_sites():
-    """The ADIS incident cited the full path in frontmatter (line 6), prose
-    (27) and a table (92). extract_citations sees only backticked spans in
-    unfenced prose, so a rung built on it could miss the very evidence this
-    ticket exists for. The scan must be raw."""
+def test_rung1_admits_a_path_the_linter_validated_in_prose():
+    """Rung 1 is the LINTER'S view of the prior page: an inline code span in
+    unfenced prose is exactly what citation_exists validated there, so it is
+    evidence the pipeline already accepted a reference to that file."""
+    full = ".claude/skills/connector-builder/references/checklist.md"
+    prior = f"The checklist lives at `{full}`.\n"
+    assert cr.build_corroborators(prior, set(), {full}) == {full}
+
+
+def test_rung1_ignores_sites_the_linter_never_validates():
+    """Frontmatter and table cells are not inline code spans in prose, so
+    citation_exists never checked them. A raw substring scan would admit them
+    and thereby corroborate a path the pipeline never validated — the surplus
+    a raw scan buys is precisely the unvalidated part, so it evidences
+    nothing."""
     full = ".claude/skills/connector-builder/references/checklist.md"
     prior = (
         "---\n"
@@ -322,13 +332,25 @@ def test_rung1_raw_scan_sees_frontmatter_and_table_sites():
         "---\n\n"
         f"| step | ref |\n| --- | --- |\n| 1 | {full} |\n"
     )
-    got = cr.build_corroborators(prior, set(), {full})
-    assert full in got
+    assert cr.build_corroborators(prior, set(), {full}) == set()
+
+
+def test_rung1_ignores_a_path_named_only_inside_a_fence():
+    """THE CRITICAL CASE. citation_exists strips fenced blocks on purpose —
+    "fenced examples are legitimately hypothetical". A path named only inside
+    a fence on the prior commit was therefore never validated, and must not
+    corroborate a new page's invented citation of the same tail. Backticked
+    INSIDE the fence on purpose: this must fail closed on the fence itself,
+    not merely on the absence of an inline span."""
+    full = "tests/fixtures/setup_repos/js_docusaurus/.github/workflows/ci.yml"
+    prior = "Nothing is cited here.\n\n```text\n" f"cite it as `{full}`\n" "```\n"
+    assert cr.build_corroborators(prior, set(), {full}) == set()
 
 
 def test_rung1_only_admits_tracked_paths():
-    """A raw scan must not admit arbitrary strings from the prior page."""
-    prior = "See totally/invented/thing.md for details.\n"
+    """A citation the linter validated on the prior page still has to name a
+    tracked file — extract_citations reports tokens, not existence."""
+    prior = "See `totally/invented/thing.md` for details.\n"
     assert cr.build_corroborators(prior, set(), {"real/file.md"}) == set()
 
 

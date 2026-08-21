@@ -1,0 +1,275 @@
+# CCE-141: deterministic repair of shortened citation paths
+
+**Status:** design
+**Date:** 2026-08-21
+**Ticket:** CCE-141
+
+## Context
+
+`page-author` sometimes emits a citation as a bare relative path.
+`citation_exists` resolves citations from the repo root, correctly finds
+nothing there, and blocks the page. From ADIS run `31463975395`:
+
+```
+lint_block: .../connector-builder-skill.md citation_exists:
+  cites nonexistent path 'references/checklist.md'
+```
+
+The file exists. The _committed_ page already cited it correctly, at three
+separate sites — frontmatter `sources:` (line 6), prose (line 27), and a table
+(line 92) — all as
+`.claude/skills/connector-builder/references/checklist.md`. The bare
+`references/checklist.md` form appears only in the author's proposed rewrite.
+The author took a correct, resolvable citation that was already on the page and
+shortened it into an unresolvable one.
+
+On an `edit` the author receives only `target_path` and reads the file itself,
+so the full path was in front of it. This is not a case of the author never
+having seen the correct form.
+
+### Why this matters more than one blocked page
+
+Post-CCE-140 the deferral skip abandons a repeatedly-blocked PR and the baseline
+moves past it. The failure mode is therefore not a stall — **the page is simply
+never written and nothing is red anywhere.** The run reports success, the
+baseline advances, and a documentation gap is created silently.
+
+### Why it cannot be fixed host-side
+
+The obvious host workaround is a `citation_exempt_tokens` entry. That is wrong
+here and was deliberately not done: the path is genuinely resolvable, and the
+host config's own rule states exemptions are _"NOT a place for a path that
+merely has the wrong prefix — those get rewritten... Adding a resolvable path
+here converts a blocking gate into a silent one."_
+
+## What we verified, and what we did not
+
+Verified in this repo:
+
+- `page-author.md:77` gives extensive citation guidance — line-free citations,
+  the reserved `example/` namespace, fenced metasyntactic tokens, dead names —
+  but **never states what root a citation is relative to**, and never says "do
+  not rewrite a citation that already resolves."
+- On `edit`, the orchestrator passes only `target_path`
+  (`orchestrator_runner.py:2289` selects the action); the author reads the
+  existing page itself.
+- Deterministic repair of agent output already has precedent:
+  `_rescue_json_object` salvages contaminated LLM output and reports
+  `prose_contamination_rescued`. `_enforce_agent_frontmatter` (CCE-119)
+  rewrites agent-authored frontmatter after the fact.
+- `citation_exists` already carries a suffix-resolution concept from the other
+  direction: `lint.citation_source_roots` (CCE-139) retries `<root>/<rel>`.
+
+**Not verified:** the originating mechanism. ADIS is not available locally, so
+the ticket's hypothesis — that the author resolves relative to the skill's own
+directory, or copies a display label rather than the citation target — remains
+unconfirmed. This design deliberately does not depend on which it is. Repair
+corrects the _observable_ defect (an unresolvable citation that is a suffix of a
+real path) regardless of why the author produced it.
+
+## Decision: repair deterministically, do not rely on prompt guidance
+
+Rejected: adding "citations are repo-root-relative, never shorten a resolving
+citation" to `page-author.md` and calling it done.
+
+The rejection is not about effort — the prompt edit is cheap and may still be
+worth making later. It is that **the fix would be unverifiable.** Both of
+CCE-141's stated acceptance criteria ask for a regression test that the _author_
+preserves a citation. That is a test of non-deterministic LLM behaviour, and
+this pipeline produced three demonstrations of that variance on 2026-08-21
+alone:
+
+1. A page blocked on an invented link target `docs/runbook.md`.
+2. The same page, re-authored, blocked on a _different_ target `docs/foo.md`.
+3. The same page, re-authored again after the `internal_links` fix, contained
+   **no markdown links at all** — it described the three syntaxes in prose
+   instead of demonstrating them.
+
+A test asserting "the author preserves citation X" would pass or fail by luck.
+We therefore substitute a different, achievable acceptance: deterministic tests
+of the repair. This substitution is a conscious deviation from the ticket and
+is recorded here rather than left implicit.
+
+## Mechanism
+
+After a page is authored, for each citation token that **fails** to resolve:
+
+```
+'references/checklist.md' does not resolve
+  → suffix-match against the tracked-file set
+  → exactly 1 match  → rewrite the token in the page text
+  → 2+ matches       → tiebreak against the previous committed version of
+                       the page; if exactly one candidate was cited there,
+                       use it; otherwise leave the token alone
+  → 0 matches        → leave the token alone
+```
+
+Both non-unique outcomes leave the page byte-identical, so `citation_exists`
+blocks exactly as it does today. Repair can only ever convert a block into a
+correct citation; it can never convert a block into a silent pass.
+
+### What "suffix-match" means precisely
+
+A tracked path `F` is a candidate for cited token `C` when `C` equals a
+**segment-boundary suffix** of `F`: splitting both on `/`, the segments of `C`
+are exactly the final `len(C)` segments of `F`.
+
+Segment boundaries are required, not substring matching.
+`references/checklist.md` matches
+`.claude/skills/connector-builder/references/checklist.md`, but
+`erences/checklist.md` matches nothing, and `checklist.md` alone matches on the
+1-segment row of the ambiguity table (with its correspondingly higher collision
+rate).
+
+`C == F` is excluded: an exact match means the path already resolved and the
+token was never a repair candidate. The candidate set is therefore always a
+strict shortening.
+
+The tracked-file set is the same `files` set `check_path` already receives, so
+repair and the lint rule agree on what exists by construction rather than by
+convention.
+
+### Why a unique match is provably correct
+
+If the page previously cited `X` and now cites `suffix(X)`, then `suffix(X)`
+necessarily matches `X` itself — a path is always a suffix of itself. So when a
+suffix matches exactly one tracked file, that file **is** `X`. The repair cannot
+silently retarget a citation to a different file. Ambiguity is the only failure
+mode, and it fails closed.
+
+### Measured ambiguity
+
+Proper suffixes (those that are genuinely a shortening of a longer tracked
+path), over citation-shaped file types:
+
+| suffix shape                                           | engineering-docs-agent | claude-code-self-assessment |
+| ------------------------------------------------------ | ---------------------- | --------------------------- |
+| 1 segment (bare filename)                              | 6.3% ambiguous         | 1.6%                        |
+| 2 segments (`references/checklist.md`, the ADIS shape) | **0.6%**               | **0.0%**                    |
+
+The shape this ticket is actually about is nearly always unambiguous. The
+residual ambiguous cases degrade to today's behaviour.
+
+## Exclusions the repair MUST honour
+
+`check_path` deliberately skips several token classes. Repair has to skip the
+same ones, or it will "fix" paths that are unresolvable _by design_:
+
+| class                                 | source                                      | why repair must skip it                                                                          |
+| ------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `lint.citation_exempt_tokens`         | `exempt_tokens(config)`                     | The host declared these unverifiable on purpose.                                                 |
+| Reserved illustrative namespace       | `example_prefixes(config)`, e.g. `example/` | `example/auth/session.py` is fictional; a suffix match would be a coincidence, not a correction. |
+| Gitignored paths                      | `_is_gitignored` (CCE-145)                  | Absent from a fresh checkout but legitimately declared.                                          |
+| Tokens `_relativize` returns None for | `_relativize(cited, repo_root)`             | Not a repo-relative citation at all.                                                             |
+
+Getting this wrong would be worse than the original defect: it would rewrite a
+deliberately-illustrative token into a real path, making a fictional example
+silently claim to cite real code.
+
+## Placement
+
+A new `_repair_citation_paths(target_path, repo_root, config, files)` runs in
+the authoring loop, immediately after `_enforce_agent_frontmatter`:
+
+```
+per authored page:
+    page-author writes target_path
+    _enforce_agent_frontmatter(...)   # exists (CCE-119)
+    _repair_citation_paths(...)       # new
+        ↓
+content-validator sees an already-correct page
+```
+
+Chosen over two alternatives:
+
+- **A separate repair pass before content-validator.** Adds a pipeline stage and
+  separates repair from the authoring context that produced the page, for no
+  gain — repair is inherently per-page.
+- **`citation_exists --fix`.** Colocated with the resolution logic it reuses,
+  but it makes a lint rule mutate files. Every rule in `scripts/lint/` follows
+  `check_path(path, config) -> (ok, message)`, and `lint_runner`'s CLI contract
+  has exit codes for _passed_ and _failed_ with no notion of _mutated_.
+  Breaking that for one rule is a category change.
+
+Repair **imports** the extraction and resolution helpers from
+`citation_exists` — `extract_citations`, `extract_symbol_citations`,
+`_relativize`, `_resolves`, `exempt_tokens`, `example_prefixes`,
+`source_roots`, `_is_gitignored`. That module's docstring already declares these
+a shared-helper contract ("imported by scripts/orchestrator_runner.py … grep
+callers repo-wide before changing signatures"). Reimplementing resolution would
+guarantee the two drift, and repair skipping a class that `check_path` skips is
+precisely the drift that would hurt.
+
+## Reporting
+
+`citation_path_repaired: <page>: '<old>' → '<new>'`, recorded **info-only**.
+
+- Info-only because nothing was lost. The page is correct, the run is not
+  degraded, and flipping `partial` would veto auto-merge for a successful
+  self-correction — the CCE-109 over-correction shape.
+- But it **must** appear in the digest. Repairing silently forever means nobody
+  ever learns the author is still shortening citations. The log line is the only
+  thing that would justify revisiting the prompt later.
+
+This matches `prose_contamination_rescued` exactly, which is the closest
+existing precedent: a successful rescue of malformed agent output, reported
+without degrading the run.
+
+## Scope
+
+**In scope**
+
+- Backticked citation tokens in prose — the tokens `citation_exists` checks.
+- Both the bare `path` form and the `path:symbol` form. `extract_citations`
+  strips a trailing `:line`/`:symbol` suffix when returning bare paths, so the
+  rewrite must operate on the full token as it appears in the page and preserve
+  any `:symbol` suffix.
+
+**Out of scope, deliberately**
+
+- **Frontmatter.** `extract_citations` only reads inline code spans, so YAML
+  `sources:` entries are not linted by this rule and are not repaired by it.
+  The ADIS page had the correct path at line 6 in frontmatter; that site was
+  never the blocker.
+- **Markdown link targets.** Those belong to `internal_links`, a different rule
+  with a different failure mode (see the 2026-08-21 fix stripping code spans and
+  fenced blocks before matching links).
+- **The author prompt.** Unchanged by this design. Adding repo-root guidance to
+  `page-author.md` remains available as a separate, unverifiable improvement.
+- **CCE-167** extraction-layer defects (`_REPO_PATH_RE`, `_relativize`).
+
+## Testing
+
+All deterministic — this is the reason for choosing repair over prompt guidance.
+
+1. Unique suffix match rewrites the token to the full repo-root path.
+2. The ADIS shape specifically: `.claude/skills/<skill>/references/<file>.md`
+   shortened to `references/<file>.md` is repaired.
+3. Ambiguous suffix (2+ tracked matches, no prior version) → no rewrite, page
+   byte-identical, `citation_exists` still blocks.
+4. Zero matches (a genuinely confabulated path) → no rewrite, still blocks.
+   **This is the strictness guard**: repair must not weaken the confabulation
+   gate that `citation_exists` exists to be.
+5. A citation that already resolves is left byte-identical.
+6. Idempotence: running repair twice produces no second change.
+7. Ambiguity tiebreak: 2 candidates, one of which the previous committed version
+   cited → that one is chosen.
+8. `path.py:Class.method` form: the path is repaired and the `:symbol` suffix
+   preserved.
+9. Exclusion honouring, one test per row of the exclusions table: an exempt
+   token, an `example/` token, and a gitignored token are each left untouched
+   even when a unique suffix match exists.
+
+## Risks
+
+- **Repair masks a worsening author.** Mitigated by the info-only digest line,
+  not eliminated. If `citation_path_repaired` starts appearing on most pages,
+  that is the signal to revisit the prompt.
+- **Ambiguity rate is repo-dependent.** Measured on two repos; a host with many
+  parallel skill directories could see a higher 2-segment collision rate. The
+  failure is safe (block, as today), so this degrades coverage rather than
+  correctness.
+- **The originating mechanism stays unknown.** If the author's shortening is
+  caused by something that also produces _non_-suffix corruption, repair will
+  not catch that class. Nothing in the observed evidence suggests it, but the
+  ADIS case was never reproduced locally.

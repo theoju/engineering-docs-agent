@@ -120,3 +120,151 @@ def test_rewrite_still_applies_inside_an_unterminated_fence():
         text, "references/checklist.md", "a/b/references/checklist.md"
     )
     assert "a/b/references/checklist.md" in out
+
+
+import subprocess
+
+import pytest
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+@pytest.fixture
+def repo(tmp_path):
+    """A real git repo — _resolves and _is_gitignored both shell out to git."""
+    subprocess.run(
+        ["git", "init", "-q", str(tmp_path)], check=True, capture_output=True
+    )
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "T")
+    target = tmp_path / ".claude/skills/connector-builder/references"
+    target.mkdir(parents=True)
+    (target / "checklist.md").write_text("# checklist\n")
+    (tmp_path / "README.md").write_text("# readme\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "init")
+    return tmp_path
+
+
+CFG: dict = {}
+
+
+def test_shortened_citation_is_repaired(repo):
+    """The ADIS case, end to end."""
+    text = "See `references/checklist.md` for the steps.\n"
+    files = cr.tracked_files(repo)
+    out, repairs = cr.repair_text(text, repo, CFG, files)
+    assert repairs == [
+        (
+            "references/checklist.md",
+            ".claude/skills/connector-builder/references/checklist.md",
+        )
+    ]
+    assert ".claude/skills/connector-builder/references/checklist.md" in out
+
+
+def test_confabulated_path_is_left_alone(repo):
+    """STRICTNESS GUARD. Repair must not weaken the gate citation_exists IS.
+
+    A path matching nothing is a confabulation. Leaving the page byte-identical
+    is what keeps citation_exists blocking it.
+    """
+    text = "See `docs/invented-by-the-model.md`.\n"
+    files = cr.tracked_files(repo)
+    out, repairs = cr.repair_text(text, repo, CFG, files)
+    assert repairs == []
+    assert out == text
+
+
+def test_ambiguous_suffix_is_left_alone(repo):
+    """Two candidates, no prior version to disambiguate -> fail closed."""
+    second = repo / "other/references"
+    second.mkdir(parents=True)
+    (second / "checklist.md").write_text("# other\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "second")
+
+    text = "See `references/checklist.md`.\n"
+    out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
+    assert repairs == []
+    assert out == text
+
+
+def test_ambiguity_is_broken_by_the_previous_version(repo):
+    """When the prior page cited exactly one candidate, that one wins."""
+    second = repo / "other/references"
+    second.mkdir(parents=True)
+    (second / "checklist.md").write_text("# other\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "second")
+
+    prior = "See `.claude/skills/connector-builder/references/checklist.md`.\n"
+    text = "See `references/checklist.md`.\n"
+    out, repairs = cr.repair_text(
+        text, repo, CFG, cr.tracked_files(repo), prior_text=prior
+    )
+    assert repairs == [
+        (
+            "references/checklist.md",
+            ".claude/skills/connector-builder/references/checklist.md",
+        )
+    ]
+
+
+def test_resolving_citation_is_byte_identical(repo):
+    text = "See `README.md`.\n"
+    out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
+    assert repairs == []
+    assert out == text
+
+
+def test_repair_is_idempotent(repo):
+    text = "See `references/checklist.md`.\n"
+    files = cr.tracked_files(repo)
+    once, _ = cr.repair_text(text, repo, CFG, files)
+    twice, repairs = cr.repair_text(once, repo, CFG, files)
+    assert repairs == []
+    assert twice == once
+
+
+def test_exempt_token_is_never_repaired(repo):
+    """Exclusion row 1. The host declared this unverifiable on purpose."""
+    cfg = {"lint": {"citation_exempt_tokens": ["references/checklist.md"]}}
+    text = "See `references/checklist.md`.\n"
+    out, repairs = cr.repair_text(text, repo, cfg, cr.tracked_files(repo))
+    assert repairs == []
+    assert out == text
+
+
+def test_example_namespace_token_is_never_repaired(repo):
+    """Exclusion row 2. `example/` is fictional by design.
+
+    Rewriting it into a real path would make an illustration silently claim to
+    cite real code — worse than the defect this module fixes.
+    """
+    ex = repo / "example/auth"
+    ex.mkdir(parents=True)
+    (ex / "session.py").write_text("# ex\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "ex")
+
+    text = "See `example/auth/session.py`.\n"
+    out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
+    assert repairs == []
+    assert out == text
+
+
+def test_gitignored_path_is_never_repaired(repo):
+    """Exclusion row 3 (CCE-145): declared but absent from a fresh checkout."""
+    (repo / ".gitignore").write_text("build/\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "ignore")
+
+    text = "See `build/output.md`.\n"
+    out, repairs = cr.repair_text(text, repo, CFG, cr.tracked_files(repo))
+    assert repairs == []
+    assert out == text

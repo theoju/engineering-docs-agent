@@ -34,7 +34,19 @@ if _LINT_DIR not in sys.path:
 from citation_exists import (  # noqa: E402
     _INLINE_CODE_RE,
     _SUFFIX_RE,
+    _build_dir,
+    _docs_dir,
+    _is_gitignored,
+    _relativize,
+    _resolves,
+    example_prefixes,
+    exempt_tokens,
+    extract_citations,
+    source_roots,
+    tracked_files,
 )
+
+__all__ = ["suffix_candidates", "rewrite_token", "repair_text", "tracked_files"]
 
 
 def suffix_candidates(cited: str, files: set[str]) -> list[str]:
@@ -107,3 +119,57 @@ def rewrite_token(text: str, old: str, new: str) -> str:
         if i not in fenced:
             lines[i] = _INLINE_CODE_RE.sub(_sub, line)
     return "\n".join(lines)
+
+
+def repair_text(
+    text: str,
+    repo_root: Path,
+    config: dict,
+    files: set[str],
+    prior_text: str | None = None,
+) -> tuple[str, list[tuple[str, str]]]:
+    """Repair shortened citations in `text`. Returns (new_text, repairs).
+
+    The skip order mirrors `citation_exists.check_path` deliberately. Every
+    class it declines to check is a class repair must decline to touch: an
+    exempt token, a reserved `example/` path, and a gitignored path are all
+    unresolvable BY DESIGN, and "fixing" one would convert a deliberate
+    illustration into a false claim about real code.
+    """
+    docs_dir = _docs_dir(config)
+    build_dir = _build_dir(repo_root)
+    prefixes = example_prefixes(config)
+    exempt = exempt_tokens(config)
+    roots = source_roots(config)
+    prior_cited = set(extract_citations(prior_text)["paths"]) if prior_text else set()
+
+    repairs: list[tuple[str, str]] = []
+    for cited in extract_citations(text)["paths"]:
+        if cited in exempt:
+            continue
+        rel = _relativize(cited, repo_root)
+        if rel is None:
+            continue
+        if any(rel.startswith(p) for p in prefixes):
+            continue
+        if _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
+            continue
+        if _is_gitignored(repo_root, rel):
+            continue
+
+        candidates = suffix_candidates(rel, files)
+        if len(candidates) > 1:
+            # Ambiguity tiebreak: the version this page shipped with before the
+            # author touched it. Only a single surviving candidate counts —
+            # two prior citations are no more decisive than none.
+            narrowed = [c for c in candidates if c in prior_cited]
+            if len(narrowed) == 1:
+                candidates = narrowed
+        if len(candidates) != 1:
+            continue
+        repairs.append((cited, candidates[0]))
+
+    new_text = text
+    for old, new in repairs:
+        new_text = rewrite_token(new_text, old, new)
+    return new_text, repairs

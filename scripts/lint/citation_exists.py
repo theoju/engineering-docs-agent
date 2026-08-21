@@ -189,6 +189,39 @@ def tracked_files(repo_root: Path) -> set[str]:
     return set(r.stdout.splitlines()) if r.returncode == 0 else set()
 
 
+@lru_cache(maxsize=None)
+def _is_gitignored(repo_root: Path, rel: str) -> bool:
+    """True when the host's .gitignore deliberately excludes this path (CCE-145).
+
+    A generated artifact a host ignores by design -- `app/data/assessment.json`
+    on the reference host -- exists on the author's disk and NOT in a fresh CI
+    checkout, so `_resolves` reports it missing and the page blocks. But the
+    .gitignore entry is the repo's own evidence that the path is expected: the
+    citation is UNVERIFIABLE, not confabulated, and this rule exists to catch
+    confabulation. check_path downgrades these to an advisory note.
+
+    Accepted trade-off: a broad ignore pattern (`node_modules/`, `dist/`)
+    exempts everything under it. That region is unverifiable by construction on
+    any checkout, and the note keeps it visible in the run output.
+
+    `--no-index` asks the pattern question directly ("would .gitignore exclude
+    this?") rather than the index question. Only unresolved paths reach here,
+    so they are untracked by definition, but the explicit flag states intent.
+    Exit codes: 0 ignored, 1 not ignored, 128 error (a path outside the repo,
+    e.g. a `../../` relative citation) -- anything but 0 fails CLOSED and the
+    citation still blocks.
+
+    Cached per (repo_root, rel): main() loops over every page in a run and
+    .gitignore does not change mid-run.
+    """
+    r = subprocess.run(
+        ["git", "-C", str(repo_root), "check-ignore", "-q", "--no-index", "--", rel],
+        capture_output=True,
+        text=True,
+    )
+    return r.returncode == 0
+
+
 def cited_test_exists(repo_root: Path, name: str) -> bool:
     """True if any tracked file defines or calls the named test.
 
@@ -220,14 +253,96 @@ def _relativize(path_str: str, repo_root: Path) -> str | None:
         return None
 
 
-def _symbol_defined(source: str, leaf: str) -> bool:
-    """True if `leaf` is defined in the file source: a def/class (any indent,
-    so methods count) or a module-level (column-0) assignment/annotation."""
+# CCE-145: what a `path:symbol` citation MEANS.
+#
+# A citation asserts "this file DEFINES this identifier" -- a definition site a
+# reader can navigate to -- NOT "this is an importable binding". The CCE-122
+# grammar already settles the question by shipping `file.py:Class.method`: a
+# method is not importable, so the grammar was never about export tables. The
+# fact-checker contract agrees in the same words ("the cited symbol is defined
+# in it", agents/fact-checker.md).
+#
+# The forms below enumerate that meaning as named binding POSITIONS, one
+# language-agnostic set. Generic-first: a host may be Python, JS/TS, Go, Rust
+# or Kotlin, and a Python-only AST path would not generalize (nor would a
+# third-party JS parser survive the stdlib-first rule). The previous matcher
+# understood Python only -- `def`/`class` at any indent plus a COLUMN-0
+# `name =` / `name:` -- so NO JavaScript form resolved at all (not
+# `export const`, not `export function`, not `export class`), and no symbol
+# nested inside an object/dict literal resolved in any language. On a JS host
+# that meant every `path.mjs:symbol` citation blocked.
+#
+# Strictness is the whole point of this rule, so the forms match only where an
+# identifier is BOUND. A name that merely appears -- in a comment, a string
+# literal, a bare `import`, or a call -- is deliberately not a definition site:
+# matching those would let a citation point at the wrong file and still read as
+# authoritative, which is the CCE-122 `:symbol` hazard.
+#
+# Known limits, accepted: a quoted dict/JSON key (`"memory": ...`) is data, not
+# an identifier, and does not resolve; `export * from './x'` cannot be followed;
+# a destructured `const { a, b } = ...` binding is not detected. Each fails
+# CLOSED (the citation blocks), which is the safe direction for a block rule.
+#
+# `{name}` is substituted with str.replace, not str.format -- these patterns are
+# full of literal braces and doubling every one of them would hide the grammar.
+_DEFINITION_FORMS: tuple[tuple[str, str], ...] = (
+    # `def f`, `class C`, `export const X`, `export default function f`,
+    # `export function* gen`, `type T`, `interface I`, `enum E`, `fn`, `func`...
+    (
+        "declaration",
+        r"^[ \t]*"
+        r"(?:(?:export|default|declare|public|private|protected|internal"
+        r"|static|abstract|final|override|readonly|async)[ \t]+)*"
+        r"(?:def|class|function|func|fn|const|let|var|type|interface|enum"
+        r"|struct|trait|impl|module|namespace|record|object|val)"
+        r"(?:[ \t]*\*[ \t]*|[ \t]+){name}\b",
+    ),
+    # `export { name }` / `export { other as name }` -- the passthrough
+    # re-export form (the CCE-145 ticket names it explicitly). Anchored on
+    # `export` so a bare `import { name }`, which binds a symbol DEFINED
+    # elsewhere, does not resolve.
+    ("named_export", r"export[ \t]*(?:type[ \t]*)?\{[^{}]*\b{name}\b[^{}]*\}"),
+    # A key or field bound at any indent: `  memory: withGates(...)` inside an
+    # exported object map, an indented Python class attribute, a TS class field.
+    # `(?!:)` and `(?![=>])` keep `::`, `==` and `=>` out.
+    (
+        "binding",
+        r"^[ \t]*"
+        r"(?:(?:export|declare|public|private|protected|static|readonly"
+        r"|override|async|get|set)[ \t]+)*"
+        r"{name}[ \t]*(?::(?!:)|=(?![=>]))",
+    ),
+    # Method shorthand: `handle(req) {`, `async handle() {`, `handle(): void {`.
+    # The trailing `{` is load-bearing -- it is what separates a definition from
+    # a bare call (`handle();`), which must NOT resolve.
+    (
+        "member_shorthand",
+        r"^[ \t]*"
+        r"(?:(?:static|async|get|set|public|private|protected|override)[ \t]+)*"
+        r"\*?[ \t]*{name}[ \t]*\([^()]*\)[ \t]*(?::[^{;\n]*)?\{",
+    ),
+)
+
+
+@lru_cache(maxsize=None)
+def _definition_pattern(leaf: str) -> re.Pattern[str]:
+    """Alternation of every _DEFINITION_FORMS pattern, bound to one symbol.
+
+    Cached: check_path runs the symbol loop per page and main() loops over
+    every page in a run, so the same leaf recurs across pages."""
     name = re.escape(leaf)
-    pattern = re.compile(
-        rf"(?m)^\s*(?:async\s+)?(?:def|class)\s+{name}\b|^{name}\s*[:=]"
+    return re.compile(
+        "|".join(f"(?:{pat.replace('{name}', name)})" for _, pat in _DEFINITION_FORMS),
+        re.MULTILINE,
     )
-    return bool(pattern.search(source))
+
+
+def _symbol_defined(source: str, leaf: str) -> bool:
+    """True if `leaf` is bound at a definition site in the file source.
+
+    See _DEFINITION_FORMS above for which positions count, and why the ones
+    that are excluded are excluded."""
+    return bool(_definition_pattern(leaf).search(source))
 
 
 def _docs_dir(config: dict) -> str:
@@ -404,6 +519,11 @@ def check_path(
         if any(rel.startswith(p) for p in prefixes):
             continue  # reserved illustrative namespace, never expected to resolve
         if not _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
+            if _is_gitignored(repo_root, rel):
+                # Ignored by design: absent from a fresh checkout, but the host
+                # declared it. Unverifiable, not confabulated (CCE-145).
+                notes.append(f"unverifiable (gitignored): '{cited}'")
+                continue
             problems.append(f"cites nonexistent path '{cited}'")
     for name in cites["tests"]:
         exists = cited_test_exists(repo_root, name)

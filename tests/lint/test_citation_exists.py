@@ -907,3 +907,185 @@ def test_grammar_placeholder_reports_drift_once_it_resolves(tmp_path):
     ok, msg = citation_exists.check_path(page, repo, files, {})
     assert ok is True, msg
     assert "stale exemption: 'path/to/file.py' now resolves" in msg
+
+
+# ---------- CCE-145: symbol resolution is language-agnostic ----------
+#
+# `_symbol_defined` recognized Python syntax only (`def`/`class` at any indent,
+# plus a COLUMN-0 `name =` / `name:`). Two consequences, both live:
+#   1. No JavaScript/TypeScript definition form resolved at all — not
+#      `export const`, not `export function`, not `export class`. Every
+#      `path.mjs:symbol` citation on a JS host blocked.
+#   2. A symbol bound as a key inside an object/dict literal, or as an indented
+#      class attribute, never resolved even in Python.
+# Reference block (run 32460602658, host claude-code-self-assessment):
+#   "cites nonexistent symbol 'memory' in 'scripts/score.mjs'" — a scorer
+#   registered as a key inside `export const EXECUTION_SCORERS = {`.
+
+
+_SCORE_MJS = """\
+export function withGates(gates, fn) {
+  return { gates, fn };
+}
+
+export const EXECUTION_SCORERS = {
+  permissions: withGates({ transcripts: true }, (s) => s.a),
+
+  memory: withGates({ transcripts: true }, (s) => s.b),
+};
+
+export function normalize(raw, target) {
+  return Math.round((raw / target) * 100);
+}
+"""
+
+
+def test_symbol_nested_in_exported_object_literal_resolves(tmp_path):
+    """The live CCE-145 repro: a scorer registered as a key inside an exported
+    object map. It is exported code at a reachable citation target; it is just
+    not a top-level export BINDING."""
+    repo, cfg = _init_host(tmp_path)
+    (repo / "scripts" / "score.mjs").write_text(_SCORE_MJS)
+    page = repo / "page.md"
+    page.write_text("The scorer lives at `scripts/score.mjs:memory`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 0, out["results"][0]["message"]
+
+
+@pytest.mark.parametrize(
+    "source,leaf",
+    [
+        ("export const A_CONST = 1;\n", "A_CONST"),
+        ("export function aFunc() {}\n", "aFunc"),
+        ("export async function aAsync() {}\n", "aAsync"),
+        ("export function* aGen() {}\n", "aGen"),
+        ("export class AClass {}\n", "AClass"),
+        ("export default function aDefault() {}\n", "aDefault"),
+        ("function aPlain() {}\n", "aPlain"),
+        ("const aArrow = () => {};\n", "aArrow"),
+        ("let aLet = 1;\n", "aLet"),
+        ("var aVar = 1;\n", "aVar"),
+        ("export type AType = string;\n", "AType"),
+        ("export interface AIface { x: number }\n", "AIface"),
+        ("export enum AEnum { X }\n", "AEnum"),
+    ],
+)
+def test_js_declaration_forms_resolve(tmp_path, source, leaf):
+    repo, cfg = _init_host(tmp_path)
+    (repo / "scripts" / "mod.ts").write_text(source)
+    page = repo / "page.md"
+    page.write_text(f"See `scripts/mod.ts:{leaf}`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 0, out["results"][0]["message"]
+
+
+def test_js_re_export_resolves(tmp_path):
+    """`export { name }` is the passthrough re-export form the CCE-145 ticket
+    names explicitly (app/lib/assessment.ts:182 on the reference host)."""
+    repo, cfg = _init_host(tmp_path)
+    (repo / "scripts" / "reexport.ts").write_text(
+        'import { evaluatePredicate } from "./predicate.mjs";\n'
+        "export { evaluatePredicate };\n"
+    )
+    page = repo / "page.md"
+    page.write_text("Re-exported from `scripts/reexport.ts:evaluatePredicate`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 0, out["results"][0]["message"]
+
+
+def test_js_class_method_shorthand_resolves(tmp_path):
+    repo, cfg = _init_host(tmp_path)
+    (repo / "scripts" / "svc.mjs").write_text(
+        "export class Service {\n  async handle(req) {\n    return req;\n  }\n}\n"
+    )
+    page = repo / "page.md"
+    page.write_text("`scripts/svc.mjs:Service.handle` does the work.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 0, out["results"][0]["message"]
+
+
+def test_python_indented_class_attribute_resolves(tmp_path):
+    """The same object-literal defect in Python form: a class attribute bound
+    at an indent, which the old column-0 anchor could not see."""
+    repo, cfg = _init_host(tmp_path)
+    (repo / "scripts" / "cfg.py").write_text(
+        "class Settings:\n    RETRY_BUDGET = 3\n"
+    )
+    page = repo / "page.md"
+    page.write_text("The cap is `scripts/cfg.py:Settings.RETRY_BUDGET`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 0, out["results"][0]["message"]
+
+
+# ---------- CCE-145: strictness guards (the rule must still block) ----------
+
+
+def test_confabulated_symbol_in_js_module_still_blocks(tmp_path):
+    """Widening definition forms must not make the rule pass for a symbol that
+    is genuinely absent. A fix that stops blocking is worse than the bug."""
+    repo, cfg = _init_host(tmp_path)
+    (repo / "scripts" / "score.mjs").write_text(_SCORE_MJS)
+    page = repo / "page.md"
+    page.write_text("See `scripts/score.mjs:totallyInventedScorer`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 1
+    assert (
+        "cites nonexistent symbol 'totallyInventedScorer' in 'scripts/score.mjs'"
+        in out["results"][0]["message"]
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "// ghostSymbol is described here but never defined.\n",
+        '/* ghostSymbol */\nconst other = 1;\n',
+        'const msg = "ghostSymbol";\n',
+        "import { ghostSymbol } from './elsewhere.mjs';\n",
+        "ghostSymbol();\n",
+        "if (ghostSymbol()) { run(); }\n",
+        'const registry = { "ghostSymbol": 1 };\n',
+    ],
+)
+def test_symbol_only_mentioned_not_defined_still_blocks(tmp_path, source):
+    """A name that merely APPEARS in the file — in a comment, a string, a bare
+    import, or a call — is not a definition site. Matching those would let a
+    citation point at the wrong file and read as authoritative."""
+    repo, cfg = _init_host(tmp_path)
+    (repo / "scripts" / "mod.mjs").write_text(source)
+    page = repo / "page.md"
+    page.write_text("See `scripts/mod.mjs:ghostSymbol`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 1, out["results"][0]["message"]
+    assert "cites nonexistent symbol 'ghostSymbol'" in out["results"][0]["message"]
+
+
+# ---------- CCE-145: gitignored paths are unverifiable, not missing ----------
+
+
+def test_gitignored_path_absent_from_checkout_does_not_block(tmp_path):
+    """A generated artifact the host gitignores by design does not exist in a
+    fresh CI checkout. It is unverifiable, not confabulated: the .gitignore
+    entry is the repo's own evidence that the path is expected."""
+    repo, cfg = _init_host(tmp_path)
+    (repo / ".gitignore").write_text("app/data/assessment.json\n")
+    page = repo / "page.md"
+    page.write_text("The snapshot is written to `app/data/assessment.json`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 0, out["results"][0]["message"]
+    assert "unverifiable (gitignored)" in out["results"][0]["message"]
+    assert "app/data/assessment.json" in out["results"][0]["message"]
+
+
+def test_untracked_path_that_is_not_gitignored_still_blocks(tmp_path):
+    """Strictness guard: gitignore-awareness must not become a blanket pass for
+    every missing path."""
+    repo, cfg = _init_host(tmp_path)
+    (repo / ".gitignore").write_text("app/data/assessment.json\n")
+    page = repo / "page.md"
+    page.write_text("See `scripts/never_written.py`.\n")
+    rc, out = _run_cli([page], cfg)
+    assert rc == 1
+    assert "cites nonexistent path 'scripts/never_written.py'" in (
+        out["results"][0]["message"]
+    )

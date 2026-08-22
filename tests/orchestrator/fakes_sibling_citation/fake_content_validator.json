@@ -1,0 +1,13 @@
+{
+  "passed": [
+    {
+      "path": "docs/site-src/core/connectors/foo.md",
+      "rules": ["frontmatter_schema"]
+    },
+    {
+      "path": "docs/site-src/core/connectors/bar.md",
+      "rules": ["frontmatter_schema"]
+    }
+  ],
+  "failed": []
+}

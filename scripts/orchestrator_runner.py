@@ -1596,8 +1596,11 @@ def _diagnose_citation_paths(
     BLOCK became a silent PASS), against a measured production value of zero
     firings across the whole archived record.
 
-    Runs beside _enforce_agent_frontmatter, on the authored page, before
-    content-validator. It reads, it reports, it returns.
+    Called once per authored page AFTER the whole authoring loop and BEFORE
+    the content-validator dispatch, so it reads the same finished tree
+    `citation_exists` is about to read. The seam, and why it may not move
+    below the lint-block revert, is documented at the call site in `run`.
+    It reads, it reports, it returns.
 
     Classification: every line here is info_only=True. The decline line was
     degraded=True while a decline meant a page did not ship; THAT REASONING IS
@@ -1610,7 +1613,7 @@ def _diagnose_citation_paths(
     reason in `partial_reasons` and still emits it to stderr, so advisory is
     not silent.
 
-    `source_paths` is the batch's grounding set and is REQUIRED. It is half of
+    `source_paths` is the page's own batch grounding set and is REQUIRED. It is half of
     the corroborator ladder, which is what separates a confidently-labelled
     suggestion from a bare one; a default would let an un-threaded call site
     silently downgrade every finding to `uncorroborated`.
@@ -2250,6 +2253,11 @@ def run(
 
         authored: list[str] = []
         authored_lens: dict[str, str] = {}
+        # CCE-141: the batch grounding each authored page was written against,
+        # carried out of the loop. The diagnosis runs AFTER the loop (see the
+        # seam comment below) and rung 2 of its run-input ladder needs the
+        # page's OWN batch sources, not whichever batch happened to be last.
+        grounding_by_path: dict[str, set[str]] = {}
         # CCE-140: the batch keys whose page actually landed. Everything in
         # per_target that is NOT in here owes its PRs a page — whatever the
         # reason: a time cut, a failed page-author dispatch, an unknown lens,
@@ -2458,6 +2466,7 @@ def run(
             if out.get("ok"):
                 authored.append(str(target_path))
                 authored_lens[str(target_path)] = lens
+                grounding_by_path[str(target_path)] = grounding
                 # CCE-140: provisionally landed. A lint block below can still
                 # revert this page, which discards the entry again.
                 landed_batches.add((lens, hint))
@@ -2480,15 +2489,44 @@ def run(
                     # above wrote it). Runs on both paths; a no-op when the write
                     # already matches.
                     _enforce_agent_frontmatter(target_path, agent_fields)
-                if target_path.exists():
-                    # CCE-141: DIAGNOSE shortened citations before
-                    # content-validator runs — report only, the page is never
-                    # rewritten. Deliberately NOT nested under the agent_fields
-                    # guard: a shortened citation blocks any page, not only the
-                    # agent-authored-frontmatter ones.
-                    _diagnose_citation_paths(
-                        target_path, repo_root, config, state, source_paths=grounding
-                    )
+
+        # CCE-141: DIAGNOSE shortened citations, over the FINISHED tree.
+        #
+        # This ran INSIDE the authoring loop until the seam was moved. There it
+        # evaluated `_resolves` against a tree that was still being built, so a
+        # page citing a sibling the SAME RUN authors later — the ordinary shape
+        # of a docs page — was diagnosed before that sibling existed and earned
+        # a digest line for a citation `citation_exists` accepts on the finished
+        # tree. A digest that flags citations the linter accepts is not a
+        # census; it is noise that trains an operator to ignore it.
+        #
+        # Placed AFTER the whole authoring loop and BEFORE the content-validator
+        # dispatch. That is the seam where the two views agree:
+        #   * every page this run authored is on disk, so `_resolves` sees the
+        #     same tree `citation_exists` is about to see inside
+        #     content-validator;
+        #   * `grounding_by_path` carries rung 2's batch sources out of the
+        #     loop, per page, so the label still rests on the page's own batch;
+        #   * nothing has been reverted yet. It must NOT move BELOW the
+        #     lint-block revert: a reverted EDIT is restored from HEAD and still
+        #     exists, so diagnosing it down there would report the PREVIOUS
+        #     COMMIT's citations as if this run had written them — and a
+        #     lint-blocked page is precisely the population this diagnostic
+        #     exists to explain, so skipping those pages would leave it with
+        #     nothing to say.
+        # Deliberately NOT nested under any agent_fields guard: a shortened
+        # citation blocks any page, not only the agent-authored ones.
+        for _authored_page in authored:
+            _authored_path = Path(_authored_page)
+            if not _authored_path.exists():
+                continue
+            _diagnose_citation_paths(
+                _authored_path,
+                repo_root,
+                config,
+                state,
+                source_paths=grounding_by_path.get(_authored_page, set()),
+            )
 
         # Content validation
         if authored:

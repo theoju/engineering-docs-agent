@@ -335,3 +335,81 @@ def test_the_production_call_site_diagnoses_an_authored_page(
         "the diagnostic is info_only, so it must not flip partial on an "
         f"otherwise-clean run: {cr['partial_reasons']}"
     )
+
+
+# --- the seam: a finished tree, not a half-built one -------------------------
+
+FAKES_SIBLING = Path(__file__).parent / "fakes_sibling_citation"
+_CITING = "docs/site-src/core/connectors/foo.md"
+_CITED_SIBLING = "docs/site-src/core/connectors/bar.md"
+# A tracked decoy whose tail is exactly the sibling's path. Without it the
+# mid-loop finding would be `no_candidate`, which the digest no longer prints
+# at all — the test would then pass with the call back inside the loop and
+# pin nothing. With it, a mid-loop diagnosis produces a LOUD digest line
+# telling an operator to repoint a working citation at a vendored mirror.
+_DECOY = "vendor/mirror/" + _CITED_SIBLING
+
+
+def test_a_citation_to_a_sibling_the_same_run_authors_is_not_reported(
+    tmp_path, init_host, read_current_run
+):
+    """THE SEAM PIN. The diagnosis must run against the FINISHED tree.
+
+    `fakes_sibling_citation` drives two doc_targets through one authoring
+    loop: `connectors/foo.md` (seeded, so authoring EDITS it and the dry-run
+    synth leaves its citation intact) and `connectors/bar.md` (created during
+    the same run, after foo). foo cites bar.
+
+    Called from inside the authoring loop, the diagnosis evaluated `_resolves`
+    against a tree that was still being built: bar did not exist yet, so foo's
+    perfectly good citation was diagnosed while `citation_exists.check_path`
+    on the finished tree answers ok. A digest that flags citations the linter
+    accepts is not a census — it is noise that trains an operator to ignore it.
+
+    Both halves are asserted, because the property is that THE TWO VIEWS
+    AGREE: the linter passes the page, and the digest says nothing about it.
+    """
+    state_path = init_host(
+        _SEED_STATE,
+        seed_files={
+            _CITING: (
+                "# foo connector\n\n"
+                f"The bar connector is documented at `{_CITED_SIBLING}`.\n"
+            ),
+            _DECOY: "# a vendored mirror of the sibling page\n",
+        },
+    )
+
+    rc = runner.run(tmp_path, dry_run_dir=FAKES_SIBLING, no_pr=True)
+    assert rc == 0
+
+    # Fixture guards: the sibling really was authored by THIS run (so the
+    # citation really was unresolvable at the moment foo was authored), and
+    # the decoy really is a unique strict suffix match (so a mid-loop
+    # diagnosis really would print a line rather than being dropped as
+    # `no_candidate`).
+    assert (tmp_path / _CITED_SIBLING).exists(), "the sibling page was never authored"
+    import citation_repair
+
+    assert citation_repair.suffix_candidates(
+        _CITED_SIBLING, citation_repair.tracked_files(tmp_path)
+    ) == [_DECOY]
+
+    sys.path.insert(0, str(Path(runner.__file__).resolve().parent / "lint"))
+    import citation_exists
+
+    ok, detail = citation_exists.check_path(
+        tmp_path / _CITING,
+        tmp_path,
+        citation_exists.tracked_files(tmp_path),
+        {"docs": {"source_dir": "docs/site-src"}},
+    )
+    assert ok, f"fixture guard: the linter must ACCEPT this page, got {detail}"
+
+    cr = read_current_run(state_path)
+    hits = [r for r in cr["partial_reasons"] if _CITED_SIBLING in r and "->" in r]
+    assert hits == [], (
+        "the diagnosis ran against a half-built tree and flagged a citation "
+        f"the linter accepts: {hits}"
+    )
+

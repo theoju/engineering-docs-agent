@@ -1160,3 +1160,227 @@ functions, never a local copy. "Consequential" is
 for `n` in `(2, 3)` where `p` has more than `n` segments; adding
 `_REPO_PATH_RE`-shape, non-resolution and full `_candidate_rejection` filters on
 top changes the count by **zero**, so the simple form is the one recorded.
+
+---
+
+# Revision 3 — detection only (2026-08-21)
+
+**Status:** design, supersedes Revision 2's mechanism and every candidate-side
+correction below it
+**Reason:** four adversarial rounds produced four Criticals and all four were the
+same defect class in a new disguise. The class is a property of rewriting a page,
+not of any one guard, so the rewrite is deleted.
+
+**Everything above stays exactly as written.** Revisions 1 and 2 and corrections
+3, 4 and 5 record three successive wrong answers, and that record is the most
+useful thing in this file — it is the evidence for the lesson at the end of this
+section. Nothing here softens them.
+
+## What shipped
+
+**Diagnosis, never mutation. The page is never rewritten.**
+
+`scripts/citation_repair.py` now REPORTS the tracked file a blocked citation was
+most likely shortened from, and stops. There is no `Path.write_text` in the
+module, no `repair_text`, no `rewrite_token`, and there must never be one again.
+`diagnose(text, repo_root, config, files, corroborators)` takes text and returns
+`[(cited, candidate, confidence)]`; it does not return a modified string and it
+does not accept a path to write to. The orchestrator entry point is renamed to
+match — `_diagnose_citation_paths` (`scripts/orchestrator_runner.py:1586`), still
+`info_only` in the digest, still called unconditionally after authoring.
+
+The page still blocks, exactly as `citation_exists` decided. Post-CCE-140 the
+deferral skip still abandons that PR. What changes is that a human reading the
+run digest is now told which file the author probably meant, instead of being
+told only that a path does not exist.
+
+Corroboration survives, demoted: it was the **entry condition for acting**, and
+it is now a **confidence label on a suggestion**. `build_corroborators` is
+unchanged in behaviour — rung 1 is still the linter's own view of the prior
+committed page, rung 2 is still the batch's source set with globs excluded, and
+both still require `source_paths` and `corroborators` to be passed explicitly
+with no default. Only its role changed: nothing acts, so there is nothing to
+gate.
+
+Nothing in this module is correct, let alone **provably** so. That claim was
+retired in Revision 2 and stays retired; the last surviving assertion of it, in
+the embedded `CLAUDE.md` draft at
+`docs/superpowers/plans/2026-08-21-cce141-citation-path-repair.md:838`, was
+retired in place on 2026-08-21 so that a future reader cannot copy it back.
+
+## Why: four rounds, four Criticals, one class
+
+Read this as a sequence, not as four unrelated bugs. Every row is the same
+sentence with a different mechanism in the middle: **repair moved a citation into
+a region `citation_exists` does not verify, so a BLOCK became a silent PASS** —
+and the pointer stopped being checked even after the file it named was deleted.
+In rounds 2, 3 and 4 the flip was reproduced end to end; in three of them the
+target file was then `git rm`-ed and `check_path` still answered `(True, 'ok')`.
+
+| round | the guard that was supposed to make rewriting safe | the Critical |
+| ----- | -------------------------------------------------- | ------------ |
+| 1 | uniqueness of the suffix match | Uniqueness never established that the cited token **was a shortening** of the candidate. A path is a suffix of itself, but that argument is conditional on an antecedent the code never checks; `repair_text`'s only entry condition was "does not resolve," which is precisely the confabulation population `citation_exists` exists to block. Measured: **2086** distinct non-resolving proper-tail tokens have a unique match against **887** tracked files — the set of invented strings that flip block into pass was larger than the repository. |
+| 2 | rung 1 — corroboration from the prior committed page | The corroborator used a **raw substring scan** of the prior text, which sees path mentions inside fenced blocks, URL bodies, HTML comments and as substrings of longer paths. Those are invisible to `extract_citations` **because the linter never validates them**, so they evidence nothing about acceptance. A prior page naming a fixture only inside a ```` ```text ```` fence corroborated it; a new page citing an invented `.github/workflows/ci.yml` was repointed at the fixture, and `check_path` went `(False, "cites nonexistent path …")` → `(True, 'ok')`. |
+| 3 | the candidate-side exclusion **blacklist** | A blacklist enumerates only what someone thought of, and it missed two rows. **(a)** A candidate the linter cannot PARSE: `_REPO_PATH_RE` admits only `[\w.\-/]`, so a tracked `app/(marketing)/guides/setup.md` was written into the page and then not SEEN by `extract_citations` at all. **(b)** A candidate under the mkdocs build dir: `_resolves`'s first arm returns True for ANY path under `site_dir` with **no existence check whatsoever**, structurally identical to `example/`. |
+| 4 | the positive verifiability **gate** that replaced the blacklist | The gate's own probe was blind. `_resolves_absent` asked "would `_resolves` still say yes if this file were gone?" by running `_resolves` against an **empty temporary repo root** — which does not delete one file, it deletes every file. All three existence arms of `_resolves` are `X in files or (repo_root / X).exists()` (`scripts/lint/citation_exists.py:456-468`), so emptying the root killed the on-disk half of all three at once. The disk fallback exists for a documented reason — "same-run siblings not yet added to git" — and the probe could not see it. |
+
+Round 4's blinding is reproducible in the current tree with `citation_exists`
+alone, no withdrawn code required:
+
+```python
+# docs_dir-rebased sibling present on disk but untracked
+(root / "docs/site-src/refs/notes.md").write_text("x")
+files = {"refs/notes.md"}
+_resolves("refs/notes.md", root, files - {"refs/notes.md"}, "docs/site-src", "", ())
+#   -> True   the real linter: resolution never depended on the candidate existing
+_resolves("refs/notes.md", Path(empty), files - {"refs/notes.md"}, "docs/site-src", "", ())
+#   -> False  the probe: "safe, verified by existence" — and the gate ADMITS it
+```
+
+A False from the probe was read as "this candidate will be verified by its own
+existence." The truth was the opposite: the candidate resolves through a file
+that is not it, so once written, deleting the named file leaves the page `ok`.
+Round 4's guard reproduced round 3's defect from inside the fix for round 3.
+
+## The two measurements that decided it
+
+Both re-derived on 2026-08-21 against `feat/CCE-141-corroborated-repair` at
+`85d5cdc`; both reproduced the figures they were quoted as.
+
+**1. The feature fired zero times across the whole archived production record.**
+`.engineering-docs-agent/stale-prs-archive/` holds 41 archived PRs, of which
+**19** carry a `cites nonexistent path` block, covering **15 distinct blocked
+citations**. Run against today's tracked set (887 files, `docs_dir:
+docs/site-src`), those 15 split:
+
+| outcome | count | why repair could not fire |
+| ------- | ----- | ------------------------- |
+| resolves now | 5 | the `docs_dir` branch from CCE-139/145 already rescues them, so repair is never reached |
+| no candidate at all | 10 | no tracked file ends with the cited tail |
+| **unique suffix match** | **0** | — |
+| ambiguous | 0 | — |
+
+Zero unique matches means the count is zero **before** the corroboration gate is
+consulted — the entry condition of Revision 2 never even gets a chance to
+decline. Revision 2's "the four genuine `architecture/*.md` shortenings already
+resolve" under-counts slightly: it is five, `.engineering-docs-agent/current_run.json`
+included. Re-run with:
+
+```
+grep -roh "cites nonexistent path '[^']*'" .engineering-docs-agent/stale-prs-archive/ \
+  | sed "s/.*path '//;s/'$//" | sort -u
+```
+
+then `citation_repair.suffix_candidates(rel, files)` for each.
+
+**2. Disabling the feature entirely left the suite green.** With the production
+call site replaced by `if False:` in a detached worktree at `85d5cdc`, the full
+suite was **1531 passed, 4 skipped** — byte-identical to the same worktree's
+baseline before the edit (1531 passed, 4 skipped). Not one test exercises the
+feature through the path production uses. Every test that covers it calls
+`repair_text` or `_repair_citation_paths` directly.
+
+Together these say the same thing twice: the rewrite delivered nothing that was
+measured, and nothing measured would have noticed its absence.
+
+## The general lesson
+
+**Escalating mechanism against a defect class that keeps reappearing is the
+signal to question the architecture, not to add a fifth mechanism.**
+
+Watch the mechanism grow across the four rounds:
+
+1. a suffix match;
+2. plus corroboration from an independent source;
+3. plus corroboration narrowed to what the linter itself validated, and a
+   candidate-side exclusion blacklist;
+4. plus a four-mechanism positive gate — named branch classes, an extractor
+   round-trip, an absence probe, and a catch-all that **fabricated an
+   impossible-filename twin** in order to ask the linter a hypothetical
+   question about a file that does not and cannot exist.
+
+Each step was a locally reasonable response to the previous Critical. Each was
+more elaborate than the last. And each one reproduced the same defect from
+inside the fix for the one before it — round 3's blacklist missed a class,
+round 4's gate replaced the blacklist and then went blind in a new place.
+
+`superpowers:systematic-debugging` names this exactly: after three fixes,
+**"each fix reveals new shared state/coupling/problem in different place"** and
+**"this is NOT a failed hypothesis — this is a wrong architecture."** The rule
+says stop and question fundamentals rather than attempt fix #4. Fix #4 was
+attempted. It produced Critical #4.
+
+The fundamental here is not any guard. It is the decision to **mutate a page the
+linter has already blocked**. Every guard was an attempt to prove that a
+particular mutation would stay under the lint; the class of "regions the lint
+does not verify" is open, discovered incrementally, and cannot be enumerated in
+advance from inside the module doing the mutating. A page that is never
+rewritten cannot be corrupted this way. Deleting the rewrite deleted the entire
+class — not the current four instances of it, the class — and kept the one thing
+four rounds actually produced: the diagnosis.
+
+The transferable form: when the Nth fix for a defect is structurally more
+complex than the (N-1)th and the defect keeps returning in a new location, the
+complexity is not buying safety. It is the cost of holding a wrong architecture
+in place. Delete the capability that hosts the class.
+
+## What is given up
+
+**The automatic rescue.** A page blocked on a shortened-but-recoverable citation
+is no longer repaired and re-checked; it blocks, the deferral skip abandons the
+PR, and the page is not written that night. A human has to read the digest and
+either fix the source or re-run. That is a real regression against the CCE-141
+ticket as written, and it is stated plainly rather than reframed.
+
+Honestly costed: **it costs nothing that was ever measured.** Against the
+complete archived production record the rescue fired zero times (above), and
+removing it moved no test. The loss is entirely prospective — a rescue that
+might have fired on some future page — weighed against four demonstrated
+BLOCK→PASS corruptions, each of which permanently un-verifies a citation on a
+page that then ships.
+
+The asymmetry is what decides it. A missed rescue leaves a page unwritten and
+loudly reported. A wrong repair writes a page that points at the wrong file,
+passes the lint, and keeps passing it after the file it names is deleted — and
+the downstream-owner audit above establishes that **no layer below repair
+catches it**.
+
+## What replaces it
+
+An honest, consistent digest line — `info_only`, one per blocked citation:
+
+```
+citation_shortening_suspected: <page>: '<cited>' -> '<candidate>' (<confidence>)
+```
+
+Four labels, and **every** non-resolving citation gets exactly one of them:
+
+| confidence | candidate field | means |
+| ---------- | --------------- | ----- |
+| `corroborated` | the one candidate | one strict suffix match, and a source outside the authoring agent already pointed at it |
+| `uncorroborated` | the one candidate | one strict suffix match, resting on the match alone |
+| `ambiguous` | the candidates, capped at `_AMBIGUITY_CAP` = 5, then `(+N more)` | several tracked files end with this tail |
+| `no_candidate` | `""` | no tracked file ends with this tail at all |
+
+The last two rows are the change that matters most for an operator. Under the
+repair design, `ambiguous`, `no_candidate` and `uncorroborated` all `continue`d
+**silently** — declining to act was implemented as declining to speak. A page
+that blocked because two candidates matched produced no digest line at all,
+while the single-candidate case was loud. That inconsistency is why the digest
+could not be read as a census of blocked citations. It can be now: every
+non-excluded, non-resolving citation appears, labelled.
+
+`_excluded_reason` still suppresses the classes `check_path` declines to CHECK —
+exempt tokens, the reserved `example/` namespace, gitignored paths. Those are
+unresolvable **by design**, so a finding there would be noise, not signal. What
+is gone is the candidate side of that machinery: the exclusion table, the gate,
+the extractor round-trip, the absence probe and the twin all existed to make a
+mutation safe, and they went with the mutation.
+
+A `corroborated` label is not a claim of correctness. It bounds the surface —
+the candidate is a tracked file some other source already pointed at — and
+nothing more. The residual from correction 5 survives unchanged and is now
+cheap: a confabulating `source-collector` can widen the `corroborated` label
+from a batch's true 5–15 files to any tracked file on the host. That residual
+used to cost a wrong page rewrite. It now costs an operator one over-confident
+line in a digest.

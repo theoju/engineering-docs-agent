@@ -1563,6 +1563,195 @@ def _enforce_agent_frontmatter(path: Path, agent_fields: dict) -> None:
     path.write_text(fmc.agent_authored_frontmatter_text(**agent_fields) + body)
 
 
+def _prior_page_text(repo_root: Path, path: Path) -> str | None:
+    """The page as HEAD has it, or None for a new page / no commit."""
+    try:
+        rel = path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return None
+    r = subprocess.run(
+        ["git", "-C", str(repo_root), "show", f"HEAD:{rel}"],
+        capture_output=True,
+    )
+    if r.returncode != 0:
+        return None
+    # errors="replace", not text=True: git show's stdout is decoded with the
+    # locale codec under text=True, so one non-UTF-8 byte in a committed page
+    # raises out of subprocess.run itself — outside the caller's try — and
+    # takes down the whole run. Under corroborated repair this is on the hot
+    # path for every edit.
+    return r.stdout.decode("utf-8", errors="replace")
+
+
+# CCE-141: how many diagnosis lines ONE page may put in the digest. A page
+# whose author confabulated wholesale can produce dozens; past a handful the
+# lines stop being a census an operator reads and become a wall they skip. The
+# count withheld is always reported alongside — see `_diagnose_citation_paths`.
+_CITATION_FINDINGS_CAP = 10
+
+# CCE-141: and how many the whole RUN may put there. The per-page cap bounds
+# one page; nothing bounded the sum, and `_format_partial_digest` joins every
+# reason unconditionally (`lines.extend(f"- {r}" ...)`), so N pages x 10
+# findings x ~950 bytes — `label`, `cited` and `candidate` are each truncated
+# at `_STDERR_TRUNCATE` SEPARATELY — clears GitHub's 65,536-byte PR-body limit
+# at roughly seven pages. Bounding one page and then calling the digest
+# BOUNDED was the same half-measure this feature exists to fight.
+_CITATION_RUN_FINDINGS_CAP = 40
+
+
+def _diagnose_citation_paths(
+    path: Path, repo_root: Path, config: dict, state: dict, source_paths: set[str]
+) -> None:
+    """CCE-141: report the tracked file a blocked citation was shortened from.
+
+    DETECTION ONLY. This never rewrites the page — `citation_repair` has no
+    `write_text` and this function must never grow one. Its module docstring
+    records why the rewrite was deleted: four adversarial review rounds
+    produced four Criticals, each the same class in a new disguise (a repair
+    moving a citation into a region `citation_exists` does not verify, so a
+    BLOCK became a silent PASS), against a measured production value of zero
+    firings across the whole archived record.
+
+    Called once per authored page AFTER the whole authoring loop and BEFORE
+    the content-validator dispatch, so it reads the same finished tree
+    `citation_exists` is about to read. The seam, and why it may not move
+    below the lint-block revert, is documented at the call site in `run`.
+    It reads, it reports, it returns.
+
+    Classification: every line here is info_only=True. The decline line was
+    degraded=True while a decline meant a page did not ship; THAT REASONING IS
+    GONE. Nothing this function does affects whether the page ships. The page
+    blocks because `citation_exists` blocks it, and that block is already
+    reported and already classified (`lint_block`, degraded=True) — a second
+    degraded reason would double-count one failure, and would cost the run
+    auto-merge through CCE-140's `partial and not advance_cursor_backed` gate
+    for a line that is pure advice. add_partial still records an info_only
+    reason in `partial_reasons` and still emits it to stderr, so advisory is
+    not silent.
+
+    ONE PATH BREAKS THAT RATIONALE, and info_only is still right there. Under
+    a section whose generator is `archive-index`, CCE-124 downgrades
+    `citation_exists` to severity `warn`, and `run`'s revert fires only on
+    `block` — so an archive page keeps its shortened citation, SHIPS, and
+    produces no `lint_block` line at all. For those pages the sentence above
+    is false: there is no block to double-count, and this advisory is the only
+    signal the operator gets. That argues for keeping the line, not for
+    promoting it: the page shipped, the run judged nothing and rejected
+    nothing, and turning a shipped-page advisory into `degraded=True` would
+    cost auto-merge for a page the host deliberately chose not to gate.
+
+    `source_paths` is the page's own batch grounding set and is REQUIRED. It
+    is rung 2 of `citation_repair.build_run_inputs`, which is what separates a
+    confidently-labelled suggestion from a bare one; a default would let an
+    un-threaded call site silently downgrade every finding to
+    `suffix_match_only`.
+
+    WHAT REACHES THE DIGEST, and what does not. `diagnose` returns all four
+    confidence classes; `no_candidate` is deliberately NOT emitted here.
+    `no_candidate` means the module looked for a tracked file ending in that
+    tail and found none — its own evidence says the token is not a shortening
+    of anything in the repo, so filing it under `citation_shortening_suspected`
+    asserted the opposite of what was measured. It is also the DOMINANT
+    population: one page with 40 confabulated citations produced 1 `lint_block`
+    line (which already names all 40 paths, with severity) and 40 diagnosis
+    lines saying nothing the block had not said. Renaming the key would have
+    kept 40 lines of zero added information in front of the operator and
+    buried the handful of findings that do name a file. Dropped, not renamed.
+    The findings still cross `diagnose`'s return boundary, so a caller that
+    wants them can have them; the digest is where they earn nothing.
+
+    BOUNDED. Both reason strings embed LLM-authored text — the cited token and
+    the candidate come from a page an agent wrote, the page label from an
+    agent-chosen `page_hint`, and `str(exc)` from anywhere. They are truncated
+    at `_STDERR_TRUNCATE`, the same convention this file already applies to
+    every other embedded untrusted string. A 40,000-char citation token
+    otherwise produced a single 40,198-byte `partial_reasons` entry, and 40
+    pages x 40 blocked citations produced a 167,005-byte PR body against
+    GitHub's 65,536 limit. Findings per page are additionally capped at
+    `_CITATION_FINDINGS_CAP`, and the count withheld is REPORTED — a silently
+    truncated digest reads as a complete one, which is the exact failure this
+    work exists to fight. Findings are bounded a SECOND time across the whole
+    run at `_CITATION_RUN_FINDINGS_CAP` — the per-page cap bounds one page and
+    says nothing about their sum, and it is the sum that reaches the PR body.
+
+    `label` is used in BOTH lines, including the failure line, which used a
+    bare `path.name`. `add_partial` dedupes identical strings, so
+    `citation_diagnosis_failed: index.md: …` collapsed every `index.md` in the
+    run into one line that named no page at all.
+
+    The whole body is wrapped, and deliberately catches broadly. A diagnostic
+    must never be fatal to an unattended nightly, and there is no top-level
+    handler in `run()` or `main()` to fall back on: a `mkdocs.yml` whose top
+    level is a YAML list or a bare scalar parses fine and then raises
+    AttributeError on `.get` inside the linter helpers this reaches, which
+    would take down the entire run for an advisory. The failure is itself
+    reported as an advisory, for the same reason the findings are — it has no
+    bearing on page correctness — but reported, because a diagnostic that
+    silently stopped working is indistinguishable from one with nothing to say.
+    """
+    try:
+        label = path.relative_to(repo_root).as_posix()[:_STDERR_TRUNCATE]
+    except ValueError:
+        label = path.name[:_STDERR_TRUNCATE]
+    try:
+        import citation_repair
+
+        try:
+            text = path.read_text()
+        except (OSError, UnicodeDecodeError):
+            # citation_exists reports an unreadable/undecodable page itself; a
+            # second, vaguer line from here would be noise.
+            return
+        files = citation_repair.tracked_files(repo_root)
+        run_inputs = citation_repair.build_run_inputs(
+            _prior_page_text(repo_root, path), source_paths, files
+        )
+        findings = citation_repair.diagnose(text, repo_root, config, files, run_inputs)
+        reportable = [f for f in findings if f[2] != "no_candidate"]
+        already = sum(
+            1
+            for r in state.get("current_run", {}).get("partial_reasons", ())
+            if r.startswith("citation_shortening_suspected: ")
+        )
+        room = max(0, _CITATION_RUN_FINDINGS_CAP - already)
+        if reportable and room == 0:
+            # Deliberately names no page. Naming them is what grows without
+            # bound, and `add_partial` dedupes identical strings, so every
+            # page past the run cap collapses into this single line.
+            add_partial(
+                state,
+                "citation_diagnosis_run_cap: reached the run limit of "
+                f"{_CITATION_RUN_FINDINGS_CAP} citation findings; later "
+                "pages' findings are withheld from this digest",
+                info_only=True,
+            )
+            return
+        shown = reportable[:_CITATION_FINDINGS_CAP][:room]
+        for cited, candidate, confidence in shown:
+            add_partial(
+                state,
+                f"citation_shortening_suspected: {label}: "
+                f"'{cited[:_STDERR_TRUNCATE]}' -> "
+                f"'{candidate[:_STDERR_TRUNCATE]}' ({confidence})",
+                info_only=True,
+            )
+        if len(reportable) > len(shown):
+            add_partial(
+                state,
+                f"citation_diagnosis_truncated: {label}: reported "
+                f"{len(shown)} of {len(reportable)} findings; "
+                f"{len(reportable) - len(shown)} withheld",
+                info_only=True,
+            )
+    except Exception as exc:  # noqa: BLE001 - a diagnostic must never be fatal
+        add_partial(
+            state,
+            f"citation_diagnosis_failed: {label}: {type(exc).__name__}: "
+            f"{str(exc)[:_STDERR_TRUNCATE]}",
+            info_only=True,
+        )
+
+
 def _resolve_docs_dir(config: dict) -> str | None:
     """The docs root for core pages: prefer ``site.docs_dir`` (what the manifest
     code and the source-map stage use), fall back to ``docs.source_dir`` for
@@ -2153,6 +2342,11 @@ def run(
 
         authored: list[str] = []
         authored_lens: dict[str, str] = {}
+        # CCE-141: the batch grounding each authored page was written against,
+        # carried out of the loop. The diagnosis runs AFTER the loop (see the
+        # seam comment below) and rung 2 of its run-input ladder needs the
+        # page's OWN batch sources, not whichever batch happened to be last.
+        grounding_by_path: dict[str, set[str]] = {}
         # CCE-140: the batch keys whose page actually landed. Everything in
         # per_target that is NOT in here owes its PRs a page — whatever the
         # reason: a time cut, a failed page-author dispatch, an unknown lens,
@@ -2361,6 +2555,7 @@ def run(
             if out.get("ok"):
                 authored.append(str(target_path))
                 authored_lens[str(target_path)] = lens
+                grounding_by_path[str(target_path)] = grounding
                 # CCE-140: provisionally landed. A lint block below can still
                 # revert this page, which discards the entry again.
                 landed_batches.add((lens, hint))
@@ -2383,6 +2578,44 @@ def run(
                     # above wrote it). Runs on both paths; a no-op when the write
                     # already matches.
                     _enforce_agent_frontmatter(target_path, agent_fields)
+
+        # CCE-141: DIAGNOSE shortened citations, over the FINISHED tree.
+        #
+        # This ran INSIDE the authoring loop until the seam was moved. There it
+        # evaluated `_resolves` against a tree that was still being built, so a
+        # page citing a sibling the SAME RUN authors later — the ordinary shape
+        # of a docs page — was diagnosed before that sibling existed and earned
+        # a digest line for a citation `citation_exists` accepts on the finished
+        # tree. A digest that flags citations the linter accepts is not a
+        # census; it is noise that trains an operator to ignore it.
+        #
+        # Placed AFTER the whole authoring loop and BEFORE the content-validator
+        # dispatch. That is the seam where the two views agree:
+        #   * every page this run authored is on disk, so `_resolves` sees the
+        #     same tree `citation_exists` is about to see inside
+        #     content-validator;
+        #   * `grounding_by_path` carries rung 2's batch sources out of the
+        #     loop, per page, so the label still rests on the page's own batch;
+        #   * nothing has been reverted yet. It must NOT move BELOW the
+        #     lint-block revert: a reverted EDIT is restored from HEAD and still
+        #     exists, so diagnosing it down there would report the PREVIOUS
+        #     COMMIT's citations as if this run had written them — and a
+        #     lint-blocked page is precisely the population this diagnostic
+        #     exists to explain, so skipping those pages would leave it with
+        #     nothing to say.
+        # Deliberately NOT nested under any agent_fields guard: a shortened
+        # citation blocks any page, not only the agent-authored ones.
+        for _authored_page in authored:
+            _authored_path = Path(_authored_page)
+            if not _authored_path.exists():
+                continue
+            _diagnose_citation_paths(
+                _authored_path,
+                repo_root,
+                config,
+                state,
+                source_paths=grounding_by_path.get(_authored_page, set()),
+            )
 
         # Content validation
         if authored:

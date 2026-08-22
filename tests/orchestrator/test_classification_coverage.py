@@ -99,12 +99,89 @@ def test_orchestrator_has_the_expected_call_site_population():
     """Tripwire on the audit's scope. Not a hard contract — if this fails
     because sites were legitimately added or removed, re-audit the new ones
     against the spec's Classification section and update the number here in
-    the same commit that adds them."""
+    the same commit that adds them.
+
+    43 -> 44, CCE-141 round 6: `citation_diagnosis_run_cap` in
+    `_diagnose_citation_paths`. Audited info_only=True. It announces that
+    ADVISORY lines were withheld from the digest once the run-wide findings cap
+    was reached; no page was judged and none was rejected, and the run's data
+    quality is unchanged. Promoting it would cost auto-merge through CCE-140's
+    `partial and not advance_cursor_backed` gate for a line about the length of
+    a suggestion list."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 40, (
-        f"expected 40 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 44, (
+        f"expected 44 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
+    # 42 -> 43: CCE-141 round 5 added `citation_diagnosis_truncated` in
+    # `_diagnose_citation_paths`. Findings from one page are capped at
+    # `_CITATION_FINDINGS_CAP`, and this site reports how many the cap
+    # withheld. It exists precisely so a truncated digest never reads as a
+    # complete one — a silent cap is the failure mode this ticket exists to
+    # fight, and the cap without the line would BE that failure mode.
+    #
+    # Classification: info_only=True, same as the two sites it stands beside.
+    # It reports on an advisory; it cannot be more severe than what it counts.
+    #
+    # 42 -> 42: CCE-141 revision 3 made the feature DETECTION ONLY. The page is
+    # never rewritten, so `_repair_citation_paths` became
+    # `_diagnose_citation_paths` and both of its sites were replaced, one for
+    # one — `citation_repair_declined` and `citation_path_repaired` out,
+    # `citation_shortening_suspected` and `citation_diagnosis_failed` in. The
+    # count is unchanged; the CLASSIFICATION is not, and that is the part worth
+    # recording.
+    #
+    # Classification: both new sites are info_only=True.
+    #
+    # The finding line was degraded=True as `citation_repair_declined`, on the
+    # reasoning that a decline meant a page did not ship. That reasoning is
+    # gone. Nothing the diagnostic does affects whether the page ships: the
+    # page blocks because `citation_exists` blocks it, and that block already
+    # arrives here as `lint_block` with its own degraded=True. A second
+    # degraded reason would double-count one failure — and would cost the run
+    # auto-merge through CCE-140's `partial and not advance_cursor_backed`
+    # gate for a line that is pure advice about a block someone else already
+    # reported. Advisory is not silent: add_partial appends an info_only
+    # reason to `partial_reasons` and emits it to stderr like any other.
+    #
+    # The failure line (`citation_diagnosis_failed`) is the broad-catch arm
+    # that keeps a malformed `mkdocs.yml` — a top-level YAML list or bare
+    # scalar raises AttributeError on `.get` — from taking down an unattended
+    # nightly through the missing top-level handler in run()/main(). It is
+    # info_only for the same reason the findings are: a broken advisory has no
+    # bearing on page correctness, so it must not flip `partial`. It is
+    # recorded at all because a diagnostic that silently stopped working is
+    # indistinguishable from one with nothing to report.
+    # 41 -> 42: CCE-141 revision 2 added `citation_repair_declined` in
+    # `_repair_citation_paths`. Corroboration is now the ENTRY CONDITION for a
+    # repair, so the repairer has a second outcome: a unique suffix candidate
+    # that no source outside the authoring agent vouches for is refused. The
+    # site reports each refusal with the cited token, the candidate it refused,
+    # and why.
+    #
+    # Classification: degraded=True — explicitly NOT info_only. A decline is not
+    # a rescue; it is a page that does not ship. The unresolvable citation
+    # survives, `citation_exists` blocks it, the lint-block revert discards the
+    # page and CCE-140 holds its PRs out of the advance cursor, so the next run
+    # re-authors it. That is exactly the shape the sibling test's assertion
+    # message calls held-back-and-self-healing, and it is the same
+    # classification the `lint_block` site it feeds already carries. Silence
+    # here would reproduce the very harm this revision exists to fix, one band
+    # narrower: block -> deferral -> forgiveness -> the page is never written
+    # and nothing in the digest ever says so. It is emphatically not blind
+    # (degraded=False): the run JUDGED this citation and rejected it.
+    # 40 -> 41: CCE-141 added `citation_path_repaired` in the new
+    # `_repair_citation_paths`, called beside `_enforce_agent_frontmatter` for
+    # every authored page. It reports each citation path the deterministic
+    # repairer rewrote from an unresolvable relative path to a resolvable one.
+    #
+    # Classification: info_only=True. A repair is a successful rescue, not a
+    # degradation — nothing was lost, so `partial` must not flip. Flipping it
+    # would veto auto-merge for a self-correction through CCE-140's `partial
+    # and not advance_cursor_backed` gate, punishing the run for fixing the
+    # very problem it fixed. It is recorded at all because the digest line is
+    # the only signal that would ever justify revisiting the author prompt
+    # that produced the shortened citation in the first place.
     # 39 -> 40: CCE-159 added `pr_summaries_reused` in run(), reporting how
     # many PRs were served from the summary cache instead of re-dispatched.
     #

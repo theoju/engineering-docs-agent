@@ -33,9 +33,47 @@ A suffix match is a SUGGESTION for a human reading the run digest. Uniqueness
 establishes only that exactly one tracked file ends with the cited tail; it
 never establishes that the cited token was a shortening of it, and "does not
 resolve" is precisely the confabulation population `citation_exists` exists to
-block. Corroboration (`build_corroborators`) is therefore reported as a
+block. The run-input set (`build_run_inputs`) is therefore reported as a
 CONFIDENCE LABEL on the suggestion rather than as a gate on an action: nothing
 acts, so there is nothing to gate.
+
+WHAT EACH LABEL ESTABLISHES, AND WHAT IT DOES NOT. Read literally; every one
+of them describes an OBSERVATION, never a verdict.
+
+`candidate_in_run_inputs`
+    ESTABLISHES: exactly one tracked file is a strict segment-suffix match for
+    the cited tail, AND that file is named by an input to this run — a file
+    the batch's PRs changed (rung 2), or a path the page's own prior commit
+    already cited and the linter validated there (rung 1).
+    DOES NOT ESTABLISH: that the cited token was ever a shortening of that
+    file; that the page-author had that file in mind; or that repointing the
+    citation at it would be right. Rung 2 admits the WHOLE
+    `_pr_changed_files(batch_prs)` set, so a vendored dependency, a lockfile
+    or an unrelated module that the batch happened to touch earns this label
+    the moment it is the unique suffix match. It bounds a coincidence; it
+    confirms nothing. This label was called `corroborated` until CCE-141
+    round 5 — a name that read as "confirmed" and was granted by batch
+    membership alone.
+
+`suffix_match_only`
+    ESTABLISHES: exactly one tracked file is a strict segment-suffix match,
+    and nothing else points at it. (Formerly `uncorroborated`.)
+    DOES NOT ESTABLISH: anything beyond the string match.
+
+`ambiguous`
+    ESTABLISHES: several tracked files end with the cited tail, listed up to
+    `_AMBIGUITY_CAP`.
+    DOES NOT ESTABLISH: that any of them is the intended one.
+
+`no_candidate`
+    ESTABLISHES: NO tracked file ends with the cited tail — the module looked
+    and found nothing, so its own evidence says the token is not a shortening
+    of anything in the repo.
+    DOES NOT ESTABLISH: anything actionable. `diagnose` still RETURNS these to
+    its caller, but the orchestrator deliberately keeps them out of the run
+    digest: `lint_block` already names every one of those paths, with zero
+    added information, and they are the dominant population — see
+    `orchestrator_runner._diagnose_citation_paths` for the full reasoning.
 
 Spec: docs/superpowers/specs/2026-08-21-cce141-citation-path-repair-design.md
 """
@@ -67,7 +105,7 @@ from citation_exists import (  # noqa: E402
 )
 
 __all__ = [
-    "build_corroborators",
+    "build_run_inputs",
     "diagnose",
     "suffix_candidates",
     "tracked_files",
@@ -83,19 +121,30 @@ _GLOB_CHARS = ("*", "?", "[", "{")
 _AMBIGUITY_CAP = 5
 
 
-def build_corroborators(
+def build_run_inputs(
     prior_text: str | None, source_paths: set[str], files: set[str]
 ) -> set[str]:
-    """Tracked paths vouched for by a source the authoring agent did not write.
+    """Tracked paths named by an input to this run that the page-author did not write.
 
     A CONFIDENCE LABEL, not a safety gate. This used to be the ENTRY CONDITION
-    for rewriting a page: a candidate no independent source vouched for was
-    refused, because acting on it was dangerous. Nothing acts now. Membership
-    here decides only how much an operator should trust the suggestion in the
-    digest — `corroborated` means some source outside the authoring agent
-    already pointed at that file during this run or on the prior commit;
-    `uncorroborated` means the suggestion rests on a suffix match alone.
-    Behaviour is unchanged from when it was a gate; only its role is.
+    for rewriting a page: a candidate no independent source named was refused,
+    because acting on it was dangerous. Nothing acts now. Membership here
+    decides only how much an operator should trust the suggestion in the
+    digest — `candidate_in_run_inputs` means some input other than the
+    authoring agent already named that file during this run or on the prior
+    commit; `suffix_match_only` means the suggestion rests on a suffix match
+    alone. Behaviour is unchanged from when it was a gate; only its role and
+    its name are.
+
+    NAMED FOR WHAT IT MEASURES (CCE-141 round 5). It was `build_corroborators`
+    and the label was `corroborated`, which reads as "confirmed". It is not:
+    rung 2 admits the WHOLE batch-changed set, so any tracked file the batch
+    happened to touch — a vendored dependency, a lockfile, an unrelated module
+    — takes the top label the moment it is the unique suffix match. The
+    evidence is "this run was already looking at that file", and the name now
+    says exactly that and no more. The fix is a RENAME on purpose: adding a
+    further check to try to earn the old name is the mechanism escalation this
+    feature was already cut down for.
 
     Rung 1 (edits, git-authoritative): the LINTER'S OWN VIEW of the prior
     committed page — `extract_citations(prior_text)["paths"]` intersected with
@@ -109,32 +158,35 @@ def build_corroborators(
     ("fenced examples are legitimately hypothetical", its own docstring),
     inside URL bodies, inside HTML comments, and as substrings of longer
     paths. A token the linter never checked evidences nothing about
-    acceptance, so counting it would stamp `corroborated` on a suggestion with
-    no independent support at all. Calling extract_citations also inherits the
-    linter's fence semantics for free, satisfying import-never-reimplement
+    acceptance, so counting it would raise a suggestion with no independent
+    support at all to the top label. Calling extract_citations also inherits
+    the linter's fence semantics for free, satisfying import-never-reimplement
     rather than straining it.
 
     Rung 2 (every authoring): the batch's source set — `grounding =
-    _pr_changed_files(batch_prs)` (orchestrator_runner.py:2372), handed here as
-    `source_paths`. Glob entries are excluded: expanding them would make the
-    label ceremony.
+    _pr_changed_files(batch_prs)` inside the page-authoring loop of
+    `orchestrator_runner.run`, carried per page in `grounding_by_path` and
+    handed here as `source_paths`. Glob entries are excluded: expanding them
+    would make the label ceremony. (Cross-references here name SYMBOLS, never
+    line numbers — two line-pinned ones in this docstring had already rotted
+    by one revision when CCE-141 round 5 checked them.)
 
     NOT "orchestrator-authoritative". `batch_prs` traces to
-    `dispatch_validated("source-collector", …)`
-    (orchestrator_runner.py:2048-2050), and source-collector is itself an LLM
-    subagent (`agents/source-collector.md`, `model: sonnet`). Its schema types
-    `files` as a bare `{"type": "array"}` with no item shape
-    (agents/schemas/source_collector.schema.json:22), and nothing under
+    `orchestrator_runner.run`'s `dispatch_validated("source-collector", …)`,
+    and source-collector is itself an LLM subagent
+    (`agents/source-collector.md`, `model: sonnet`). Its schema types `files`
+    as a bare `{"type": "array"}` with no item shape
+    (`agents/schemas/source_collector.schema.json`), and nothing under
     scripts/ checks `pr["files"]` against git. Rung 2's provenance is therefore
     A DIFFERENT AGENT, not the orchestrator.
 
     The doctrine still holds LITERALLY: source-collector is not the AUTHORING
     agent, so a page-author that confabulates a citation cannot also mint its
-    own corroborator. The residual is that a confabulating source-collector
-    can — an invented entry in `files[]` becomes a corroborator, widening the
-    `corroborated` label from a batch's true 5–15 files to any tracked file on
-    the host. That residual cost a rewrite; it now costs an operator one
-    over-confident digest line.
+    own supporting input. The residual is that a confabulating source-collector
+    can — an invented entry in `files[]` becomes a run input, widening the
+    `candidate_in_run_inputs` label from a batch's true 5–15 files to any
+    tracked file on the host. That residual cost a rewrite; it now costs an
+    operator one over-confident digest line.
 
     `p in files` and `suffix_candidates` iterating `files` both bound this to
     the tracked set (`files` is `git ls-files` via
@@ -152,14 +204,14 @@ def build_corroborators(
     return out
 
 
-def _excluded_reason(
+def _is_excluded(
     token: str,
     rel: str,
     repo_root: Path,
     exempt: set[str],
     prefixes: tuple[str, ...],
-) -> str | None:
-    """Which class `citation_exists.check_path` declines to CHECK this path as.
+) -> bool:
+    """True when `citation_exists.check_path` declines to CHECK this path at all.
 
     The skips that live in check_path's OWN paths loop — an exempt token, a
     reserved `example/` prefix, a gitignored path. Every class here is
@@ -179,14 +231,16 @@ def _excluded_reason(
 
     Ordering: this runs AFTER `_resolves`, so the `_is_gitignored` subprocess
     is only paid for paths that do not resolve.
+
+    Returns a BOOL. It used to return which class matched, but the only caller
+    tested that string against None and the class never reached a digest line
+    or a test — a classification nobody read. Bool is the whole contract.
     """
-    if token in exempt:
-        return "exempt_token"
-    if any(rel.startswith(p) for p in prefixes):
-        return "example_namespace"
-    if _is_gitignored(repo_root, rel):
-        return "gitignored"
-    return None
+    return (
+        token in exempt
+        or any(rel.startswith(p) for p in prefixes)
+        or _is_gitignored(repo_root, rel)
+    )
 
 
 def suffix_candidates(cited: str, files: set[str]) -> list[str]:
@@ -227,7 +281,7 @@ def diagnose(
     repo_root: Path,
     config: dict,
     files: set[str],
-    corroborators: set[str],
+    run_inputs: set[str],
 ) -> list[tuple[str, str, str]]:
     """What each blocked citation was probably shortened from. Reports; never acts.
 
@@ -240,39 +294,44 @@ def diagnose(
     check. Four confidence labels, and every non-resolving citation gets
     exactly one of them:
 
-    | confidence       | candidate field            | means                    |
-    | ---------------- | -------------------------- | ------------------------ |
-    | `corroborated`   | the one candidate          | one strict suffix match, |
-    |                  |                            | and some source outside  |
-    |                  |                            | the authoring agent      |
-    |                  |                            | already pointed at it    |
-    | `uncorroborated` | the one candidate          | one strict suffix match, |
-    |                  |                            | resting on the match     |
-    |                  |                            | alone                    |
-    | `ambiguous`      | the candidates, capped at  | several tracked files    |
-    |                  | `_AMBIGUITY_CAP`, then     | end with this tail       |
-    |                  | `(+N more)`                |                          |
-    | `no_candidate`   | `""`                       | no tracked file ends     |
-    |                  |                            | with this tail at all    |
+    | confidence                | candidate field           | means                |
+    | ------------------------- | ------------------------- | -------------------- |
+    | `candidate_in_run_inputs` | the one candidate         | one strict suffix    |
+    |                           |                           | match, and an input  |
+    |                           |                           | to this run other    |
+    |                           |                           | than the authoring   |
+    |                           |                           | agent already named  |
+    |                           |                           | that file            |
+    | `suffix_match_only`       | the one candidate         | one strict suffix    |
+    |                           |                           | match, resting on    |
+    |                           |                           | the match alone      |
+    | `ambiguous`               | the candidates, capped at | several tracked      |
+    |                           | `_AMBIGUITY_CAP`, then    | files end with this  |
+    |                           | `(+N more)`               | tail                 |
+    | `no_candidate`            | `""`                      | no tracked file ends |
+    |                           |                           | with this tail       |
 
-    Uncorroborated findings are REPORTED, not withheld. The old code declined
-    them because ACTING on them was dangerous; nothing acts now, and an
-    operator reading the digest is better served by a labelled suggestion than
-    by silence. The same reasoning covers the last two rows: `ambiguous` and
-    `no_candidate` used to `continue` silently, so a page that blocked because
-    two candidates matched produced no digest line at all while the
+    The module docstring states what each label does and does NOT establish;
+    read it before acting on one.
+
+    `suffix_match_only` findings are RETURNED, not withheld. The old code
+    declined them because ACTING on them was dangerous; nothing acts now, and
+    an operator reading the digest is better served by a labelled suggestion
+    than by silence. The same reasoning covers the last two rows: `ambiguous`
+    and `no_candidate` used to `continue` silently, so a page that blocked
+    because two candidates matched produced no line at all while the
     single-candidate case was loud. That inconsistency was the whole reason
-    the digest could not be trusted as a census of blocked citations. Now it
-    can: every non-excluded, non-resolving citation appears.
+    the digest could not be trusted as a census of blocked citations.
 
-    A `corroborated` label is not a claim of correctness. Corroboration bounds
-    the surface — the candidate is a tracked file some other source already
-    pointed at — and nothing more.
+    This function returns ALL FOUR classes. What reaches the run digest is the
+    ORCHESTRATOR's decision, and it drops `no_candidate` — that population is
+    already named path-for-path by `lint_block`, and its own evidence says the
+    token is not a shortening. See `orchestrator_runner._diagnose_citation_paths`.
 
     The skip order mirrors `citation_exists.check_path` deliberately. A token
     that resolves needs no diagnosis; an absolute path outside the repo is an
     environment reference the linter does not treat as a repo citation; and
-    every class `_excluded_reason` names is unresolvable by design, so a
+    every class `_is_excluded` covers is unresolvable by design, so a
     finding there would be noise rather than signal.
     """
     docs_dir = _docs_dir(config)
@@ -288,7 +347,7 @@ def diagnose(
             continue
         if _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
             continue
-        if _excluded_reason(cited, rel, repo_root, exempt, prefixes) is not None:
+        if _is_excluded(cited, rel, repo_root, exempt, prefixes):
             continue
 
         candidates = suffix_candidates(rel, files)
@@ -296,10 +355,10 @@ def diagnose(
             findings.append((cited, "", "no_candidate"))
         elif len(candidates) > 1:
             findings.append((cited, _summarize(candidates), "ambiguous"))
-        elif candidates[0] in corroborators:
+        elif candidates[0] in run_inputs:
             # Match the CANDIDATE, never the cited token: the token is what the
-            # authoring agent wrote, so corroborating it would be circular.
-            findings.append((cited, candidates[0], "corroborated"))
+            # authoring agent wrote, so matching it would be circular.
+            findings.append((cited, candidates[0], "candidate_in_run_inputs"))
         else:
-            findings.append((cited, candidates[0], "uncorroborated"))
+            findings.append((cited, candidates[0], "suffix_match_only"))
     return findings

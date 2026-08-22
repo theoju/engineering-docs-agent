@@ -46,7 +46,7 @@ def _state() -> dict:
     return {"current_run": {"partial": False, "partial_reasons": []}}
 
 
-def test_a_corroborated_shortening_is_reported_and_stays_info_only(repo):
+def test_a_run_input_shortening_is_reported_and_stays_info_only(repo):
     """The finding is visible in the digest and does NOT degrade the run.
 
     Classification change from revision 2: this line used to be degraded=True,
@@ -64,7 +64,7 @@ def test_a_corroborated_shortening_is_reported_and_stays_info_only(repo):
 
     cr = state["current_run"]
     assert any(
-        "citation_shortening_suspected" in r and "corroborated" in r
+        "citation_shortening_suspected" in r and "(candidate_in_run_inputs)" in r
         for r in cr["partial_reasons"]
     ), cr["partial_reasons"]
     assert cr["partial"] is False, (
@@ -76,7 +76,7 @@ def test_a_corroborated_shortening_is_reported_and_stays_info_only(repo):
 
 def test_the_page_is_never_written(repo):
     """THE POINT OF REVISION 3. The page's bytes and mtime-bearing content are
-    untouched even when a corroborated candidate is found — the whole class of
+    untouched even when a top-labelled candidate is found — the whole class of
     defects four review rounds surfaced needed a write to happen."""
     page = repo / "page.md"
     original = "See `references/checklist.md` for the steps.\n"
@@ -88,7 +88,7 @@ def test_the_page_is_never_written(repo):
     assert FULL not in page.read_text()
 
 
-def test_an_uncorroborated_shortening_is_reported_not_silently_dropped(repo):
+def test_a_suffix_match_only_shortening_is_reported_not_silently_dropped(repo):
     """Revision 2 declined this loudly-but-as-a-degradation; revision 3 reports
     it as an advisory with the label that says how much to trust it."""
     page = repo / "page.md"
@@ -99,31 +99,55 @@ def test_an_uncorroborated_shortening_is_reported_not_silently_dropped(repo):
 
     cr = state["current_run"]
     assert any(
-        "citation_shortening_suspected" in r and "uncorroborated" in r
+        "citation_shortening_suspected" in r and "(suffix_match_only)" in r
         for r in cr["partial_reasons"]
     ), cr["partial_reasons"]
     assert cr["partial"] is False
 
 
-def test_an_unmatched_citation_is_still_reported(repo):
-    """The zero-match case reaches the digest too. Silence here is what made
-    the old digest untrustworthy as a census of blocked citations."""
+def test_a_no_candidate_citation_is_kept_out_of_the_digest(repo):
+    """FIX 3. `no_candidate` means the module LOOKED for a tracked file ending
+    in that tail and found none — its own evidence says the token is not a
+    shortening of anything in the repo. Emitting it under
+    `citation_shortening_suspected` filed the dominant population under a key
+    asserting the opposite of what was measured.
+
+    Dropped from the digest rather than renamed, because a renamed key would
+    still carry ZERO added information: `lint_block` already names every one
+    of those paths, with severity, on the same run. One page with 40
+    confabulated citations produced 1 lint_block line and 40 diagnosis lines.
+    Renaming would have kept 40 lines of nothing in front of the operator and
+    buried the findings that do name a file.
+
+    The finding is DROPPED FROM THE DIGEST, not from the module: `diagnose`
+    still returns it, which the second half asserts. A future caller that
+    wants the census can have it; the digest is where it earns nothing.
+    """
     page = repo / "page.md"
     page.write_text("See `docs/invented.md`.\n")
     state = _state()
 
     runner._diagnose_citation_paths(page, repo, {}, state, source_paths=set())
 
-    assert any(
-        "citation_shortening_suspected" in r and "no_candidate" in r
-        for r in state["current_run"]["partial_reasons"]
-    ), state["current_run"]["partial_reasons"]
+    assert state["current_run"]["partial_reasons"] == [], (
+        "a no_candidate finding must not reach the digest: lint_block already "
+        "names that path and the label asserts the opposite of the evidence"
+    )
+
+    import citation_repair
+
+    assert citation_repair.diagnose(
+        page.read_text(), repo, {}, citation_repair.tracked_files(repo), set()
+    ) == [("docs/invented.md", "", "no_candidate")], (
+        "the finding must still cross diagnose's return boundary — only the "
+        "digest drops it"
+    )
 
 
-def test_a_fenced_mention_on_the_prior_page_does_not_corroborate(repo):
+def test_a_fenced_mention_on_the_prior_page_is_not_a_run_input(repo):
     """citation_exists deliberately never validates fenced regions, so a path
     named only inside a fence on the prior commit is not evidence the pipeline
-    accepted a reference to it. Under a raw substring scan it corroborated
+    accepted a reference to it. Under a raw substring scan it counted
     anyway. It no longer decides whether anything happens to the page — but it
     still decides the CONFIDENCE an operator reads, and an over-confident
     label on a confabulated citation is how a reviewer is talked into the
@@ -146,19 +170,19 @@ def test_a_fenced_mention_on_the_prior_page_does_not_corroborate(repo):
 
     assert page.read_text() == cited
     reasons = state["current_run"]["partial_reasons"]
-    assert any("uncorroborated" in r for r in reasons), reasons
-    assert not any("(corroborated)" in r for r in reasons), reasons
+    assert any("(suffix_match_only)" in r for r in reasons), reasons
+    assert not any("(candidate_in_run_inputs)" in r for r in reasons), reasons
 
 
-def test_the_prior_committed_page_supplies_rung_1_corroboration(repo):
+def test_the_prior_committed_page_supplies_rung_1(repo):
     """`_prior_page_text` is threaded for a reason: on an EDIT the prior
-    commit is the git-authoritative half of the corroborator ladder.
+    commit is the git-authoritative half of the run-input ladder.
 
     Here `source_paths` is EMPTY, so rung 2 contributes nothing and the
-    `corroborated` label can only come from the prior page — which cited the
-    full path in unfenced prose, exactly the site `citation_exists` validated.
-    Cutting the `_prior_page_text` thread downgrades this to
-    `uncorroborated`.
+    `candidate_in_run_inputs` label can only come from the prior page — which
+    cited the full path in unfenced prose, exactly the site `citation_exists`
+    validated. Cutting the `_prior_page_text` thread downgrades this to
+    `suffix_match_only`.
     """
     page = repo / "page.md"
     page.write_text(f"The checklist lives at `{FULL}`.\n")
@@ -171,7 +195,7 @@ def test_the_prior_committed_page_supplies_rung_1_corroboration(repo):
     runner._diagnose_citation_paths(page, repo, {}, state, source_paths=set())
 
     reasons = state["current_run"]["partial_reasons"]
-    assert any("(corroborated)" in r for r in reasons), reasons
+    assert any("(candidate_in_run_inputs)" in r for r in reasons), reasons
 
 
 def test_prior_page_text_survives_a_non_utf8_page_at_head(repo):
@@ -298,10 +322,14 @@ def test_the_production_call_site_diagnoses_an_authored_page(
     citation-free and why this call site was previously unreachable from the
     suite.
 
-    Asserting on the `corroborated` label rather than merely on the reason
-    prefix pins the `source_paths=grounding` thread too: if the call site
-    stopped passing the batch's grounding, the same finding would arrive
-    labelled `uncorroborated` and this would fail.
+    Asserting on the `candidate_in_run_inputs` label rather than merely on
+    the reason prefix pins the `source_paths=grounding_by_path[...]` thread
+    too: if the call site stopped passing the page's own batch grounding, the
+    same finding would arrive labelled `suffix_match_only` and this would
+    fail. That is the SUBSTRING TRAP this file fell into once — asserting
+    `"corroborated" in r` was satisfied by `"uncorroborated"`, so it could not
+    distinguish the two labels, the one thing its name claimed. Every label
+    assertion here is now parenthesised and exact.
     """
     page_text = (
         "# foo connector\n\n"
@@ -328,7 +356,7 @@ def test_the_production_call_site_diagnoses_an_authored_page(
         _TARGET in r
         and f"'{_SHORTENED}'" in r
         and f"'{_GROUNDED}'" in r
-        and "(corroborated)" in r
+        and "(candidate_in_run_inputs)" in r
         for r in hits
     ), hits
     assert cr["partial"] is False, (
@@ -413,3 +441,198 @@ def test_a_citation_to_a_sibling_the_same_run_authors_is_not_reported(
         f"the linter accepts: {hits}"
     )
 
+
+# --- the reporting seam: completeness, and the bounds on it -----------------
+#
+# All four of these mutations to the reporting loop survived the FULL suite
+# before these tests existed:
+#     for cited, candidate, confidence in shown:  ->  ... in shown[:1]:
+#                                                     ... in shown[-1:]:
+#                                                     ... in shown[:2]:
+#     inserting `if confidence == "ambiguous": continue` as the loop's first
+#     line
+# The test file's own words are "the digest is a census of blocked citations
+# or it is nothing", and nothing pinned it HERE, at the seam that writes it.
+
+
+def _commit(repo: Path, rels: list[str]) -> None:
+    for rel in rels:
+        f = repo / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(f"# {rel}\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "fixture files")
+
+
+def _suspected(state: dict) -> list[str]:
+    return [
+        r
+        for r in state["current_run"]["partial_reasons"]
+        if r.startswith("citation_shortening_suspected:")
+    ]
+
+
+def test_the_digest_reports_every_finding_on_a_page_not_a_slice_of_them(repo):
+    """THE CENSUS PROPERTY, pinned at the seam that writes the digest.
+
+    Three findings, asserted as an exact ordered list. `[:1]`, `[-1:]` and
+    `[:2]` each drop at least one line and each fail here.
+    """
+    _commit(repo, ["pkg/alpha/one.md", "pkg/beta/two.md", "pkg/gamma/three.md"])
+    page = repo / "page.md"
+    page.write_text(
+        "First: `alpha/one.md`.\n"
+        "Second: `beta/two.md`.\n"
+        "Third: `gamma/three.md`.\n"
+    )
+    state = _state()
+
+    runner._diagnose_citation_paths(page, repo, {}, state, source_paths=set())
+
+    assert _suspected(state) == [
+        "citation_shortening_suspected: page.md: 'alpha/one.md' -> "
+        "'pkg/alpha/one.md' (suffix_match_only)",
+        "citation_shortening_suspected: page.md: 'beta/two.md' -> "
+        "'pkg/beta/two.md' (suffix_match_only)",
+        "citation_shortening_suspected: page.md: 'gamma/three.md' -> "
+        "'pkg/gamma/three.md' (suffix_match_only)",
+    ], state["current_run"]["partial_reasons"]
+
+
+def test_an_ambiguous_finding_reaches_the_digest(repo):
+    """The `ambiguous` class must not be filtered at the reporting seam.
+
+    Inserting `if confidence == "ambiguous": continue` into the loop survived
+    the whole suite. Ambiguity is the case an operator most needs to see: the
+    page blocked, several tracked files end with that tail, and only a human
+    can pick. Silently dropping it recreates exactly the inconsistency that
+    made the old digest untrustworthy.
+    """
+    _commit(repo, ["a/shared/dup.md", "b/shared/dup.md"])
+    page = repo / "page.md"
+    page.write_text("Both of them: `shared/dup.md`.\n")
+    state = _state()
+
+    runner._diagnose_citation_paths(page, repo, {}, state, source_paths=set())
+
+    assert _suspected(state) == [
+        "citation_shortening_suspected: page.md: 'shared/dup.md' -> "
+        "'a/shared/dup.md, b/shared/dup.md' (ambiguous)"
+    ], state["current_run"]["partial_reasons"]
+
+
+def test_findings_are_capped_per_page_and_the_cap_says_what_it_withheld(repo):
+    """FIX 4, second half. A page whose author confabulated wholesale can
+    produce dozens of findings; past a handful they stop being a census an
+    operator reads and become a wall they skip.
+
+    The cap is the easy part. The line that says how many were withheld is the
+    load-bearing part: a SILENTLY truncated digest reads as a complete one,
+    which is the exact failure mode this whole ticket exists to fight.
+    """
+    n = runner._CITATION_FINDINGS_CAP + 2
+    _commit(repo, [f"pkg/f{i:02d}/x.md" for i in range(n)])
+    page = repo / "page.md"
+    page.write_text("".join(f"See `f{i:02d}/x.md`.\n" for i in range(n)))
+    state = _state()
+
+    runner._diagnose_citation_paths(page, repo, {}, state, source_paths=set())
+
+    hits = _suspected(state)
+    assert len(hits) == runner._CITATION_FINDINGS_CAP, hits
+    assert hits[0].endswith("'f00/x.md' -> 'pkg/f00/x.md' (suffix_match_only)")
+    assert (
+        f"citation_diagnosis_truncated: page.md: reported "
+        f"{runner._CITATION_FINDINGS_CAP} of {n} findings; "
+        f"{n - runner._CITATION_FINDINGS_CAP} withheld"
+    ) in state["current_run"]["partial_reasons"], state["current_run"][
+        "partial_reasons"
+    ]
+
+
+# 30 x 11 - 1 = 329 characters, comfortably over _STDERR_TRUNCATE and
+# comfortably under PATH_MAX once tmp_path is prepended. Each segment is 11
+# bytes, far under the 255-byte per-component limit.
+_DEEP = "/".join(f"seg{i:02d}aaaa" for i in range(30))
+
+
+def test_the_reason_truncates_the_llm_authored_halves_of_the_line(repo):
+    """FIX 4, first half. `cited` and `candidate` are LLM-authored text with
+    no length bound, embedded verbatim into a state reason that ends up in the
+    PR body. This file already defines `_STDERR_TRUNCATE = 300` and applies it
+    to every other embedded untrusted string; the citation lines did not.
+
+    Measured before the fix: a 40,000-char citation token produced a single
+    40,198-byte `partial_reasons` entry, and 40 pages x 40 blocked citations
+    produced a 167,005-byte PR body against GitHub's 65,536-byte limit.
+
+    The EXISTING convention is applied — no new one is invented.
+    """
+    tracked = f"vendor/{_DEEP}/y.md"
+    _commit(repo, [tracked])
+    cited = f"{_DEEP}/y.md"
+    page = repo / "page.md"
+    page.write_text(f"See `{cited}`.\n")
+    state = _state()
+
+    # Fixture guards: the token really is over the limit, and it really does
+    # reach the digest (a no_candidate finding would be dropped instead).
+    assert len(cited) > runner._STDERR_TRUNCATE
+    import citation_repair
+
+    assert citation_repair.suffix_candidates(
+        cited, citation_repair.tracked_files(repo)
+    ) == [tracked]
+
+    runner._diagnose_citation_paths(page, repo, {}, state, source_paths=set())
+
+    hits = _suspected(state)
+    assert len(hits) == 1, hits
+    assert f"'{cited[: runner._STDERR_TRUNCATE]}'" in hits[0]
+    assert cited not in hits[0], "the untruncated token reached the digest"
+
+
+def test_a_diagnosis_failure_names_the_page_by_its_repo_relative_label(repo):
+    """The failure line used a bare `path.name` while the finding line used
+    the repo-relative label — so `citation_diagnosis_failed: index.md: …` did
+    not say WHICH index.md. Worse, `add_partial` dedupes identical strings, so
+    every `index.md` in a run collapsed into one line naming no page at all.
+
+    Both pages fail here. With `path.name` the two reasons are byte-identical
+    and the dedupe leaves ONE; with `label` there are two, each naming its
+    page. The exception message is also truncated: `str(exc)` is the least
+    bounded string of the three.
+    """
+    _commit(repo, ["docs/a/index.md", "docs/b/index.md"])
+    state = _state()
+
+    import citation_repair
+
+    boom = "E" * 40_000
+
+    def _explode(_repo_root):
+        raise RuntimeError(boom)
+
+    original = citation_repair.tracked_files
+    citation_repair.tracked_files = _explode
+    try:
+        for rel in ("docs/a/index.md", "docs/b/index.md"):
+            runner._diagnose_citation_paths(
+                repo / rel, repo, {}, state, source_paths=set()
+            )
+    finally:
+        citation_repair.tracked_files = original
+
+    failures = [
+        r
+        for r in state["current_run"]["partial_reasons"]
+        if r.startswith("citation_diagnosis_failed:")
+    ]
+    assert len(failures) == 2, (
+        "a bare basename makes the two reasons identical and add_partial "
+        f"dedupes them into one: {failures}"
+    )
+    assert any("docs/a/index.md" in r for r in failures), failures
+    assert any("docs/b/index.md" in r for r in failures), failures
+    assert all(boom not in r for r in failures), "str(exc) reached state untruncated"
+    assert all(len(r) < 2 * runner._STDERR_TRUNCATE for r in failures), failures

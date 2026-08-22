@@ -1583,6 +1583,13 @@ def _prior_page_text(repo_root: Path, path: Path) -> str | None:
     return r.stdout.decode("utf-8", errors="replace")
 
 
+# CCE-141: how many diagnosis lines ONE page may put in the digest. A page
+# whose author confabulated wholesale can produce dozens; past a handful the
+# lines stop being a census an operator reads and become a wall they skip. The
+# count withheld is always reported alongside — see `_diagnose_citation_paths`.
+_CITATION_FINDINGS_CAP = 10
+
+
 def _diagnose_citation_paths(
     path: Path, repo_root: Path, config: dict, state: dict, source_paths: set[str]
 ) -> None:
@@ -1613,10 +1620,42 @@ def _diagnose_citation_paths(
     reason in `partial_reasons` and still emits it to stderr, so advisory is
     not silent.
 
-    `source_paths` is the page's own batch grounding set and is REQUIRED. It is half of
-    the corroborator ladder, which is what separates a confidently-labelled
-    suggestion from a bare one; a default would let an un-threaded call site
-    silently downgrade every finding to `uncorroborated`.
+    `source_paths` is the page's own batch grounding set and is REQUIRED. It
+    is rung 2 of `citation_repair.build_run_inputs`, which is what separates a
+    confidently-labelled suggestion from a bare one; a default would let an
+    un-threaded call site silently downgrade every finding to
+    `suffix_match_only`.
+
+    WHAT REACHES THE DIGEST, and what does not. `diagnose` returns all four
+    confidence classes; `no_candidate` is deliberately NOT emitted here.
+    `no_candidate` means the module looked for a tracked file ending in that
+    tail and found none — its own evidence says the token is not a shortening
+    of anything in the repo, so filing it under `citation_shortening_suspected`
+    asserted the opposite of what was measured. It is also the DOMINANT
+    population: one page with 40 confabulated citations produced 1 `lint_block`
+    line (which already names all 40 paths, with severity) and 40 diagnosis
+    lines saying nothing the block had not said. Renaming the key would have
+    kept 40 lines of zero added information in front of the operator and
+    buried the handful of findings that do name a file. Dropped, not renamed.
+    The findings still cross `diagnose`'s return boundary, so a caller that
+    wants them can have them; the digest is where they earn nothing.
+
+    BOUNDED. Both reason strings embed LLM-authored text — the cited token and
+    the candidate come from a page an agent wrote, the page label from an
+    agent-chosen `page_hint`, and `str(exc)` from anywhere. They are truncated
+    at `_STDERR_TRUNCATE`, the same convention this file already applies to
+    every other embedded untrusted string. A 40,000-char citation token
+    otherwise produced a single 40,198-byte `partial_reasons` entry, and 40
+    pages x 40 blocked citations produced a 167,005-byte PR body against
+    GitHub's 65,536 limit. Findings per page are additionally capped at
+    `_CITATION_FINDINGS_CAP`, and the count withheld is REPORTED — a silently
+    truncated digest reads as a complete one, which is the exact failure this
+    work exists to fight.
+
+    `label` is used in BOTH lines, including the failure line, which used a
+    bare `path.name`. `add_partial` dedupes identical strings, so
+    `citation_diagnosis_failed: index.md: …` collapsed every `index.md` in the
+    run into one line that named no page at all.
 
     The whole body is wrapped, and deliberately catches broadly. A diagnostic
     must never be fatal to an unattended nightly, and there is no top-level
@@ -1629,6 +1668,10 @@ def _diagnose_citation_paths(
     silently stopped working is indistinguishable from one with nothing to say.
     """
     try:
+        label = path.relative_to(repo_root).as_posix()[:_STDERR_TRUNCATE]
+    except ValueError:
+        label = path.name[:_STDERR_TRUNCATE]
+    try:
         import citation_repair
 
         try:
@@ -1638,27 +1681,33 @@ def _diagnose_citation_paths(
             # second, vaguer line from here would be noise.
             return
         files = citation_repair.tracked_files(repo_root)
-        corroborators = citation_repair.build_corroborators(
+        run_inputs = citation_repair.build_run_inputs(
             _prior_page_text(repo_root, path), source_paths, files
         )
-        findings = citation_repair.diagnose(
-            text, repo_root, config, files, corroborators
-        )
-        try:
-            label = path.relative_to(repo_root).as_posix()
-        except ValueError:
-            label = path.name
-        for cited, candidate, confidence in findings:
+        findings = citation_repair.diagnose(text, repo_root, config, files, run_inputs)
+        reportable = [f for f in findings if f[2] != "no_candidate"]
+        shown = reportable[:_CITATION_FINDINGS_CAP]
+        for cited, candidate, confidence in shown:
             add_partial(
                 state,
-                f"citation_shortening_suspected: {label}: '{cited}' -> "
-                f"'{candidate}' ({confidence})",
+                f"citation_shortening_suspected: {label}: "
+                f"'{cited[:_STDERR_TRUNCATE]}' -> "
+                f"'{candidate[:_STDERR_TRUNCATE]}' ({confidence})",
+                info_only=True,
+            )
+        if len(reportable) > len(shown):
+            add_partial(
+                state,
+                f"citation_diagnosis_truncated: {label}: reported "
+                f"{len(shown)} of {len(reportable)} findings; "
+                f"{len(reportable) - len(shown)} withheld",
                 info_only=True,
             )
     except Exception as exc:  # noqa: BLE001 - a diagnostic must never be fatal
         add_partial(
             state,
-            f"citation_diagnosis_failed: {path.name}: {type(exc).__name__}: {exc}",
+            f"citation_diagnosis_failed: {label}: {type(exc).__name__}: "
+            f"{str(exc)[:_STDERR_TRUNCATE]}",
             info_only=True,
         )
 

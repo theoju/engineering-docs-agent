@@ -115,7 +115,7 @@ def test_diagnose_returns_findings_and_takes_no_destination():
     """It takes text and returns findings. It does not return a modified
     string, and it has no parameter to write to."""
     params = list(inspect.signature(cr.diagnose).parameters)
-    assert params == ["text", "repo_root", "config", "files", "corroborators"]
+    assert params == ["text", "repo_root", "config", "files", "run_inputs"]
     ret = inspect.signature(cr.diagnose).return_annotation
     assert "list" in str(ret), ret
 
@@ -124,7 +124,7 @@ def test_diagnose_is_the_public_name_and_repair_is_gone():
     """The name must not suggest mutation, and the retired surface must not
     linger as an alias that a caller could still reach."""
     assert set(cr.__all__) == {
-        "build_corroborators",
+        "build_run_inputs",
         "diagnose",
         "suffix_candidates",
         "tracked_files",
@@ -143,15 +143,15 @@ def test_diagnose_is_the_public_name_and_repair_is_gone():
         assert not hasattr(cr, gone), f"{gone} survived the deletion"
 
 
-def test_corroborators_has_no_default():
+def test_run_inputs_has_no_default():
     """An un-threaded call site must fail loudly, never silently downgrade
-    every finding to `uncorroborated`."""
+    every finding to `suffix_match_only`."""
     sig = inspect.signature(cr.diagnose)
-    assert sig.parameters["corroborators"].default is inspect.Parameter.empty
+    assert sig.parameters["run_inputs"].default is inspect.Parameter.empty
 
 
 def test_source_paths_has_no_default():
-    sig = inspect.signature(cr.build_corroborators)
+    sig = inspect.signature(cr.build_run_inputs)
     assert sig.parameters["source_paths"].default is inspect.Parameter.empty
 
 
@@ -190,41 +190,75 @@ FULL = ".claude/skills/connector-builder/references/checklist.md"
 # --- the four confidence labels ---------------------------------------------
 
 
-def test_a_corroborated_shortening_is_reported_as_corroborated(repo):
-    """The ADIS case, end to end. One strict suffix candidate, vouched for by
-    a source outside the authoring agent."""
+def test_a_shortening_whose_candidate_is_a_run_input_is_labelled_as_such(repo):
+    """The ADIS case, end to end. One strict suffix candidate, and an input to
+    this run other than the authoring agent already named that file.
+
+    The label says the candidate is IN THE RUN'S INPUTS and nothing more. It
+    was `corroborated` until CCE-141 round 5, a name that read as "confirmed"
+    while being granted by batch membership alone."""
     text = "See `references/checklist.md` for the steps.\n"
-    got = cr.diagnose(text, repo, CFG, cr.tracked_files(repo), corroborators={FULL})
-    assert got == [("references/checklist.md", FULL, "corroborated")]
+    got = cr.diagnose(text, repo, CFG, cr.tracked_files(repo), run_inputs={FULL})
+    assert got == [("references/checklist.md", FULL, "candidate_in_run_inputs")]
 
 
-def test_an_uncorroborated_shortening_is_reported_not_withheld(repo):
+def test_a_batch_touched_vendored_file_gets_no_stronger_label_than_it_earns(repo):
+    """WHY THE LABEL WAS RENAMED, pinned as behaviour.
+
+    The repo tracks only a vendored third-party module. The page cites an
+    invented `auth/session.py`, which is a unique strict suffix of it, and the
+    batch happened to touch the vendored file — so it lands in `run_inputs`
+    and takes the top label. Under the old name the digest called that
+    `corroborated`, which an operator reads as "confirmed". Nothing about the
+    vendored file confirms anything; the label may only say that this run's
+    inputs already named it."""
+    vendored = repo / "vendor/third_party/oauthlib/auth"
+    vendored.mkdir(parents=True)
+    (vendored / "session.py").write_text("# oauthlib\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "vendored")
+    full = "vendor/third_party/oauthlib/auth/session.py"
+
+    got = cr.diagnose(
+        "See `auth/session.py`.\n",
+        repo,
+        CFG,
+        cr.tracked_files(repo),
+        run_inputs={full},
+    )
+    assert got == [("auth/session.py", full, "candidate_in_run_inputs")]
+    assert "corroborated" not in got[0][2], (
+        "batch membership alone must never be labelled as corroboration"
+    )
+
+
+def test_a_suffix_match_only_shortening_is_reported_not_withheld(repo):
     """THE REVISION-3 CHANGE. The old code DECLINED this case, because acting
     on it was dangerous — a unique suffix match establishes only that the
     candidate exists, never that the cited token was ever a shortening of it.
 
     Nothing acts now. An operator reading the digest is better served by a
     labelled suggestion than by silence, so this is reported with its
-    confidence set to `uncorroborated` rather than dropped.
+    confidence set to `suffix_match_only` rather than dropped.
     """
     text = "See `references/checklist.md`.\n"
-    got = cr.diagnose(text, repo, CFG, cr.tracked_files(repo), corroborators=set())
-    assert got == [("references/checklist.md", FULL, "uncorroborated")]
+    got = cr.diagnose(text, repo, CFG, cr.tracked_files(repo), run_inputs=set())
+    assert got == [("references/checklist.md", FULL, "suffix_match_only")]
 
 
-def test_corroboration_matches_the_candidate_not_the_cited_token(repo):
-    """Corroborating the TOKEN would be circular — the token is what the
-    authoring agent wrote. Only the candidate's provenance counts, so
-    corroborating the token must leave the label at `uncorroborated`."""
+def test_the_run_input_match_is_on_the_candidate_not_the_cited_token(repo):
+    """Matching the TOKEN would be circular — the token is what the authoring
+    agent wrote. Only the candidate's provenance counts, so a run input equal
+    to the token must leave the label at `suffix_match_only`."""
     text = "See `references/checklist.md`.\n"
     got = cr.diagnose(
         text,
         repo,
         CFG,
         cr.tracked_files(repo),
-        corroborators={"references/checklist.md"},
+        run_inputs={"references/checklist.md"},
     )
-    assert got == [("references/checklist.md", FULL, "uncorroborated")]
+    assert got == [("references/checklist.md", FULL, "suffix_match_only")]
 
 
 def test_an_ambiguous_citation_is_reported_with_its_candidates(repo):
@@ -240,7 +274,7 @@ def test_an_ambiguous_citation_is_reported_with_its_candidates(repo):
     _git(repo, "commit", "-qm", "second")
 
     text = "See `references/checklist.md`.\n"
-    got = cr.diagnose(text, repo, CFG, cr.tracked_files(repo), corroborators=set())
+    got = cr.diagnose(text, repo, CFG, cr.tracked_files(repo), run_inputs=set())
     assert got == [
         (
             "references/checklist.md",
@@ -264,7 +298,7 @@ def test_the_ambiguous_candidate_list_is_capped_and_says_so(repo):
     _git(repo, "commit", "-qm", "many")
 
     got = cr.diagnose(
-        "See `x/y.md`.\n", repo, CFG, cr.tracked_files(repo), corroborators=set()
+        "See `x/y.md`.\n", repo, CFG, cr.tracked_files(repo), run_inputs=set()
     )
     assert len(got) == 1
     cited, listed, confidence = got[0]
@@ -287,41 +321,105 @@ def test_a_citation_with_no_candidate_is_reported_as_such(repo):
         repo,
         CFG,
         cr.tracked_files(repo),
-        corroborators=set(),
+        run_inputs=set(),
     )
     assert got == [("docs/invented.md", "", "no_candidate")]
 
 
-def test_every_non_resolving_citation_on_a_page_gets_exactly_one_finding(repo):
-    """The census property, stated directly. Four citations of four different
-    shapes on one page produce four findings, in document order."""
+def test_four_citations_produce_one_finding_each_for_the_three_that_do_not_resolve(
+    repo,
+):
+    """The census property, stated directly: FOUR citations on one page, one
+    of which resolves, produce THREE findings, in document order and one per
+    citation.
+
+    Name, docstring and assertions agree here, and they did not before. The
+    docstring claimed four findings while asserting three, and its "resolving"
+    line was `README.md` — which `_REPO_PATH_RE` does not even accept as a
+    citation (it requires a slash), so `extract_citations` never emitted it
+    and the `_resolves` arm this test credited was never reached. The
+    resolving citation is now `docs/index.md`, a real tracked path with a
+    slash. (The `_resolves` guard is pinned DISCRIMINATINGLY in isolation by
+    `test_a_resolving_citation_is_never_reported`; its job here is only to be
+    a genuine citation that this loop must skip.)
+    """
     second = repo / "other/references"
     second.mkdir(parents=True)
     (second / "checklist.md").write_text("# other\n")
     other_tail = repo / "vendor/pkg/references"
     other_tail.mkdir(parents=True)
     (other_tail / "notes.md").write_text("# notes\n")
+    (repo / "docs").mkdir()
+    (repo / "docs/index.md").write_text("# index\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "more")
 
+    files = cr.tracked_files(repo)
+    # Fixture guard: all four really are citations the linter surfaces, or the
+    # count below is measuring the extractor rather than the diagnosis.
     text = (
-        "Resolving: `README.md`.\n"
+        "Resolving: `docs/index.md`.\n"
         "Ambiguous: `references/checklist.md`.\n"
-        "Corroborated: `references/notes.md`.\n"
+        "A run input: `references/notes.md`.\n"
         "Missing: `docs/invented.md`.\n"
     )
+    assert cr.extract_citations(text)["paths"] == [
+        "docs/index.md",
+        "references/checklist.md",
+        "references/notes.md",
+        "docs/invented.md",
+    ]
+
     got = cr.diagnose(
-        text,
-        repo,
-        CFG,
-        cr.tracked_files(repo),
-        corroborators={"vendor/pkg/references/notes.md"},
+        text, repo, CFG, files, run_inputs={"vendor/pkg/references/notes.md"}
     )
     assert [(c, k) for c, _, k in got] == [
         ("references/checklist.md", "ambiguous"),
-        ("references/notes.md", "corroborated"),
+        ("references/notes.md", "candidate_in_run_inputs"),
         ("docs/invented.md", "no_candidate"),
     ], got
+
+
+def test_diagnose_inherits_the_linters_fence_stripping(repo):
+    """`extract_citations` calls `strip_fenced_blocks` ON PURPOSE — "fenced
+    examples are legitimately hypothetical" — so a path named only inside a
+    fence NEVER blocks a page. Nothing asserted that `diagnose` inherits that,
+    and it must: a citation the linter will not block needs no diagnosis, and
+    a digest line for one is a line telling an operator to fix a page that is
+    not broken.
+
+    Inheritance, not reimplementation: `diagnose` gets this for free by
+    calling the linter's own extractor, which is the whole point of the
+    import-never-reimplement rule at the top of the module.
+
+    The fixture is DISCRIMINATING in the loudest direction available. The
+    fenced path has exactly one strict suffix candidate AND that candidate is
+    a run input, so if the fence markers were stripped before extraction the
+    token would surface with the TOP label — the strongest line the digest can
+    print — rather than merely changing shade.
+
+    (The mutation that proves this is a real catch splits the text on triple
+    backticks and rejoins it, which removes the fence markers. The naive
+    `text.replace("```", "")` form is NOT a valid mutation here: `replace` is
+    in `_WRITE_ATTRS`, so it fails the AST write-guard instead — an artifact,
+    not a behavioural catch.)
+    """
+    text = (
+        "Nothing is cited in prose on this page.\n"
+        "\n"
+        "```text\n"
+        "cite it as `references/checklist.md`\n"
+        "```\n"
+    )
+    files = cr.tracked_files(repo)
+
+    # Fixture guards: the linter really does drop this token, and the token
+    # really would produce the loudest possible finding if it did not.
+    assert cr.extract_citations(text)["paths"] == []
+    assert cr.suffix_candidates("references/checklist.md", files) == [FULL]
+    assert not (repo / "references/checklist.md").exists()
+
+    assert cr.diagnose(text, repo, CFG, files, run_inputs={FULL}) == []
 
 
 # --- the guards that keep noise out of the digest ---------------------------
@@ -336,7 +434,7 @@ def test_a_resolving_citation_is_never_reported(repo):
     never consulted.
 
     Here the cited `docs/index.md` RESOLVES and ALSO has exactly one strict
-    suffix candidate, `vendor/pkg/docs/index.md`, which IS corroborated. Every
+    suffix candidate, `vendor/pkg/docs/index.md`, which IS a run input. Every
     other guard passes, so `_resolves` is the only thing standing between a
     working citation and a digest line telling an operator to repoint it at a
     different tracked file.
@@ -359,7 +457,7 @@ def test_a_resolving_citation_is_never_reported(repo):
         repo,
         CFG,
         files,
-        corroborators={"vendor/pkg/docs/index.md"},
+        run_inputs={"vendor/pkg/docs/index.md"},
     )
     assert got == []
 
@@ -369,7 +467,7 @@ def test_exempt_token_is_never_reported(repo):
     is not a defect and a suggestion for it is pure noise.
 
     Corroborated on purpose: without the exempt check the candidate would be
-    reported, so this stays discriminating. corroborators=set() would not —
+    reported, so this stays discriminating. run_inputs=set() would not —
     the finding would merely change label rather than disappear.
     """
     cfg = {"lint": {"citation_exempt_tokens": ["references/checklist.md"]}}
@@ -378,7 +476,7 @@ def test_exempt_token_is_never_reported(repo):
         repo,
         cfg,
         cr.tracked_files(repo),
-        corroborators={FULL},
+        run_inputs={FULL},
     )
     assert got == []
 
@@ -404,7 +502,7 @@ def test_example_namespace_token_is_never_reported(repo):
         repo,
         CFG,
         cr.tracked_files(repo),
-        corroborators={"docs/example/auth/session.py"},
+        run_inputs={"docs/example/auth/session.py"},
     )
     assert got == []
 
@@ -432,7 +530,7 @@ def test_gitignored_path_is_never_reported(repo):
         repo,
         CFG,
         cr.tracked_files(repo),
-        corroborators={"docs/generated/output.md"},
+        run_inputs={"docs/generated/output.md"},
     )
     assert got == []
 
@@ -477,10 +575,10 @@ def test_absolute_path_outside_repo_is_never_reported(repo):
         "exactly one candidate, or the candidate count decides this first"
     )
 
-    assert cr.diagnose(text, repo, CFG, files, corroborators=set()) == []
+    assert cr.diagnose(text, repo, CFG, files, run_inputs=set()) == []
 
 
-# --- build_corroborators: unchanged behaviour, changed role -----------------
+# --- build_run_inputs: unchanged behaviour, changed role and name -----------
 
 
 def test_rung1_admits_a_path_the_linter_validated_in_prose():
@@ -489,13 +587,14 @@ def test_rung1_admits_a_path_the_linter_validated_in_prose():
     evidence the pipeline already accepted a reference to that file."""
     full = ".claude/skills/connector-builder/references/checklist.md"
     prior = f"The checklist lives at `{full}`.\n"
-    assert cr.build_corroborators(prior, set(), {full}) == {full}
+    assert cr.build_run_inputs(prior, set(), {full}) == {full}
 
 
 def test_rung1_ignores_sites_the_linter_never_validates():
     """Frontmatter and table cells are not inline code spans in prose, so
     citation_exists never checked them. A raw substring scan would admit them
-    and stamp `corroborated` on a suggestion with no independent support."""
+    and raise a suggestion with no independent support to
+    `candidate_in_run_inputs`."""
     full = ".claude/skills/connector-builder/references/checklist.md"
     prior = (
         "---\n"
@@ -503,40 +602,41 @@ def test_rung1_ignores_sites_the_linter_never_validates():
         "---\n\n"
         f"| step | ref |\n| --- | --- |\n| 1 | {full} |\n"
     )
-    assert cr.build_corroborators(prior, set(), {full}) == set()
+    assert cr.build_run_inputs(prior, set(), {full}) == set()
 
 
 def test_rung1_ignores_a_path_named_only_inside_a_fence():
     """THE CRITICAL CASE. citation_exists strips fenced blocks on purpose —
     "fenced examples are legitimately hypothetical". A path named only inside
     a fence on the prior commit was therefore never validated, so it must not
-    raise a new page's invented citation of the same tail to `corroborated`.
+    raise a new page's invented citation of the same tail to
+    `candidate_in_run_inputs`.
     Backticked INSIDE the fence on purpose: this must fail on the fence
     itself, not merely on the absence of an inline span."""
     full = "tests/fixtures/setup_repos/js_docusaurus/.github/workflows/ci.yml"
     prior = f"Nothing is cited here.\n\n```text\ncite it as `{full}`\n```\n"
-    assert cr.build_corroborators(prior, set(), {full}) == set()
+    assert cr.build_run_inputs(prior, set(), {full}) == set()
 
 
 def test_rung1_only_admits_tracked_paths():
     """A citation the linter validated on the prior page still has to name a
     tracked file — extract_citations reports tokens, not existence."""
     prior = "See `totally/invented/thing.md` for details.\n"
-    assert cr.build_corroborators(prior, set(), {"real/file.md"}) == set()
+    assert cr.build_run_inputs(prior, set(), {"real/file.md"}) == set()
 
 
 def test_rung2_admits_the_batch_source_set():
-    got = cr.build_corroborators(None, {"a/b/c.md"}, {"a/b/c.md"})
+    got = cr.build_run_inputs(None, {"a/b/c.md"}, {"a/b/c.md"})
     assert got == {"a/b/c.md"}
 
 
 def test_rung2_excludes_an_untracked_source_path():
     """`p in files` is a real guard, not decoration. source-collector's
     `files[]` is an LLM subagent's output that nothing under scripts/ checks
-    against git, so an invented entry would otherwise stamp `corroborated` on
+    against git, so an invented entry would otherwise pin a run-input label on
     a path that is not in the repo at all."""
     assert (
-        cr.build_corroborators(None, {"invented/thing.md"}, {"real/file.md"}) == set()
+        cr.build_run_inputs(None, {"invented/thing.md"}, {"real/file.md"}) == set()
     )
 
 
@@ -549,12 +649,12 @@ def test_rung2_excludes_glob_entries():
     only the glob filter can. The second is the original manifest shape, kept
     as a regression.
     """
-    assert cr.build_corroborators(None, {"weird[x].md"}, {"weird[x].md"}) == set()
+    assert cr.build_run_inputs(None, {"weird[x].md"}, {"weird[x].md"}) == set()
     assert (
-        cr.build_corroborators(None, {"core/**", "docs/superpowers/**"}, {"core/x.md"})
+        cr.build_run_inputs(None, {"core/**", "docs/superpowers/**"}, {"core/x.md"})
         == set()
     )
 
 
-def test_no_prior_and_no_sources_corroborates_nothing():
-    assert cr.build_corroborators(None, set(), {"a/b.md"}) == set()
+def test_no_prior_and_no_sources_yields_no_run_inputs():
+    assert cr.build_run_inputs(None, set(), {"a/b.md"}) == set()

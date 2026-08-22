@@ -1567,3 +1567,146 @@ from defect 5, the seam move of defect 1, the `no_candidate` re-emission, the
 truncation and the cap of defect 4, the fence-marker strip of defect 6, the
 bare-basename failure line, the `_resolves` guard, and a label swap that the
 old substring assertion would have passed.
+
+---
+
+# Post-implementation correction 7 — round 6, and where the ratchet stops (2026-08-22)
+
+Two independent verifiers re-reviewed correction 6 and both returned
+DO_NOT_MERGE — one Critical, seven Importants, six Minors between them. Every
+finding was reproduced here before it was acted on, because reviewers on this
+branch have twice reported a real defect with the wrong stated cause.
+
+The finding *category* has changed, and that is the signal worth recording.
+Rounds 1–4 each found **a repair corrupting a page**. Rounds 5 and 6 find
+**a digest that might mislead an operator**. The architectural reversal did
+what it was supposed to do: the remaining defects are advisory-quality
+defects, none of which can turn a BLOCK into a PASS.
+
+## Fixed
+
+**1 — one pathological token destroyed the whole page's census.** `_resolves`
+reaches `(repo_root / rel).exists()`, and pathlib **re-raises** OSError for
+errno values outside its ignored set; ENAMETOOLONG is not in that set. A
+single 3000-char citation token propagated out of `diagnose` and discarded the
+local `findings` list wholesale, so every good finding that appeared **earlier
+in document order** was lost and the page produced one vague
+`citation_diagnosis_failed` line instead. The per-citation body is now wrapped;
+the token is skipped and its neighbours survive. Skipping is safe for the same
+reason the caller drops `no_candidate` — the token does not resolve, so
+`citation_exists` blocks the page and `lint_block` names that exact path.
+Pinned by `test_one_pathological_token_costs_only_itself`.
+
+**2 — the digest was bounded per page and unbounded per run.** Correction 6
+capped one page at `_CITATION_FINDINGS_CAP` and called the digest BOUNDED.
+`_format_partial_digest` joins every reason unconditionally, so N pages × 10
+findings × ~950 bytes — `label`, `cited` and `candidate` are each truncated at
+`_STDERR_TRUNCATE` **separately** — clears GitHub's 65,536-byte PR-body limit
+at roughly seven pages. That is the same defect correction 6 opened for,
+half-fixed. `_CITATION_RUN_FINDINGS_CAP` now bounds the sum, and the line that
+announces it names **no page**, so `add_partial`'s string-dedupe collapses
+every page past the cap into one line.
+
+**3 — both caps were pinned relatively, never absolutely.** Each cap test
+derived its fixture size *from the constant it was testing*, so raising either
+to an ineffective value scaled the fixture with it and the suite stayed green:
+`_CITATION_FINDINGS_CAP = 10 → 10000` and `_AMBIGUITY_CAP = 5 → 5000` both
+passed the full suite. Lowering was caught; raising was not — which leaves
+exactly the harm each constant exists to prevent unguarded. Each now carries
+one absolute assertion, with the reason for the bound in the test.
+
+**4 — the orchestrator's write-guard guarded less than it claimed to.** Its
+docstring called it "matching the module-level one"; it listed five attributes
+against the module guard's nine. `path.touch()` and `path.open("w").write(...)`
+inside `_diagnose_citation_paths` both passed the full suite while the same two
+calls inside `citation_repair` were caught. It now imports the module test's
+`_WRITE_ATTRS` rather than re-listing them. A guard that guards less than the
+one it names is worse than no guard: it reads as coverage.
+
+**5 — the classification rationale was factually wrong for one lens.** The
+docstring argued info_only from "the page blocks because `citation_exists`
+blocks it, and that block is already reported." Under a section whose
+generator is `archive-index`, CCE-124 downgrades `citation_exists` to `warn`
+and `run`'s revert fires only on `block` — so an archive page keeps its
+shortened citation, **ships**, and produces no `lint_block` line at all. For
+those pages this advisory is the only signal the operator gets. That argues
+for keeping the line, not for promoting it: the run judged nothing and
+rejected nothing, and `degraded=True` would cost auto-merge for a page the
+host deliberately chose not to gate.
+
+**6 — the durable record described a digest that does not ship.** `CLAUDE.md`
+was two commits stale: it named `corroborated`/`uncorroborated`,
+`_excluded_reason` and `build_corroborators`, all renamed in `998ad5c`, and
+listed `no_candidate` as reaching the digest when it is dropped. Both
+checkbox-driven plans under `docs/superpowers/plans/` were 100% unchecked, with
+no superseded banner, and each opens by instructing an agentic worker to build
+the capability that was deleted. Both now carry a stop banner.
+
+## Accepted, not fixed — the same-run untracked sibling
+
+The candidate search and the resolution test use different universes.
+`_resolves` accepts `rel in files or (repo_root / rel).exists()`, and the disk
+arm exists — by its own comment — to cover same-run siblings not yet added to
+git. `suffix_candidates` iterates `files` alone, which is `git ls-files`. Pages
+this run just **created** are not staged until `_stage_docs_run_changes`, far
+below the diagnosis seam.
+
+Reproduced, both shapes:
+
+- with no tracked decoy → `no_candidate` → dropped from the digest → silence;
+  `lint_block` still names the path, so the operator loses the hint, not the
+  block.
+- with a tracked decoy elsewhere in the tree → the digest suggests **the
+  decoy** while the real target is the untracked sibling. This is the sharp
+  edge: a wrong suggestion, not a missing one.
+
+**Ruling: document and pin, do not fix.** Widening the candidate universe to
+untracked on-disk state is precisely the region-the-linter-does-not-verify
+class that produced a Critical in four consecutive rounds — it is the same
+move that killed the repair, re-entering through the diagnostic. The cost is
+bounded and asymmetric: the label is `suffix_match_only`, the weakest of the
+four, whose documented meaning is "resting on the match alone," and **nothing
+acts on it**. A wrong hint an operator can check against the tree is not in
+the same class as a BLOCK silently becoming a PASS. Pinned by
+`test_a_same_run_untracked_sibling_is_a_known_blind_spot`, whose docstring
+says plainly that it records behaviour we accept rather than behaviour we
+want.
+
+## Parked, with reasons
+
+- **`scripts/citation_repair.py` repairs nothing and is still named
+  `citation_repair`.** Every `repair`/`rewrite` string inside it is correctly
+  framed as history. A rename touches 8 files for no behavioural gain; it
+  belongs in its own commit, not at the end of a six-round branch.
+- **Reason strings dedupe within `_STDERR_TRUNCATE`.** Two distinct blocked
+  citations whose reason strings agree within the first 300 characters
+  collapse into one digest line with no truncation notice. Requires a
+  ~300-character shared path stem to trigger.
+- **`cited` vs `rel` at the two use sites, and the label's truncation upper
+  bound**, are each unpinned by a test. Both argument choices are correct
+  today and diverge only for an absolute in-repo citation.
+
+## Verification
+
+Six mutations, each run against the two citation test files, restored
+byte-identically after each:
+
+| # | mutation | result |
+| - | -------- | ------ |
+| M-A | `except OSError` → `except ZeroDivisionError` | 1 failed |
+| M-B | delete the `return` after the run-cap line | **survived — see below** |
+| M-C | `_CITATION_RUN_FINDINGS_CAP` 40 → 10000 | 2 failed |
+| M-D | `_AMBIGUITY_CAP` 5 → 5000 | 1 failed |
+| M-E | insert `path.touch()` into `_diagnose_citation_paths` | 1 failed |
+| M-B′ | M-B again, against the strengthened test | 1 failed |
+
+**M-B is this round's own vacuous test, caught by mutating it.** The run-cap
+test asserted only on the `citation_shortening_suspected` lines, and deleting
+the `return` still passed — because `[:room]` already empties `shown`. What
+the `return` actually prevents is each page past the cap emitting its **own**
+`citation_diagnosis_truncated: <page>: reported 0 of 10` line, which names a
+page, so dedupe cannot collapse them and the growth the cap exists to stop
+resumes at one line per page. The test now counts **every** line the feature
+contributes, not the subset it happened to be about. That makes seven vacuous
+tests found on this branch, all the same shape: an assertion that cannot
+observe the thing its name claims.

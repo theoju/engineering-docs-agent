@@ -99,10 +99,18 @@ def test_orchestrator_has_the_expected_call_site_population():
     """Tripwire on the audit's scope. Not a hard contract — if this fails
     because sites were legitimately added or removed, re-audit the new ones
     against the spec's Classification section and update the number here in
-    the same commit that adds them."""
+    the same commit that adds them.
+
+    43 -> 44, CCE-141 round 6: `citation_diagnosis_run_cap` in
+    `_diagnose_citation_paths`. Audited info_only=True. It announces that
+    ADVISORY lines were withheld from the digest once the run-wide findings cap
+    was reached; no page was judged and none was rejected, and the run's data
+    quality is unchanged. Promoting it would cost auto-merge through CCE-140's
+    `partial and not advance_cursor_backed` gate for a line about the length of
+    a suggestion list."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 43, (
-        f"expected 43 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 44, (
+        f"expected 44 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
     # 42 -> 43: CCE-141 round 5 added `citation_diagnosis_truncated` in

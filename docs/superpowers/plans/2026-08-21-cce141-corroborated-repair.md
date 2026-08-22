@@ -1,5 +1,23 @@
 # CCE-141 Corroborated Repair Implementation Plan
 
+> # ⛔ SUPERSEDED — DO NOT EXECUTE THIS PLAN
+>
+> Every unchecked step below builds a capability that **was deliberately
+> deleted**. CCE-141 shipped as **detection only**: `citation_repair.diagnose`
+> reports the tracked file a blocked citation was probably shortened from and
+> stops. There is no `repair_text`, no `rewrite_token`, and no `Path.write_text`
+> in the module — and there must never be one again.
+>
+> The rewrite was withdrawn after four adversarial review rounds produced four
+> Criticals, each the same class in a new disguise: a repair moving a citation
+> into a region `citation_exists` does not verify, so a BLOCK became a silent
+> PASS and the page was never re-checked — against a measured production value
+> of **zero firings** across the whole archived record.
+>
+> Authority: the design spec's Revision 3
+> (`docs/superpowers/specs/2026-08-21-cce141-citation-path-repair-design.md`)
+> and `CLAUDE.md`. This file is kept only as the record of what was tried.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make corroboration the entry condition for citation repair, so repair can never introduce a reference to a file the pipeline had not already accepted a reference to — and make every declined repair loud enough to act on.

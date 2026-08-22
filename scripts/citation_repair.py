@@ -342,15 +342,28 @@ def diagnose(
 
     findings: list[tuple[str, str, str]] = []
     for cited in extract_citations(text)["paths"]:
-        rel = _relativize(cited, repo_root)
-        if rel is None:
-            continue
-        if _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
-            continue
-        if _is_excluded(cited, rel, repo_root, exempt, prefixes):
+        try:
+            rel = _relativize(cited, repo_root)
+            if rel is None:
+                continue
+            if _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
+                continue
+            if _is_excluded(cited, rel, repo_root, exempt, prefixes):
+                continue
+
+            candidates = suffix_candidates(rel, files)
+        except OSError:
+            # One pathological token costs only itself. `_resolves` reaches
+            # `(repo_root / rel).exists()` and pathlib RE-RAISES OSError for
+            # errno values outside its ignored set — ENAMETOOLONG among them —
+            # so a single 3000-char token propagated out of this function and
+            # discarded `findings` wholesale, losing every good finding that
+            # appeared EARLIER on the same page. Skipping just this token is
+            # safe for the same reason the caller drops `no_candidate`: the
+            # token does not resolve, so `citation_exists` blocks the page and
+            # `lint_block` names this exact path, with severity.
             continue
 
-        candidates = suffix_candidates(rel, files)
         if not candidates:
             findings.append((cited, "", "no_candidate"))
         elif len(candidates) > 1:

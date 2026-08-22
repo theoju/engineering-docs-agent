@@ -271,6 +271,27 @@ def test_source_paths_has_no_default():
     assert sig.parameters["source_paths"].default is inspect.Parameter.empty
 
 
+def _write_attrs() -> set[str]:
+    """The module-level guard's attribute set, imported rather than re-listed.
+
+    This test used to spell its own, four names SHORTER — `writelines`,
+    `write`, `touch` and `mkdir` were missing — so `path.touch()` and
+    `path.open("w").write(...)` inside `_diagnose_citation_paths` both passed
+    the full suite while the same two calls inside `citation_repair` were
+    caught. A guard that guards less than the one it claims to match is worse
+    than no guard: it reads as coverage. Loaded by path because the two test
+    files are not an importable package.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_cr_module_test", Path(__file__).with_name("test_citation_repair.py")
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod._WRITE_ATTRS
+
+
 def test_the_diagnostic_never_writes_a_page():
     """Source-level pin on the orchestrator half, matching the module-level one
     in test_citation_repair.py. `path.write_text(new_text)` lived here in
@@ -284,7 +305,7 @@ def test_the_diagnostic_never_writes_a_page():
         for n in ast.walk(tree)
         if isinstance(n, ast.Call)
         and isinstance(n.func, ast.Attribute)
-        and n.func.attr in {"write_text", "write_bytes", "rename", "replace", "unlink"}
+        and n.func.attr in _write_attrs()
     ]
     assert writes == [], f"the diagnostic must not mutate anything: {writes}"
 
@@ -636,3 +657,61 @@ def test_a_diagnosis_failure_names_the_page_by_its_repo_relative_label(repo):
     assert any("docs/b/index.md" in r for r in failures), failures
     assert all(boom not in r for r in failures), "str(exc) reached state untruncated"
     assert all(len(r) < 2 * runner._STDERR_TRUNCATE for r in failures), failures
+
+
+def test_the_run_wide_cap_bounds_what_reaches_the_pr_body(repo):
+    """ROUND 6. The per-page cap bounds ONE page and says nothing about their
+    sum — and it is the sum that reaches the PR body.
+
+    `_format_partial_digest` joins every reason unconditionally, so N pages x
+    `_CITATION_FINDINGS_CAP` findings x ~950 bytes (label, cited and candidate
+    are truncated at `_STDERR_TRUNCATE` SEPARATELY) clears GitHub's 65,536-byte
+    limit at roughly seven pages. Round 5 called the digest BOUNDED after
+    fixing only the per-page half.
+    """
+    per_page = runner._CITATION_FINDINGS_CAP
+    pages = (runner._CITATION_RUN_FINDINGS_CAP // per_page) + 2
+    _commit(repo, [f"pkg/f{i:03d}/x.md" for i in range(pages * per_page)])
+    state = _state()
+
+    i = 0
+    for pg in range(pages):
+        page = repo / f"page{pg}.md"
+        page.write_text("".join(f"See `f{i + k:03d}/x.md`.\n" for k in range(per_page)))
+        i += per_page
+        runner._diagnose_citation_paths(page, repo, {}, state, source_paths=set())
+
+    assert len(_suspected(state)) == runner._CITATION_RUN_FINDINGS_CAP
+
+    # EVERY line the feature contributes, not just the findings. Asserting on
+    # the `suspected` subset alone was vacuous: deleting the `return` that
+    # follows the run-cap line still passed, because `[:room]` already empties
+    # `shown` — while each page past the cap went on to emit its OWN
+    # `citation_diagnosis_truncated: <page>: reported 0 of 10` line, which
+    # names a page, so `add_partial`'s dedupe cannot collapse them and the
+    # growth the cap exists to stop resumes one line per page.
+    lines = [
+        r
+        for r in state["current_run"]["partial_reasons"]
+        if r.startswith("citation_")
+    ]
+    assert len(lines) == runner._CITATION_RUN_FINDINGS_CAP + 1, lines
+    # The +1: exactly one run-cap line. It names no page precisely so that
+    # `add_partial`'s string-dedupe collapses every page past the cap into it.
+    assert lines[-1].startswith("citation_diagnosis_run_cap: "), lines[-1]
+    body = runner._format_partial_digest(state["current_run"]["partial_reasons"])
+    assert len(body.encode()) < 65_536, len(body.encode())
+
+
+def test_the_citation_caps_are_bounded_in_absolute_terms():
+    """Both cap tests derive their fixture size FROM the constant, so raising
+    either to an ineffective value scales the fixture with it and the suite
+    stays green: `_CITATION_FINDINGS_CAP = 10 -> 10000` and `_AMBIGUITY_CAP =
+    5 -> 5000` were each mutation-verified to pass the FULL suite. Lowering is
+    caught; raising was not. These are the absolute assertions, and they carry
+    the reason each bound exists.
+    """
+    # A per-page wall an operator skips instead of reads.
+    assert runner._CITATION_FINDINGS_CAP <= 20
+    # ~950 bytes per line against GitHub's 65,536-byte PR-body limit.
+    assert runner._CITATION_RUN_FINDINGS_CAP * 1000 < 65_536

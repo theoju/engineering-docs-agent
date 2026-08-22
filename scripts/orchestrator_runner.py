@@ -1589,6 +1589,15 @@ def _prior_page_text(repo_root: Path, path: Path) -> str | None:
 # count withheld is always reported alongside — see `_diagnose_citation_paths`.
 _CITATION_FINDINGS_CAP = 10
 
+# CCE-141: and how many the whole RUN may put there. The per-page cap bounds
+# one page; nothing bounded the sum, and `_format_partial_digest` joins every
+# reason unconditionally (`lines.extend(f"- {r}" ...)`), so N pages x 10
+# findings x ~950 bytes — `label`, `cited` and `candidate` are each truncated
+# at `_STDERR_TRUNCATE` SEPARATELY — clears GitHub's 65,536-byte PR-body limit
+# at roughly seven pages. Bounding one page and then calling the digest
+# BOUNDED was the same half-measure this feature exists to fight.
+_CITATION_RUN_FINDINGS_CAP = 40
+
 
 def _diagnose_citation_paths(
     path: Path, repo_root: Path, config: dict, state: dict, source_paths: set[str]
@@ -1620,6 +1629,17 @@ def _diagnose_citation_paths(
     reason in `partial_reasons` and still emits it to stderr, so advisory is
     not silent.
 
+    ONE PATH BREAKS THAT RATIONALE, and info_only is still right there. Under
+    a section whose generator is `archive-index`, CCE-124 downgrades
+    `citation_exists` to severity `warn`, and `run`'s revert fires only on
+    `block` — so an archive page keeps its shortened citation, SHIPS, and
+    produces no `lint_block` line at all. For those pages the sentence above
+    is false: there is no block to double-count, and this advisory is the only
+    signal the operator gets. That argues for keeping the line, not for
+    promoting it: the page shipped, the run judged nothing and rejected
+    nothing, and turning a shipped-page advisory into `degraded=True` would
+    cost auto-merge for a page the host deliberately chose not to gate.
+
     `source_paths` is the page's own batch grounding set and is REQUIRED. It
     is rung 2 of `citation_repair.build_run_inputs`, which is what separates a
     confidently-labelled suggestion from a bare one; a default would let an
@@ -1650,7 +1670,9 @@ def _diagnose_citation_paths(
     GitHub's 65,536 limit. Findings per page are additionally capped at
     `_CITATION_FINDINGS_CAP`, and the count withheld is REPORTED — a silently
     truncated digest reads as a complete one, which is the exact failure this
-    work exists to fight.
+    work exists to fight. Findings are bounded a SECOND time across the whole
+    run at `_CITATION_RUN_FINDINGS_CAP` — the per-page cap bounds one page and
+    says nothing about their sum, and it is the sum that reaches the PR body.
 
     `label` is used in BOTH lines, including the failure line, which used a
     bare `path.name`. `add_partial` dedupes identical strings, so
@@ -1686,7 +1708,25 @@ def _diagnose_citation_paths(
         )
         findings = citation_repair.diagnose(text, repo_root, config, files, run_inputs)
         reportable = [f for f in findings if f[2] != "no_candidate"]
-        shown = reportable[:_CITATION_FINDINGS_CAP]
+        already = sum(
+            1
+            for r in state.get("current_run", {}).get("partial_reasons", ())
+            if r.startswith("citation_shortening_suspected: ")
+        )
+        room = max(0, _CITATION_RUN_FINDINGS_CAP - already)
+        if reportable and room == 0:
+            # Deliberately names no page. Naming them is what grows without
+            # bound, and `add_partial` dedupes identical strings, so every
+            # page past the run cap collapses into this single line.
+            add_partial(
+                state,
+                "citation_diagnosis_run_cap: reached the run limit of "
+                f"{_CITATION_RUN_FINDINGS_CAP} citation findings; later "
+                "pages' findings are withheld from this digest",
+                info_only=True,
+            )
+            return
+        shown = reportable[:_CITATION_FINDINGS_CAP][:room]
         for cited, candidate, confidence in shown:
             add_partial(
                 state,

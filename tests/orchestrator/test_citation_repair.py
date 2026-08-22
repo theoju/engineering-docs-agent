@@ -658,3 +658,83 @@ def test_rung2_excludes_glob_entries():
 
 def test_no_prior_and_no_sources_yields_no_run_inputs():
     assert cr.build_run_inputs(None, set(), {"a/b.md"}) == set()
+
+
+def test_one_pathological_token_costs_only_itself(repo):
+    """ROUND 6. `_resolves` reaches `(repo_root / rel).exists()`, and pathlib
+    RE-RAISES OSError for errno values outside its ignored set — ENAMETOOLONG
+    among them. The exception propagated out of `diagnose` and discarded the
+    local `findings` list wholesale, so ONE 3000-char token destroyed the whole
+    page's census, including good findings that appeared EARLIER in document
+    order. The page label survived; every finding did not.
+    """
+    (repo / "pkg/weird").mkdir(parents=True)
+    (repo / "pkg/weird/notes.md").write_text("# notes\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "second")
+    text = (
+        "See `references/checklist.md`.\n"
+        "And `a/" + "b" * 3000 + ".md`.\n"
+        "And `weird/notes.md`.\n"
+    )
+
+    got = cr.diagnose(text, repo, CFG, cr.tracked_files(repo), set())
+
+    # The findings on either side of the pathological token both survive; only
+    # the token itself is dropped.
+    assert got == [
+        ("references/checklist.md", FULL, "suffix_match_only"),
+        ("weird/notes.md", "pkg/weird/notes.md", "suffix_match_only"),
+    ], got
+
+
+def test_a_same_run_untracked_sibling_is_a_known_blind_spot(repo):
+    """ROUND 6, PINNED AS A LIMITATION — this is not the behaviour we want, it
+    is the behaviour we accept, and the test exists so a future reader meets it
+    deliberately rather than by surprise.
+
+    The candidate search and the resolution test use different universes.
+    `_resolves` accepts `rel in files or (repo_root / rel).exists()` — the disk
+    arm covers same-run siblings not yet added to git — while
+    `suffix_candidates` iterates `files` alone (`git ls-files`). A page this
+    run just CREATED is therefore invisible as a candidate, so a citation
+    shortened to a same-run sibling names a TRACKED decoy elsewhere in the tree
+    instead of the real target.
+
+    Not fixed, and the reason is the ticket's whole history: widening the
+    candidate universe to untracked disk state is precisely the
+    region-the-linter-does-not-verify class that produced a Critical in four
+    consecutive review rounds. The cost is bounded — the label is
+    `suffix_match_only`, the weakest of the four, whose documented meaning is
+    "resting on the match alone" — and nothing acts on it.
+    """
+    decoy = repo / "vendor/mirror/connectors/bar.md"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text("# decoy\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "decoy")
+    real = repo / "docs/site-src/core/connectors/bar.md"
+    real.parent.mkdir(parents=True)
+    real.write_text("the real target, written this run, not yet tracked\n")
+
+    got = cr.diagnose(
+        "The bar connector is documented at `connectors/bar.md`.\n",
+        repo,
+        CFG,
+        cr.tracked_files(repo),
+        set(),
+    )
+
+    assert got == [
+        ("connectors/bar.md", "vendor/mirror/connectors/bar.md", "suffix_match_only")
+    ], got
+
+
+def test_the_ambiguity_cap_is_bounded_in_absolute_terms():
+    """`test_the_ambiguous_candidate_list_is_capped_and_says_so` sizes its
+    fixture from the constant, so `_AMBIGUITY_CAP = 5 -> 5000` passes the FULL
+    suite. Lowering is caught, raising was not. The bound exists because a
+    one-segment tail matches hundreds of paths on a real host, and an unbounded
+    join drowns every other reason in the run.
+    """
+    assert cr._AMBIGUITY_CAP <= 10

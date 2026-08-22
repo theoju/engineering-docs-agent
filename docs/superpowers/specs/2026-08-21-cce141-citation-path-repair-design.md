@@ -269,6 +269,13 @@ its own reason string (`candidate_exempt_token`, `candidate_example_namespace`,
 from a plain `uncorroborated` decline. One predicate helper,
 `_excluded_reason`, serves both ends — there is no second copy.
 
+**Superseded on the candidate side (2026-08-21, correction 4).** This table is a
+blacklist, and a blacklist enumerates only what someone thought of. It went on to
+miss two more rows — a candidate the linter cannot PARSE, and a candidate under
+the mkdocs build dir — with the same consequence each time. The candidate side is
+now a positive verifiability gate; the table still governs the CITED token
+unchanged. See "Post-implementation correction 4".
+
 ## Placement
 
 A new `_repair_citation_paths(target_path, repo_root, config, files)` runs in
@@ -461,6 +468,28 @@ least one corroborator the agent did not author. `evidence.files_read` is
 deliberately **excluded** as a source: an author that confabulates a citation can
 equally confabulate a files_read entry.
 
+> **Post-implementation correction (2026-08-21, fourth adversarial review).**
+> The mechanism named in the paragraph above is **false on the reference host**,
+> and the ladder's rung-2 "Authored by: **the orchestrator**" cell overstates the
+> provenance. Both are corrected in correction 5 below. The text stays as
+> written.
+>
+> `_enforce_agent_frontmatter` runs only under `if agent_fields is not None`
+> (`orchestrator_runner.py:2454`), and `agent_fields` is set only when
+> `action == "create"` **and**
+> `fmc.section_generator_for(rel, config) == "agent-authored"`
+> (`orchestrator_runner.py:2384-2386`). The reference host's
+> `.engineering-docs-agent/config.yml` declares **no `site:` block at all**, so
+> `section_generator_for` returns `None`, `agent_fields` stays `None`, and that
+> call never runs there.
+>
+> The **conclusion** survives, by a different mechanism than the one stated: on
+> a create, corroboration comes from `source_paths=grounding` being handed to
+> `build_corroborators` directly (`orchestrator_runner.py:1608`), never from
+> reading a page's frontmatter back. `extract_citations` does not see
+> frontmatter in any case, so a prior page's `source_files` could not be a
+> rung-1 corroborator even on a host where enforcement does run.
+
 **Globs are excluded from corroboration.** `docs/site-src/.doc-core-manifest.json`
 carries glob `source_files` (`core/**`, `docs/superpowers/**`). Expanding them
 would make the gate ceremony while the diff still reads `if candidate in
@@ -635,3 +664,499 @@ restored the block-becomes-pass defect), names all three miss-buckets including
 the link-target-only one it had dropped, states the segment floor as a property
 of `_REPO_PATH_RE` rather than a guard, and records the candidate-side
 exclusions and the `splitlines()` fence mirror.
+
+---
+
+# Post-implementation correction 4 — the candidate blacklist becomes a gate (2026-08-21)
+
+**Status:** correction, applied in code, in this spec and in `CLAUDE.md`
+**Reason:** the candidate-side exclusion list missed a third and a fourth row.
+
+Correction 3 fixed the candidate side by applying the cited-side exclusion table
+to both ends of a repair. That was the right direction and the wrong shape. The
+table is a **blacklist** of the classes `citation_exists` declines to check, and
+a blacklist can only ever enumerate what someone thought of.
+
+## The two rows it missed
+
+Both share one shape: **repair moves the citation into a region the linter does
+not verify, so the page flips from BLOCK to `ok` and is never checked again.**
+Both were reproduced end to end through `repair_text`, and in both the target
+file was then `git rm`-ed and `check_path` still answered `(True, 'ok')`.
+
+| miss | fixture | before | after repair |
+| ---- | ------- | ------ | ------------ |
+| candidate the extractor cannot PARSE | tracked `app/(marketing)/guides/setup.md`, page cites `guides/setup.md` | `(False, "cites nonexistent path 'guides/setup.md'")` | `(True, 'ok')`, and `extract_citations(page)["paths"] == []` |
+| candidate under the mkdocs build dir | `mkdocs.yml` with `site_dir: site`, tracked `site/refs/notes.md`, page cites `refs/notes.md` | `(False, "cites nonexistent path 'refs/notes.md'")` | `(True, 'ok')` |
+
+The first is `_REPO_PATH_RE`, which admits only `[\w.\-/]`: a tracked candidate
+containing a space, `(`, `)`, `@`, `+`, `~`, `,` or `&` clears rung 2's
+`_GLOB_CHARS` filter, gets written into the page, and is then not SEEN by
+`extract_citations` at all. Bracketed and parenthesised route paths are ordinary
+— this repo's own reference host tracks `app/dimensions/[id]/page.tsx` and
+`app/tips/[n]/page.tsx`.
+
+The second is the first arm of `_resolves`, which returns True for ANY path under
+`site_dir` **with no existence check whatsoever** — structurally identical to the
+`example/` namespace, and `repair_text` was already computing `build_dir` for the
+cited side without consulting it for candidates.
+
+## The gate
+
+A candidate is acceptable only if, once written into the page, `citation_exists`
+would both **SEE** it and verify it **BY EXISTENCE**. Both properties are
+established by asking the linter, not by re-deriving its rules:
+
+- **Seen** — `_extractor_sees` round-trips the candidate through
+  `extract_citations` in the span `rewrite_token` would write. That inherits
+  `_INLINE_CODE_RE`, `_REPO_PATH_RE`, `_is_placeholder` and any future extractor
+  change for free.
+- **Verified by existence, not by a skip class** — `_resolves_absent` runs the
+  linter's own `_resolves` against a world where the file is gone (an EMPTY repo
+  root, and the tracked set minus the candidate) with the path string untouched.
+  Three of the four arms of `_resolves` test existence — of the path itself, or
+  of it rebased under `docs_dir` or a declared source root. The `build_dir` arm
+  does not, and it is the one that bites today. The probe catches the next such
+  arm too, without this module being told about it.
+- **The classes check_path skips in its own branch structure** — exempt token,
+  `example/` prefix, gitignored, `_relativize` None — stay NAMED rather than
+  probed, because they live in branches rather than in a resolution result and
+  because each earns its own digest reason.
+- **Anything else** — `_linter_reports_an_absent_file` asks `check_path` itself
+  whether it would report an absent file in the candidate's directory, with the
+  candidate's extension. This is the fail-closed catch-all: a cause nobody
+  anticipated declines instead of shipping.
+
+Reasons, in the order the gate applies them. The first four are unchanged from
+correction 3, so operator greps of the digest keep working:
+
+| reason | cause |
+| ------ | ----- |
+| `candidate_outside_repo` | `_relativize`: not a repo-relative path |
+| `candidate_exempt_token` | host declared this exact token unverifiable |
+| `candidate_example_namespace` | reserved illustrative namespace |
+| `candidate_gitignored` | ignored by design; CCE-145 downgrades it to a note |
+| `candidate_unextractable` | the linter's extractor does not return it |
+| `candidate_unresolvable` | it does not resolve at all |
+| `candidate_unverified_namespace` | resolves without its existence being tested |
+| `candidate_unverified` | `check_path` would not report an absent file here; cause unknown |
+
+## Why a twin path, and what it costs
+
+The catch-all asks about a TWIN — same directory, same extension, a filename stem
+that cannot exist — because the candidate itself exists, so asking about it
+directly could only ever return `ok`. The twin is asked against the **real** repo
+root, so `mkdocs.yml`, `.gitignore` and git are the host's own.
+
+Reconstructing an absent WORLD instead (a scratch root plus copies of whichever
+files `check_path` happens to read) was rejected for failing **open**: the first
+file the copy list had not been told about would go missing, missing files
+produce more blocking, and more blocking is exactly what the gate reads as
+"verified".
+
+Two residuals, both accepted and both in the safe direction:
+
+- A skip keyed on the exact filename **stem** evades the twin. Those are the
+  enumerable kind — `lint.citation_exempt_tokens` is one — and they are named
+  above it. Measured: deleting the named-class branch makes the exempt-token and
+  gitignored tests repair rather than decline, which is precisely this residual,
+  and is why the named classes are kept rather than folded into the probe.
+- The twin can decline a candidate the linter would really verify: a
+  `.gitignore` that ignores the directory and re-admits this one file by
+  negation. A false decline leaves the page blocking, which is where it already
+  was.
+
+## Coverage
+
+Five tests, all through `repair_text`, all mutation-checked (delete or invert the
+guard the test names, confirm the test FAILS, restore, confirm it PASSES):
+
+- `test_candidate_the_extractor_cannot_parse_is_declined` — miss 1's fixture.
+- `test_candidate_with_a_placeholder_marker_is_declined_despite_corroboration` —
+  the fail-closed property on the extractor half, reached through a DIFFERENT
+  extractor rule (`_is_placeholder`), with corroboration present.
+- `test_candidate_under_the_mkdocs_build_dir_is_declined` — miss 2's fixture.
+- `test_candidate_outside_the_build_dir_is_still_repaired` — the build-dir probe
+  must discriminate, not blanket-decline.
+- `test_a_cause_the_gate_does_not_name_fails_closed` — the catch-all, with
+  `check_path` patched to answer `ok` on an otherwise perfect repair.
+
+Fixture guards are asserted inline in each: the candidate is tracked, the cited
+token does not resolve, `suffix_candidates` returns exactly one, and — for the
+build-dir tests — `_build_dir(repo) == "site"`, without which the arm under test
+is inert and the test is vacuous.
+
+---
+
+# Post-implementation correction 4 — the fence mirror, and three untested guards (2026-08-21)
+
+**Status:** correction, applied in code, tests and `CLAUDE.md`
+**Reason:** a third adversarial review of what shipped.
+
+Correction 3 above says the fence mirror "is real now". **It was not.** That
+sentence, and the docstring it was drawn from, stay exactly as written — being
+wrong three times about the same twenty lines is the useful part of this record.
+
+## The mirror recorded only CLOSED fences, and that is not what the linter does
+
+`_closed_fence_lines` walked `splitlines()` correctly after correction 3, but it
+recorded a fence's lines only once the fence CLOSED. `strip_fenced_blocks` does
+something different with a fence that never closes: it `continue`s past the
+opener before appending it, so the opener is dropped, and the
+`del out[fence_start:]` that would cut the body back out never runs because
+nothing was appended for it to cut. **An unterminated fence loses its opener and
+keeps its body.** The mirror reported neither.
+
+Both halves were observable with no mutation at all:
+
+- ` ```python\nprose `refs/x.md`\n ` — `strip_fenced_blocks` returns
+  `` 'prose `refs/x.md`' `` (the opener is gone), the linter-dropped source
+  index is `[0]`, and `_closed_fence_lines` returned `[]`.
+- ` ~~~ see `refs/x.md`\nbody\n ` — `extract_citations(text)["paths"] == []`,
+  the linter reads NOTHING; `rewrite_token` rewrote it anyway.
+
+The second is the harm: the page is edited at a site `citation_exists` cannot
+see, so `repair_text` reports a repair that the rule meant to police it will
+never check. It is the report/apply divergence this module forbids, inverted.
+
+## The fix: stop maintaining a parallel implementation
+
+`_linter_dropped_lines` replaces `_closed_fence_lines`. It RUNS
+`strip_fenced_blocks` and reads back which source lines survived, so the answer
+is the linter's by construction and any future fence rule — a new syntax, a
+different unterminated policy — is inherited rather than re-implemented.
+
+Reading survivors back needs each line to be identifiable by a tag that does not
+perturb the function being measured. The tag is a fixed-width binary index code
+written in **leading whitespace**, tab for 1 and space for 0, prepended to each
+line. `strip_fenced_blocks` computes `stripped = line.lstrip()` once and every
+branch it takes reads only `stripped`, so leading whitespace is discarded before
+any decision is made — `(code + line).lstrip()` is `line.lstrip()`, character for
+character — while the function appends the ORIGINAL line to its output, so the
+code survives into the result. Neither tab nor space is a `splitlines()`
+boundary, so the code cannot forge a line break either.
+
+An APPENDED marker was written first and rejected. It reads identically today,
+but only because `fence` is `stripped[:3]`; the moment fence matching considered
+the whole opener — full info strings, which is what CommonMark actually
+specifies — an appended marker would silently stop two identical fences from
+matching. That was not hypothetical: it was caught by mutating `stripped[:3]`
+to `stripped` and watching unrelated bare-fence tests go red.
+
+Two self-checks make the derivation verified rather than merely argued, because
+a silent misalignment here is exactly the forbidden outcome:
+
+1. Each survivor must decode to a well-formed index whose body is that source
+   line — the `strip_fenced_blocks` appends-verbatim contract.
+2. The surviving bodies, rejoined, must equal `strip_fenced_blocks` of the
+   UNMARKED text — the marker-neutrality contract. This is what catches a marker
+   that has stopped being invisible: the two runs would keep different lines.
+
+Both raise rather than guess, the same choice `_resolves` makes by refusing to
+default its `roots` parameter.
+
+**The invariant, now asserted directly:** repair rewrites a line **if and only
+if** the linter reads that line. `FENCE_SHAPES` states it as a table of ten
+fence shapes. It is a regression guard on the derivation, not a probe of
+`strip_fenced_blocks` — it holds trivially while the dropped set is derived from
+the linter, and `opener_carries_the_citation` is the row that fails against the
+closed-fence mirror it replaced.
+
+## Info-string fences had no coverage at all
+
+Every fence opener in the rewrite tests was bare. ` ```python ` closes against a
+bare ` ``` ` only because `strip_fenced_blocks` truncates both sides to three
+characters, and the mirror carried its own copy of that truncation: mutating
+**the mirror's** `stripped[:3]` to `stripped` left the whole suite green while
+making the fenced illustration rewritable. Reconstructed pre-fix, on
+`` See `refs/x.md`.\n\n```python\ncite it as `refs/x.md`\n```\n ``: the mirror
+reports `[2, 3, 4]` truncated and `[]` untruncated, so the fenced line 3 becomes
+rewritable while the linter cannot read it.
+
+The mirror's copy is gone with the mirror. `test_rewrite_skips_a_closed_info_string_fence`
+and its `~~~yaml` sibling now discriminate on the LINTER's truncation. Worth
+recording precisely: `test_rung1_ignores_a_path_named_only_inside_a_fence`
+already used a ` ```text ` fence and already discriminated on the linter's copy,
+so "no test anywhere uses an info-string fence" was true of the rewrite path
+only.
+
+## `test_absolute_path_outside_repo_is_never_repaired` was the fifth vacuous test
+
+It named `if rel is None: continue` but `/etc/nginx/nginx.conf` yields ZERO
+suffix candidates — an absolute path's leading `/` makes `segments[0]` empty and
+no `git ls-files` path has an empty first segment — so `len(candidates) != 1`
+decided it first. Mutating the named guard to `rel = cited` left the suite green;
+only total deletion turned it red, via an incidental `TypeError` from
+`repo_root / None`. It proved "no crash", not "never repaired", and its docstring
+claimed the opposite.
+
+Rebuilt rather than deleted. The guard is load-bearing — deleting it crashes the
+run — and the candidate-side sibling tests a different call site. Making it
+DECIDE requires an injected candidate with an empty path segment
+(`vendor//etc/__cr_absent__/thing.conf`), which git cannot emit; the docstring
+says so and rests the test on the same parameter-contract framing the
+candidate-side sibling already uses, since `files` is a parameter of
+`repair_text` rather than git's output. Every earlier guard is asserted inline.
+The cited path must also be guaranteed ABSENT from the test machine, because
+`repo_root / "/abs/path"` is `/abs/path` and `_resolves`'s on-disk arm would
+otherwise answer True on some runners and not others — re-vacuuming the test
+non-deterministically.
+
+## The `.strip()` in `_sub`'s equality test
+
+`extract_citations` strips each inline-code token before matching, so
+`` ` references/checklist.md ` `` IS a citation it extracts and `repair_text`
+repairs. Mutating `_SUFFIX_RE.sub("", token.strip())` to
+`_SUFFIX_RE.sub("", token)` left the suite green while producing the forbidden
+divergence directly: `repairs` non-empty, page untouched.
+`test_a_padded_inline_span_is_both_reported_and_applied` asserts the applied
+text, not only the report, and checks that the padding survives and a second
+pass is a no-op.
+
+## There are EIGHT splitlines()-only characters, not six
+
+`\x1d` (GS) and `\x1e` (RS) were omitted from correction 3's list, from both
+docstrings, from the `SPLITLINES_ONLY` test constant and from the `CLAUDE.md`
+bullet. Re-derived rather than copied: every codepoint below U+3000 was written
+to a file as UTF-8, read back with `Path.read_text()`, and kept when it BOTH
+survived that round trip AND split `"a<ch>b"` in two under `splitlines()`. The
+survivors are U+2028, U+2029, `\x85`, `\x0b`, `\x0c`, `\x1c`, `\x1d`, `\x1e`
+(plus `\n` itself; `\r` is normalised away by `read_text`).
+
+The shipped code was always correct — `splitlines()` handles all eight
+uniformly — so this was a documentation and test-completeness gap, not a defect.
+It is still worth closing: a character absent from the fixtures is a character a
+lossy rejoin could normalise with nothing to catch it. Measured by normalising
+ONLY `\x1d` and `\x1e` on the way out: red against the eight-character fixtures,
+green against the six-character ones.
+
+## Coverage added this round
+
+All mutation-checked (delete or invert the guard the test names, confirm FAIL,
+restore, confirm PASS):
+
+- `test_rewrite_never_touches_the_dropped_opener_of_an_unterminated_fence` — the
+  ghost repair; fails against the closed-fence mirror.
+- `test_rewrite_applies_inside_the_body_of_an_unterminated_fence` — the other
+  half, rebuilt from a test whose docstring asserted the false claim; fails
+  against a mirror that over-drops to EOF.
+- `test_rewrite_skips_a_closed_info_string_fence` and its `~~~yaml` sibling —
+  the `stripped[:3]` truncation.
+- `test_rewrite_touches_a_line_iff_the_linter_reads_it` — ten fence shapes.
+- `test_a_broken_strip_fenced_blocks_contract_fails_loudly` and
+  `test_a_marker_that_perturbs_the_linter_fails_loudly` — the two self-checks.
+- `test_absolute_path_outside_repo_is_never_repaired` — rebuilt.
+- `test_a_padded_inline_span_is_both_reported_and_applied` — the `.strip()`.
+
+---
+
+# Post-implementation correction 5 — rung 2's provenance, and what rung 1's narrowing cost (2026-08-21)
+
+**Status:** correction, applied in `scripts/citation_repair.py`'s docstring, in
+this spec and in `CLAUDE.md`
+**Reason:** a fourth adversarial review, plus two reviewers who contradicted each
+other about the same call site.
+
+The two sections above are both numbered **4**. They are left exactly as they
+are — renumbering the record to tidy it is the one edit this file never makes.
+
+## Rung 2 is not "orchestrator-authoritative". It is a DIFFERENT AGENT.
+
+`build_corroborators` documented rung 2 as **orchestrator-authoritative** while
+the module's doctrine is that a candidate must be vouched for by *a source the
+authoring agent did not write* — the doctrine that explicitly rejects
+`evidence.files_read` because "an author that confabulates a citation can equally
+confabulate a files_read entry." Traced end to end, the label is wrong:
+
+| step | where |
+| ---- | ----- |
+| `source_paths` is `grounding` | `orchestrator_runner.py:2466` → `:1608` |
+| `grounding = _pr_changed_files(batch_prs)` | `orchestrator_runner.py:2372` |
+| `_pr_changed_files` reads `pr["files"]` verbatim | `orchestrator_runner.py:1680-1683` |
+| `batch_prs` ⊆ `prs` from `dispatch_validated("source-collector", …)` | `orchestrator_runner.py:2048-2050` |
+| source-collector is an LLM subagent | `agents/source-collector.md` (`model: sonnet`, tools `Bash`/`Read`/`WebFetch`) |
+| its schema types `files` as a bare untyped array | `agents/schemas/source_collector.schema.json:22` — `"files": { "type": "array" }`, no `items` |
+
+Grepping `scripts/` for any git-side validation of `pr["files"]` finds none. The
+one orchestrator-side git safety net on source-collector output,
+`_clip_prs_to_window` (`orchestrator_runner.py:974`), validates `merge_sha`
+against `git rev-list` and never reads `files`. `GhClient.pr_view_files`
+(`scripts/gh_client.py:23-27`) does ask `gh` for a PR's real file list, but its
+only caller is `scripts/verify_runner.py:40` — a different stage, off this path.
+
+**What is and is not true.** The doctrine holds *literally*: source-collector is
+not the **authoring** agent, so a `page-author` that confabulates a citation
+cannot also mint the corroborator that would rescue it. That is the whole
+property rung 2 was designed for, and it survives.
+
+**The residual, stated so it can be acted on.** A confabulating — or simply
+sloppy — source-collector *can* mint one. An invented entry in `pr["files"]`
+flows unchecked into `grounding` and becomes a corroborator.
+
+**The bound, and where it is enforced.** A corroborator must be a **tracked**
+file, and that bound is in code twice, not merely in the design:
+
+- `scripts/citation_repair.py`, `build_corroborators`: `p in files`.
+- `scripts/citation_repair.py`, `suffix_candidates`: it iterates `files`, so
+  every candidate is a tracked path before corroboration is even consulted.
+
+`files` is `git ls-files` — `citation_exists.tracked_files`
+(`scripts/lint/citation_exists.py:183-189`), called at
+`orchestrator_runner.py:1607` and passed to both. So an injected path can only
+repoint a citation at some **other file that really is in the repo**; it can
+never introduce an untracked or nonexistent one, and set-invariance against
+*nonexistent* files is intact. What it loses is the narrowing: rung 2 widens
+from a batch's honest 5–15 files to any of this host's **887** tracked files.
+That is a widening of the confabulation surface, not a hole in the invariant,
+and it is the number to quote when someone asks how much rung 2 actually buys.
+
+The false label is removed from the docstring, which now names the chain, the
+residual and the bound.
+
+## Two reviewers contradicted each other. Reviewer A was right.
+
+One reviewer reported that `_enforce_agent_frontmatter` **never runs** on a host
+whose config has no `site:` block. Another reported that it **does** run and
+overwrites the agent's `source_files` with the orchestrator's values. Settled by
+execution, not by reading:
+
+- **The guard.** `_enforce_agent_frontmatter` is called under
+  `if agent_fields is not None and target_path.exists()`
+  (`orchestrator_runner.py:2454`). `agent_fields` is `None` unless
+  `action == "create"` **and**
+  `fmc.section_generator_for(rel, config) == "agent-authored"`
+  (`orchestrator_runner.py:2383-2386`).
+- **The reference host.** `.engineering-docs-agent/config.yml` on
+  `claude-code-self-assessment` has top-level keys
+  `docs, lint, notifications, publishing, run, sources, voice` — **no `site:`
+  key**. `section_generator_for` returns `None` on its first branch (`site` is
+  not a dict, `frontmatter_contract.py:44-46`). Executed against the real file
+  for three real page paths: `None` every time.
+- **The other half.** Given a config that *does* carry
+  `site.docs_dir` + a section with `generator: agent-authored`,
+  `section_generator_for` returns `'agent-authored'`, and
+  `_enforce_agent_frontmatter` executed on a page whose frontmatter listed
+  `AGENT_INVENTED.py` returned frontmatter listing only the orchestrator's
+  `source_files` — the agent's value gone.
+
+So reviewer B described the function correctly and reviewer A described the
+**reference host** correctly, and it is A's fact that decides the spec: on this
+host the call never fires, so it cannot be what closes circularity. Reviewer B's
+mechanism is real but conditional on a `site:` block that the host does not have.
+
+**The spec's conclusion survives anyway, by a different route**, which is why
+this is a corrected argument rather than a withdrawn feature: on a create,
+corroboration comes from `source_paths=grounding` being passed to
+`build_corroborators` directly (`orchestrator_runner.py:1608`). Nothing ever
+reads the written page's frontmatter back. And it could not: executed on the
+enforced page above plus one inline prose citation, `extract_citations` returned
+**only** the prose path — frontmatter `source_files` are not backticked spans, so
+they are invisible to rung 1 on every host. The "Circularity is closed" paragraph
+in Revision 2 now carries an in-place note saying so.
+
+## What the rung-1 narrowing cost, measured
+
+Rung 1 was narrowed from a raw substring scan of the prior page to
+`set(extract_citations(prior_text)["paths"]) & files`. Re-derived on this repo at
+this branch — **887** tracked files (`git ls-files`), **108** pages under
+`docs/site-src/` — by scoring each page both ways and differencing:
+
+| quantity | value |
+| -------- | ----- |
+| raw substring scan (old rung 1), page/path mentions | **673** |
+| `extract_citations & files` (new rung 1) | **369** |
+| dropped | **304** — **45.2%** of 673 |
+| pages affected | **45 of 108** |
+
+Location of the 304 dropped mentions. One bucket per occurrence, precedence
+`frontmatter` → linter-dropped fence line (`_linter_dropped_lines`) → markdown
+link destination → inline code span → bare prose; a mention counted once per
+*distinct* bucket it occurs in, which is why the column sums above 304:
+
+| location | dropped | of those, consequential |
+| -------- | ------- | ----------------------- |
+| `markdown_link_target` | 149 | 149 |
+| `bare_prose` | 84 | 59 |
+| `inline_code_span` | 32 | 0 |
+| `frontmatter` | 29 | 16 |
+| `fenced_block` | 19 | 3 |
+| **sum** | **313** (9 mentions occur in two regions) | **227** |
+
+**Consequential** means: a 2- or 3-segment shortening of that path is a unique
+suffix candidate, so an edit that shortened it *now declines where it previously
+repaired*. Counted over **distinct tracked paths** that is **180** of the 215
+distinct dropped paths; counted over **mentions** it is **226** of 304. Those are
+different questions with different answers — name which one you mean, the same
+hazard the probe-count and Boris-tip-count rules already flag.
+
+That is the real price, and it is coverage, not correctness: on an edit, 180
+distinct tracked paths lost their rung-1 corroborator, so a shortening of any of
+them now emits a non-`info_only` `citation_repair_declined` partial and the page
+does not ship. Rung 2 has to carry them, and on `claude-extensions` rung 2 is
+already the whole gate.
+
+### The `internal_links` defence does not survive on this corpus
+
+The narrowing is usually defended by observing that markdown link targets are
+validated by a **different** rule, `internal_links`, so excluding them from rung 1
+is a real price rather than a free win. On this corpus that is **false**, and it
+is false in the direction that makes the narrowing look *better*, not worse:
+
+**149 of 149** dropped `markdown_link_target` mentions sit inside an **external**
+`https://github.com/theoju/engineering-docs-agent/blob/main/…` URL. Measured by
+importing `LINK_RE` and `is_external` from the rule itself:
+`internal_links.is_external` returns True for `http://`, `https://`, `mailto:`
+and `tel:`, and `check_path` `continue`s on it
+(`scripts/lint/internal_links.py:54-55, 62-65`). **Zero** of the 149 are relative
+internal links; zero would be checked by `internal_links` even after
+`strip_code`. Nothing validates them at all.
+
+So the single largest bucket of dropped corroborators is not a debt owed to
+another rule — it is precisely the module docstring's own category *"inside URL
+bodies"*, and losing it is the strongest part of the narrowing rather than its
+cost. `internal_links` does validate *relative* link targets, and on a corpus
+that used them the original defence would hold; it does not hold here, and the
+sentence should not be repeated without re-running the measurement.
+
+### Figures that did not reproduce
+
+Recorded rather than silently replaced, in keeping with this file's convention:
+
+- **`markdown_link_target` 140 / `inline_code_span` 41** was the split circulated
+  into this round. Mine is **149 / 32** — same total (313), same other three
+  buckets, 9 mentions classified differently. Swapping the link-target /
+  code-span precedence does not move it, and neither does dropping
+  reference-definition and autolink destinations from the link region, so the
+  difference is a region classifier I could not reconstruct. Mine is stated with
+  its rules above so it can be re-run and disagreed with.
+- **"180 of the dropped are consequential"** reproduces only as a count of
+  distinct **paths**. At mention level the same rule gives **226**. The
+  accompanying split (`markdown_link_target` 138, `frontmatter` 15,
+  `bare_prose` 15, `inline_code_span` 9, `fenced_block` 2 — which sums to 179,
+  not 180) does not reproduce at either level; mine is the table above.
+- **887 tracked / 108 pages / 673 → 369 / 304 / 45.2% / 45 of 108** all
+  reproduced exactly, so the headline result is not in doubt — only the
+  breakdowns are.
+
+### How to re-run it
+
+Reproduce with `scripts/lint/citation_exists.py` and `scripts/citation_repair.py`
+on the import path:
+
+```python
+files = set(subprocess.run(["git", "-C", ROOT, "ls-files"],
+                           capture_output=True, text=True).stdout.splitlines())
+for page in sorted((ROOT / "docs" / "site-src").rglob("*.md")):
+    text = page.read_text()
+    raw  = {f for f in files if f in text}            # old rung 1
+    lint = set(extract_citations(text)["paths"]) & files  # new rung 1
+    dropped = raw - lint
+```
+
+Locations come from `citation_repair._linter_dropped_lines(text)` for the fence
+region and from `citation_exists._INLINE_CODE_RE` for spans — the linter's own
+functions, never a local copy. "Consequential" is
+`len(citation_repair.suffix_candidates("/".join(p.split("/")[-n:]), files)) == 1`
+for `n` in `(2, 3)` where `p` has more than `n` segments; adding
+`_REPO_PATH_RE`-shape, non-resolution and full `_candidate_rejection` filters on
+top changes the count by **zero**, so the simple form is the one recorded.

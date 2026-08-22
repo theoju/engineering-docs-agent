@@ -133,23 +133,201 @@ def test_rewrite_skips_a_closed_fence():
     assert "cite it as `references/checklist.md`" in out
 
 
-def test_rewrite_still_applies_inside_an_unterminated_fence():
-    """Mirrors strip_fenced_blocks exactly: an UNTERMINATED fence strips
-    nothing, so extract_citations DOES see these tokens. If the rewrite
-    skipped them, repair_text would report a repair it never applied."""
+def test_rewrite_applies_inside_the_body_of_an_unterminated_fence():
+    """An unterminated fence loses its OPENER and keeps its BODY.
+
+    strip_fenced_blocks `continue`s past the opener before appending it, and
+    the `del out[fence_start:]` that would cut the body back out never runs on
+    a fence that never closes -- nothing was appended for it to cut. So
+    extract_citations DOES see the body token, and skipping it would make
+    repair_text report a repair it never applied.
+
+    The previous docstring here asserted something stronger and false ("an
+    UNTERMINATED fence strips nothing"), which is exactly what let the
+    CLOSED-fence mirror look correct: the body half of that claim is right,
+    the opener half never was. See the test below for the half it got wrong.
+    """
     text = "```\nsee `references/checklist.md`\n"
+    assert cr.extract_citations(text)["paths"] == ["references/checklist.md"], (
+        "fixture guard: the linter must actually READ this token, or the test "
+        "asserts nothing about the mirror"
+    )
     out = cr.rewrite_token(
         text, "references/checklist.md", "a/b/references/checklist.md"
     )
     assert "a/b/references/checklist.md" in out
 
 
-# The six characters that survive Path.read_text()'s universal-newline
+def test_rewrite_never_touches_the_dropped_opener_of_an_unterminated_fence():
+    """THE GHOST REPAIR. A citation written ON the opener line of a fence that
+    never closes is invisible to extract_citations -- strip_fenced_blocks drops
+    that line before appending anything -- yet the CLOSED-fence mirror reported
+    NO dropped lines at all for an unterminated fence, so rewrite_token edited
+    it anyway.
+
+    That is the report/apply contract inverted: the page is mutated at a site
+    the lint cannot see, so a rewrite the rule exists to police never reaches
+    it. Names `_linter_dropped_lines`.
+    """
+    text = "~~~ see `references/checklist.md`\nbody\n"
+    assert cr.extract_citations(text)["paths"] == [], (
+        "fixture guard: the linter must NOT see this token, or the ghost this "
+        "test names cannot occur"
+    )
+    assert (
+        cr.rewrite_token(
+            text, "references/checklist.md", "a/b/references/checklist.md"
+        )
+        == text
+    )
+
+
+def test_rewrite_skips_a_closed_info_string_fence():
+    """INFO-STRING FENCES -- the dominant real-world form, and the only shape
+    that exercises the `stripped[:3]` truncation in `strip_fenced_blocks`.
+
+    A ```python opener closes against a bare ``` terminator only because both
+    sides are truncated to three characters. Without the truncation the fence
+    never closes, reads as UNTERMINATED, loses only its opener -- and the
+    illustration inside becomes a live citation that repair rewrites, turning
+    a deliberate example into a false claim about real code.
+
+    Every other fence opener in this file is bare, so nothing else here
+    discriminates on that truncation: mutating `stripped[:3]` -> `stripped`
+    used to leave the whole suite green.
+    """
+    text = (
+        "See `references/checklist.md`.\n"
+        "\n"
+        "```python\n"
+        "cite it as `references/checklist.md`\n"
+        "```\n"
+    )
+    out = cr.rewrite_token(
+        text, "references/checklist.md", "a/b/references/checklist.md"
+    )
+    assert out.count("a/b/references/checklist.md") == 1
+    assert "cite it as `references/checklist.md`" in out
+
+
+def test_rewrite_skips_a_closed_tilde_info_string_fence():
+    """The same truncation on the tilde side: `~~~yaml` closed by a bare
+    `~~~`. Both fence characters are covered, so a partial revert of the
+    truncation is caught rather than only a wholesale one."""
+    text = (
+        "See `references/checklist.md`.\n"
+        "\n"
+        "~~~yaml\n"
+        "cite it as `references/checklist.md`\n"
+        "~~~\n"
+    )
+    out = cr.rewrite_token(
+        text, "references/checklist.md", "a/b/references/checklist.md"
+    )
+    assert out.count("a/b/references/checklist.md") == 1
+    assert "cite it as `references/checklist.md`" in out
+
+
+def test_a_broken_strip_fenced_blocks_contract_fails_loudly(monkeypatch):
+    """The derivation reads its index markers back out of
+    `strip_fenced_blocks`'s output, which works only because that function
+    appends its input lines VERBATIM. If it ever stopped doing so the alignment
+    would be unknowable, and guessing it silently is the one outcome forbidden
+    here: `repair_text` would report a rewrite the page never received.
+
+    Both verbatim-contract branches, simulated by the two shapes any content
+    transformation there would take -- a survivor with no marker at all, and a
+    survivor whose marker no longer names its own line.
+    """
+    monkeypatch.setattr(cr, "strip_fenced_blocks", lambda text: "a\nb")
+    with pytest.raises(RuntimeError, match="no line marker"):
+        cr.rewrite_token("a\nb\n", "refs/x.md", "a/b/refs/x.md")
+
+    # Codes intact (width 1: " " is index 0, "\t" is index 1), bodies swapped.
+    monkeypatch.setattr(cr, "strip_fenced_blocks", lambda text: " b\n\ta")
+    with pytest.raises(RuntimeError, match="does not name its source line"):
+        cr.rewrite_token("a\nb\n", "refs/x.md", "a/b/refs/x.md")
+
+
+def test_a_marker_that_perturbs_the_linter_fails_loudly(monkeypatch):
+    """The index code lives in LEADING WHITESPACE because
+    `strip_fenced_blocks` lstrips every line before deciding anything about
+    it. That is a contract, not a law, and this is what happens when it
+    breaks: the marked and unmarked runs keep DIFFERENT lines, the alignment
+    stops meaning anything, and the derivation refuses rather than guesses.
+
+    Simulated by a `strip_fenced_blocks` that reads the RAW line instead of
+    the lstripped one -- precisely the change that would stop the whitespace
+    code being invisible to it.
+    """
+
+    def raw_line_sensitive(text: str) -> str:
+        return "\n".join(
+            line for line in text.splitlines() if not line.startswith("\t")
+        )
+
+    monkeypatch.setattr(cr, "strip_fenced_blocks", raw_line_sensitive)
+    with pytest.raises(RuntimeError, match="perturbs strip_fenced_blocks"):
+        cr.rewrite_token("a\nb\nc\n", "refs/x.md", "a/b/refs/x.md")
+
+
+# The invariant the mirror exists to deliver, as a table: repair rewrites a
+# line IF AND ONLY IF the linter reads that line. One citation per row; `seen`
+# is what extract_citations reports, `rewritten` is whether rewrite_token
+# changed anything at all.
+#
+# This is the REGRESSION guard on `_linter_dropped_lines`, not a probe of
+# strip_fenced_blocks. It holds trivially while the dropped set is DERIVED from
+# the linter by running it, and it breaks the moment anyone re-derives that
+# bookkeeping by hand: `opener_carries_the_citation` is the row that fails
+# against the CLOSED-fence mirror this replaced (verified by reverting the
+# derivation and re-running -- it is the ONLY row that does, which is why the
+# named ghost test above exists as well). The two info-string tests are what
+# discriminate on the linter's own internals; nothing here can, because both
+# sides of the comparison now come from the same function.
+FENCE_SHAPES = (
+    ("plain_prose", "cite `refs/x.md`\n"),
+    ("closed_bare_fence", "p\n```\ncite `refs/x.md`\n```\n"),
+    ("closed_info_string_fence", "p\n```python\ncite `refs/x.md`\n```\n"),
+    ("closed_tilde_info_string_fence", "p\n~~~yaml\ncite `refs/x.md`\n~~~\n"),
+    ("indented_closed_fence", "p\n  ```\n  cite `refs/x.md`\n  ```\n"),
+    ("unterminated_fence_body", "```python\ncite `refs/x.md`\n"),
+    ("opener_carries_the_citation", "~~~ cite `refs/x.md`\nbody\n"),
+    ("tilde_does_not_close_a_backtick_fence", "```\ncite `refs/x.md`\n~~~\n"),
+    (
+        "fence_opened_after_a_u2028_break",
+        "Example:\N{LINE SEPARATOR}```\ncite `refs/x.md`\n```\n",
+    ),
+    ("closing_fence_carries_the_citation", "```\nbody\n``` cite `refs/x.md`\n"),
+)
+
+
+@pytest.mark.parametrize(
+    "shape,text", FENCE_SHAPES, ids=[name for name, _ in FENCE_SHAPES]
+)
+def test_rewrite_touches_a_line_iff_the_linter_reads_it(shape, text):
+    seen = "refs/x.md" in cr.extract_citations(text)["paths"]
+    rewritten = cr.rewrite_token(text, "refs/x.md", "a/b/refs/x.md") != text
+    assert seen == rewritten, (
+        f"{shape}: linter reads the citation={seen}, repair rewrote it="
+        f"{rewritten} -- repair must rewrite a line iff the linter reads it"
+    )
+
+
+# The EIGHT characters that survive Path.read_text()'s universal-newline
 # translation yet ARE str.splitlines() boundaries. Written as escapes on
-# purpose: four are invisible and two are zero-width in most editors, so a
+# purpose: six are invisible and two are zero-width in most editors, so a
 # literal here would be unreviewable. "\r" is deliberately absent -- read_text
 # normalises it, so it never reaches this code.
-SPLITLINES_ONLY = "\N{LINE SEPARATOR}\N{PARAGRAPH SEPARATOR}\x85\x0b\x0c\x1c"
+#
+# Re-derived rather than copied: every codepoint below U+3000 was written to a
+# file as UTF-8, read back with Path.read_text(), and kept when it BOTH
+# survived that round trip AND split "a<ch>b" into two under splitlines(). The
+# previous list said six and omitted \x1d (GS) and \x1e (RS); both behaved
+# exactly like the other six against the pre-fix code, so the shortfall was a
+# documentation and coverage gap, not a defect -- splitlines() handles all
+# eight uniformly and the shipped code always did.
+SPLITLINES_ONLY = "\N{LINE SEPARATOR}\N{PARAGRAPH SEPARATOR}\x85\x0b\x0c\x1c\x1d\x1e"
 
 
 def test_rewrite_skips_a_fence_opened_after_a_u2028_line_break():
@@ -169,8 +347,9 @@ def test_rewrite_skips_a_fence_opened_after_a_u2028_line_break():
 
 
 def test_rewrite_skips_a_fence_opened_after_a_vertical_tab_line_break():
-    """The same divergence via \\x0b. Two of the six are covered so a partial
-    revert of either iteration site is caught, not just a wholesale one."""
+    """The same divergence via \\x0b. Two of the eight are covered here as a
+    spot check, so a partial revert of either iteration site is caught, not
+    just a wholesale one; the byte-fidelity test below covers all eight."""
     text = "Example:\x0b```\ncite `references/checklist.md`\n```\n"
     out = cr.rewrite_token(
         text, "references/checklist.md", "a/b/references/checklist.md"
@@ -180,12 +359,16 @@ def test_rewrite_skips_a_fence_opened_after_a_vertical_tab_line_break():
 
 def test_rewrite_preserves_splitlines_only_terminators_byte_for_byte():
     """Iterating splitlines() is only half the fix: "\\n".join() would then
-    normalise all six characters into newlines on every page containing one.
+    normalise all EIGHT characters into newlines on every page containing one.
     Lines are rejoined with their OWN terminators, so a line this function did
-    not rewrite comes back verbatim and only the cited span changes."""
+    not rewrite comes back verbatim and only the cited span changes.
+
+    All eight appear below, \\x1d and \\x1e included -- they were missing from
+    the original list of six, and an uncovered character is a character the
+    join could silently normalise with nothing to catch it."""
     text = (
         "alpha\N{LINE SEPARATOR}beta\N{PARAGRAPH SEPARATOR}gamma\x85"
-        "delta\x0bepsilon\x0czeta\x1ceta\n"
+        "delta\x0bepsilon\x0czeta\x1ceta\x1dtheta\x1eiota\n"
         "See `references/checklist.md`.\n"
         "tail\N{LINE SEPARATOR}end\n"
     )
@@ -311,10 +494,11 @@ def test_resolving_citation_is_byte_identical(repo):
 def test_repair_preserves_splitlines_only_terminators_on_the_rest_of_the_page(repo):
     """The byte-identity contract, end to end, on a page carrying every
     splitlines()-only boundary character. A repair must change the cited span
-    and NOTHING else — a "\n".join() round-trip would silently rewrite six
+    and NOTHING else — a "\n".join() round-trip would silently rewrite eight
     distinct characters on every page that contains one."""
     text = (
-        "alpha\u2028beta\u2029gamma\x85delta\x0bepsilon\x0czeta\x1ceta\n"
+        "alpha\u2028beta\u2029gamma\x85delta\x0bepsilon\x0czeta\x1ceta"
+        "\x1dtheta\x1eiota\n"
         "\n"
         "See `references/checklist.md`.\n"
     )
@@ -323,6 +507,45 @@ def test_repair_preserves_splitlines_only_terminators_on_the_rest_of_the_page(re
     )
     assert repairs == [("references/checklist.md", FULL)]
     assert out == text.replace("`references/checklist.md`", f"`{FULL}`")
+
+
+def test_a_padded_inline_span_is_both_reported_and_applied(repo):
+    """THE `.strip()` IN `_sub`'s EQUALITY TEST.
+
+    `extract_citations` strips each inline-code token before matching, so
+    `` ` references/checklist.md ` `` IS a citation the linter extracts and
+    `repair_text` therefore repairs. `_sub` must strip the same way before
+    comparing, or the two ends disagree: `repair_text` reports the repair while
+    `rewrite_token` matches nothing and the page is returned untouched —
+    precisely the report/apply divergence this module forbids, and the reason
+    the assertion below is on `out`, not only on `repairs`.
+
+    Mutating `_SUFFIX_RE.sub("", token.strip())` -> `_SUFFIX_RE.sub("", token)`
+    used to leave the full suite green.
+
+    The padding survives the rewrite: the replacement happens inside the
+    ORIGINAL token, so only the path changes, and a second pass is a no-op.
+    """
+    text = "See ` references/checklist.md ` for the steps.\n"
+    files = cr.tracked_files(repo)
+    assert cr.extract_citations(text)["paths"] == ["references/checklist.md"], (
+        "fixture guard: the linter must extract the PADDED span, or repair_text "
+        "never reports anything and the divergence cannot occur"
+    )
+
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, files, corroborators={FULL}
+    )
+    assert repairs == [("references/checklist.md", FULL)]
+    assert declines == []
+    assert out != text, "reported a repair the page never received"
+    assert out == f"See ` {FULL} ` for the steps.\n"
+
+    again, repairs_again, _ = cr.repair_text(
+        out, repo, CFG, files, corroborators={FULL}
+    )
+    assert repairs_again == []
+    assert again == out
 
 
 def test_repair_is_idempotent(repo):
@@ -417,23 +640,69 @@ def test_gitignored_path_is_never_repaired(repo):
     assert out == text
 
 
-def test_absolute_path_outside_repo_is_never_repaired(repo):
-    """Exclusion row 4: `_relativize` returns None for a path outside the repo.
+# An absolute path outside the repo has an EMPTY first segment, and no path
+# `git ls-files` emits has one -- so for any git-derived `files`,
+# `suffix_candidates` returns nothing for such a token and `len(candidates)
+# != 1` decides it before `if rel is None` is ever consulted. The previous
+# version of the test below cited `/etc/nginx/nginx.conf` against the plain
+# fixture and claimed the opposite in its docstring; mutating the named guard
+# to `rel = cited` left the whole suite green, and only total deletion turned
+# it red, via an incidental TypeError from `repo_root / None`. It proved "no
+# crash", not "never repaired".
+_ABSOLUTE_CITED = "/etc/__cr_absent__/thing.conf"
+# The only shape that can suffix-match an absolute token: a tracked path whose
+# tail segments include that empty one. Grotesque on purpose -- see the test.
+_ABSOLUTE_CANDIDATE = "vendor/" + _ABSOLUTE_CITED  # note the doubled slash
 
-    `citation_exists._relativize` treats an absolute path that does not
-    resolve inside `repo_root` as an environment reference, not a repo
-    citation — there is nothing repo-relative to check it against. Verified
-    (via a standalone script, not guessed): `/etc/nginx/nginx.conf` matches
-    `_REPO_PATH_RE`, is not filtered by `_is_placeholder`, so
-    `extract_citations` DOES surface it as a path citation and it genuinely
-    reaches this branch through `repair_text`'s own call path — this is not a
-    contrived unreachable case.
+
+def test_absolute_path_outside_repo_is_never_repaired(repo):
+    """Exclusion row 4: `_relativize` returns None for a path outside the repo,
+    and that guard is the ONLY thing standing between this input and a repair.
+
+    `citation_exists._relativize` treats an absolute path that does not resolve
+    inside `repo_root` as an environment reference, not a repo citation — there
+    is nothing repo-relative to check it against.
+
+    Making the guard decide takes an injected candidate, and the injection is
+    honest about what it is. `git ls-files` cannot emit
+    `vendor//etc/__cr_absent__/thing.conf`: git has no empty path segments, so
+    with a git-derived `files` this guard can never be the decider. But `files`
+    is a PARAMETER of `repair_text`, so the guard is a contract on the
+    parameter rather than on git's output — the same framing, and the same
+    injection, as the candidate-side sibling
+    `test_candidate_outside_the_repo_is_declined`. What the injection buys is a
+    fixture where every EARLIER guard passes, asserted below, so deleting or
+    inverting `if rel is None` is what flips the result.
+
+    The cited path must be guaranteed ABSENT from the test machine, which is
+    why it is `/etc/__cr_absent__/thing.conf` and not `/etc/nginx/nginx.conf`.
+    `repo_root / "/abs/path"` is `/abs/path`, so `_resolves`'s on-disk arm
+    would answer True for a file that happens to exist on the runner and
+    short-circuit before the candidate arithmetic — re-vacuuming the test on
+    some machines and not others.
     """
-    text = "See `/etc/nginx/nginx.conf`.\n"
-    out, repairs, _ = cr.repair_text(
-        text, repo, CFG, cr.tracked_files(repo), corroborators=set()
+    files = cr.tracked_files(repo) | {_ABSOLUTE_CANDIDATE}
+    text = f"See `{_ABSOLUTE_CITED}`.\n"
+
+    # Fixture guards: every earlier guard must PASS, or this test stops
+    # exercising `if rel is None` and goes back to proving nothing.
+    assert cr.extract_citations(text)["paths"] == [_ABSOLUTE_CITED], (
+        "the linter must surface this token as a path citation"
+    )
+    assert cr._relativize(_ABSOLUTE_CITED, repo) is None, "the guard must be armed"
+    assert not (repo / _ABSOLUTE_CITED).exists(), "the cited token must not resolve"
+    assert cr.suffix_candidates(_ABSOLUTE_CITED, files) == [_ABSOLUTE_CANDIDATE], (
+        "exactly one candidate, or `len(candidates) != 1` decides this first"
+    )
+    assert cr._candidate_rejection(_ABSOLUTE_CANDIDATE, repo, CFG, files) is None, (
+        "the candidate gate must pass, or IT decides this first"
+    )
+
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, files, corroborators={_ABSOLUTE_CANDIDATE}
     )
     assert repairs == []
+    assert declines == []
     assert out == text
 
 
@@ -537,6 +806,181 @@ def test_candidate_outside_the_repo_is_declined(repo):
     assert declines == [
         ("nginx/nginx.conf", "/etc/nginx/nginx.conf", "candidate_outside_repo")
     ]
+
+
+# --- The verifiability gate -------------------------------------------------
+# The four rows above were a BLACKLIST of the classes check_path declines to
+# check, and a blacklist can only enumerate what someone thought of. It missed
+# a row twice, both times the same shape: the repair moved the citation into a
+# region the linter does not verify, so the page flipped from BLOCK to `ok` and
+# was never checked again. The gate is positive now -- the linter must both SEE
+# the candidate and verify it BY EXISTENCE -- so an unnamed class declines.
+
+
+def test_candidate_the_extractor_cannot_parse_is_declined(repo):
+    r"""MISS 1, the reproduced case. `_REPO_PATH_RE` admits only `[\w.\-/]`, so a
+    tracked candidate carrying a parenthesis survives every candidate-side
+    check the blacklist knew about, gets written into the page, and is then not
+    SEEN by extract_citations at all: check_path went (False, 'cites
+    nonexistent path ...') -> (True, 'ok'), and stayed 'ok' after `git rm` of
+    the file it names. Bracketed and parenthesised route paths are ordinary --
+    the reference host tracks `app/dimensions/[id]/page.tsx` and
+    `app/tips/[n]/page.tsx`.
+
+    Names `_extractor_sees`.
+    """
+    routed = repo / "app/(marketing)/guides"
+    routed.mkdir(parents=True)
+    (routed / "setup.md").write_text("# setup\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "parenthesised route")
+
+    files = cr.tracked_files(repo)
+    candidate = "app/(marketing)/guides/setup.md"
+    # Fixture guards: every EARLIER guard must pass, or this test would be
+    # decided before `_extractor_sees` is ever consulted.
+    assert candidate in files
+    assert cr.suffix_candidates("guides/setup.md", files) == [candidate]
+    assert not (repo / "guides/setup.md").exists(), "the cited token must not resolve"
+
+    text = "See `guides/setup.md`.\n"
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, files, corroborators={candidate}
+    )
+    assert repairs == []
+    assert out == text
+    assert declines == [("guides/setup.md", candidate, "candidate_unextractable")]
+
+
+def test_candidate_with_a_placeholder_marker_is_declined_despite_corroboration(repo):
+    """THE FAIL-CLOSED PROPERTY, stated directly: a candidate the linter's
+    extractor does not return is declined no matter how well corroborated.
+
+    A second, DIFFERENT extractor rule from the one above -- `_is_placeholder`,
+    not `_REPO_PATH_RE` -- reached through the same round-trip, which is the
+    point of round-tripping rather than re-deriving: both rules, and any future
+    third, are inherited.
+
+    The corroborator is passed directly rather than built by
+    `build_corroborators`, whose `_GLOB_CHARS` filter would drop a `{` path
+    first and decide this case as `uncorroborated` -- the gate would never be
+    reached and the test would assert nothing about it.
+
+    Names `_extractor_sees`.
+    """
+    templated = repo / "app/{slug}/guides"
+    templated.mkdir(parents=True)
+    (templated / "page.md").write_text("# page\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "templated route")
+
+    files = cr.tracked_files(repo)
+    candidate = "app/{slug}/guides/page.md"
+    assert candidate in files
+    assert cr.suffix_candidates("guides/page.md", files) == [candidate]
+    assert not (repo / "guides/page.md").exists(), "the cited token must not resolve"
+
+    text = "See `guides/page.md`.\n"
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, files, corroborators={candidate}
+    )
+    assert repairs == []
+    assert out == text
+    assert declines == [("guides/page.md", candidate, "candidate_unextractable")]
+
+
+def test_candidate_under_the_mkdocs_build_dir_is_declined(repo):
+    """MISS 2, the reproduced case. `_resolves` returns True for ANY path under
+    the mkdocs `site_dir` with no existence check whatsoever, so a tracked
+    candidate under it parks the citation in an unconditionally-resolving
+    namespace -- structurally identical to `example/`. Repair used to fire with
+    no decline; then `git rm site/refs/notes.md` and check_path still answered
+    (True, 'ok'). `repair_text` already computed `build_dir` and never
+    consulted it for candidates.
+
+    Names `_resolves_absent`.
+    """
+    (repo / "mkdocs.yml").write_text("site_name: x\nsite_dir: site\n")
+    built = repo / "site/refs"
+    built.mkdir(parents=True)
+    (built / "notes.md").write_text("# notes\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "committed build output")
+
+    files = cr.tracked_files(repo)
+    candidate = "site/refs/notes.md"
+    assert candidate in files
+    assert cr.suffix_candidates("refs/notes.md", files) == [candidate]
+    assert not (repo / "refs/notes.md").exists(), "the cited token must not resolve"
+    # Fixture guard: with no parseable mkdocs config `build_dir` is "" and the
+    # arm under test is INERT, which would make this test vacuous.
+    assert cr._build_dir(repo) == "site"
+
+    text = "See `refs/notes.md`.\n"
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, files, corroborators={candidate}
+    )
+    assert repairs == []
+    assert out == text
+    assert declines == [
+        ("refs/notes.md", candidate, "candidate_unverified_namespace")
+    ]
+
+
+def test_candidate_outside_the_build_dir_is_still_repaired(repo):
+    """The build-dir probe must DISCRIMINATE, not blanket-decline. Same host,
+    same configured `site_dir`, a candidate that simply is not under it: the
+    ADIS repair still fires.
+
+    Names `_resolves_absent` in the other direction -- forcing it to True
+    breaks this test while leaving the decline tests green.
+    """
+    (repo / "mkdocs.yml").write_text("site_name: x\nsite_dir: site\n")
+    built = repo / "site"
+    built.mkdir()
+    (built / "index.html").write_text("<html></html>\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "build dir exists")
+
+    files = cr.tracked_files(repo)
+    assert cr._build_dir(repo) == "site", "the arm under test must be armed"
+    assert cr.suffix_candidates("references/checklist.md", files) == [FULL]
+
+    text = "See `references/checklist.md`.\n"
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, files, corroborators={FULL}
+    )
+    assert declines == []
+    assert repairs == [("references/checklist.md", FULL)]
+    assert FULL in out
+
+
+def test_a_cause_the_gate_does_not_name_fails_closed(repo, monkeypatch):
+    """THE FAIL-CLOSED PROPERTY of the gate as a whole. Every named check
+    answers a question this module thought to ask; the last one asks
+    `check_path` whether it would report an absent file in the candidate's
+    location, so a skip class nobody has heard of still answers.
+
+    Simulated by making that probe's `check_path` answer `ok` -- exactly what a
+    new skip branch in its paths loop would do -- on an otherwise perfect ADIS
+    repair. Every other guard passes, corroboration is present, and the repair
+    is still refused.
+
+    Names `_linter_reports_an_absent_file`.
+    """
+    files = cr.tracked_files(repo)
+    text = "See `references/checklist.md`.\n"
+    # Fixture guard: unpatched, this exact call repairs (see
+    # test_shortened_citation_is_repaired), so the probe is what decides it.
+    assert cr.suffix_candidates("references/checklist.md", files) == [FULL]
+
+    monkeypatch.setattr(cr, "check_path", lambda *_a, **_kw: (True, "ok"))
+    out, repairs, declines = cr.repair_text(
+        text, repo, CFG, files, corroborators={FULL}
+    )
+    assert repairs == []
+    assert out == text
+    assert declines == [("references/checklist.md", FULL, "candidate_unverified")]
 
 
 def test_rung1_admits_a_path_the_linter_validated_in_prose():

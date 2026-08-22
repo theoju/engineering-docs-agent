@@ -1357,10 +1357,14 @@ Four labels, and **every** non-resolving citation gets exactly one of them:
 
 | confidence | candidate field | means |
 | ---------- | --------------- | ----- |
-| `corroborated` | the one candidate | one strict suffix match, and a source outside the authoring agent already pointed at it |
-| `uncorroborated` | the one candidate | one strict suffix match, resting on the match alone |
+| `candidate_in_run_inputs` | the one candidate | one strict suffix match, and an input to this run other than the authoring agent already named that file |
+| `suffix_match_only` | the one candidate | one strict suffix match, resting on the match alone |
 | `ambiguous` | the candidates, capped at `_AMBIGUITY_CAP` = 5, then `(+N more)` | several tracked files end with this tail |
 | `no_candidate` | `""` | no tracked file ends with this tail at all |
+
+> The first two labels were `corroborated` / `uncorroborated` as originally
+> shipped. Correction 6 renamed them; see that section for why, and for why
+> `no_candidate` no longer reaches the digest at all.
 
 The last two rows are the change that matters most for an operator. Under the
 repair design, `ambiguous`, `no_candidate` and `uncorroborated` all `continue`d
@@ -1384,3 +1388,182 @@ cheap: a confabulating `source-collector` can widen the `corroborated` label
 from a batch's true 5–15 files to any tracked file on the host. That residual
 used to cost a wrong page rewrite. It now costs an operator one over-confident
 line in a digest.
+
+---
+
+# Post-implementation correction 6 — the diagnostic's own honesty (2026-08-22)
+
+Revision 3 deleted the page rewrite and left one thing behind: a digest line.
+That makes **the digest's trustworthiness the feature's entire remaining
+value** — a line that is wrong, misleading or missing is now the only harm
+this code can do, and an operator will act on it. A sixth adversarial round
+judged every part of the diagnostic against exactly that, and found six
+defects. None of the fixes adds mechanism: each is a relocation, a rename, a
+deletion or a cap.
+
+## 1 (Critical) — the digest reported citations that are not blocked
+
+`_diagnose_citation_paths` was called **inside** the per-page authoring loop,
+so it evaluated `_resolves` against a tree that was **still being built**. A
+page citing a sibling docs page that the SAME RUN authors later — the ordinary
+shape of a docs page — was diagnosed before that sibling existed.
+
+Reproduced by driving the real `runner.run(...)` with two `doc_targets` where
+the first cites the second:
+
+```
+HITS = ["citation_shortening_suspected: docs/site-src/core/connectors/foo.md:
+         'docs/site-src/core/connectors/bar.md' -> '' (no_candidate)"]
+LINT  ok=True
+```
+
+A digest that flags citations the linter accepts is not a census; it is noise
+that trains an operator to ignore it.
+
+**The seam chosen:** after the whole authoring loop, **before** the
+content-validator dispatch. That is where the two views agree — every page the
+run authored is on disk, so `_resolves` sees the same tree `citation_exists` is
+about to see inside content-validator.
+
+Three ordering constraints were checked against that seam:
+
+- **Still sees the pages the run authored.** It iterates `authored`, the list
+  the loop appends to on `out["ok"]`, filtered by `Path.exists()`.
+- **Rung 2 grounding still in scope.** `grounding` is computed per batch inside
+  the loop, so it is now recorded per page in `grounding_by_path` and read back
+  by page. Passing the last batch's grounding to every page would have
+  mislabelled findings silently.
+- **Must not run for pages reverted by the lint-block revert.** This is why the
+  seam is ABOVE the revert, not below it. A reverted *edit* is restored from
+  HEAD and **still exists on disk**, so a diagnosis below the revert would
+  report the previous commit's citations as if this run had written them.
+  Below the revert is also where the feature would have nothing to say: a
+  lint-blocked page is precisely the population this diagnostic exists to
+  explain.
+
+Pinned by `test_a_citation_to_a_sibling_the_same_run_authors_is_not_reported`,
+which asserts BOTH halves — `citation_exists.check_path` accepts the page, and
+the digest says nothing about it. Its fixture seeds a tracked decoy whose tail
+is the sibling's path, so a mid-loop diagnosis produces a LOUD line rather than
+a `no_candidate` the digest now drops anyway; without the decoy the test would
+pass with the call back inside the loop and pin nothing.
+
+## 2 (Important) — `corroborated` was not earned
+
+The label was granted by **batch membership alone**. Rung 2 admits the whole
+`_pr_changed_files(batch_prs)` set, so any tracked file the batch happened to
+touch — a vendored dependency, a lockfile, an unrelated module — took the top
+confidence label the moment it was the unique strict suffix match. Reproduced:
+a repo tracking only `vendor/third_party/oauthlib/auth/session.py`, a page
+citing an invented `auth/session.py`, reported as `(corroborated)`.
+
+**Renamed, not re-earned.** Adding a further check to try to deserve the old
+name is the mechanism escalation this feature was already cut down for.
+
+| was | is |
+| --- | -- |
+| `corroborated` | `candidate_in_run_inputs` |
+| `uncorroborated` | `suffix_match_only` |
+| `build_corroborators` | `build_run_inputs` |
+
+Both names now state an **observation**, never a verdict. The module docstring
+carries a per-label "ESTABLISHES / DOES NOT ESTABLISH" block, so what the top
+label does *not* prove is written down beside what it does.
+
+## 3 (Important) — `no_candidate` was filed under a key contradicting it
+
+`no_candidate` means the module looked for a tracked file ending with that tail
+and found none — **its own evidence says the token is not a shortening**. Those
+findings were nonetheless emitted under `citation_shortening_suspected`, and it
+is the most common shape, so the dominant population sat under a key asserting
+the opposite of what was measured.
+
+Measured amplification: one page with 40 confabulated citations produces **1**
+`lint_block` line — which already names all 40 paths, with severity — and **40**
+diagnosis lines.
+
+**Decision: dropped from the digest, not renamed.** Justification is entirely
+about the operator: a renamed key would still carry *zero added information*
+over the `lint_block` line that already names those paths, while keeping 40
+lines in front of the reader and burying the handful of findings that do name
+a file. The findings still cross `diagnose`'s return boundary, so the census is
+available to any caller that wants it — the digest is the one place it earns
+nothing. Pinned in both directions by
+`test_a_no_candidate_citation_is_kept_out_of_the_digest`.
+
+## 4 (Important) — unbounded LLM-authored text in state
+
+Both `add_partial` reason strings embedded `cited`, `candidate` and `str(exc)`
+with no truncation, against this file's own convention: `orchestrator_runner`
+defines `_STDERR_TRUNCATE = 300` and applies it to every other embedded
+untrusted string. Measured: a 40,000-char citation token produced a single
+40,198-byte `partial_reasons` entry; 40 pages x 40 blocked citations produced a
+167,005-byte PR body against GitHub's 65,536 limit.
+
+The **existing** convention is applied — the page `label` too, since an
+agent-chosen `page_hint` is the same class of text. Findings per page are
+additionally capped at `_CITATION_FINDINGS_CAP = 10`, and the count withheld is
+**reported** as `citation_diagnosis_truncated`. A silent cap is the failure mode
+this whole ticket exists to fight; the cap without that line would *be* it.
+
+## 5 (Important) — report completeness was unpinned, four ways
+
+All four of these mutations to the reporting loop SURVIVED the full suite:
+
+```
+for cited, candidate, confidence in findings:   ->  ... in findings[:1]:    GREEN
+                                                    ... in findings[-1:]:   GREEN
+                                                    ... in findings[:2]:    GREEN
+insert  if confidence == "ambiguous": continue  as the loop's first line     GREEN
+```
+
+The test file's own words are "the digest is a census of blocked citations or
+it is nothing", and nothing pinned it at the seam that writes the digest.
+`test_the_digest_reports_every_finding_on_a_page_not_a_slice_of_them` asserts
+three findings as an exact ordered list (killing all three slices) and
+`test_an_ambiguous_finding_reaches_the_digest` kills the fourth.
+
+## 6 (Important) — `diagnose` did not assert it inherits fence-stripping
+
+`extract_citations` calls `strip_fenced_blocks` on purpose ("fenced examples
+are legitimately hypothetical"), so a citation appearing only inside a fence
+never blocks. Nothing asserted `diagnose` inherits that, and this mutation
+survived the full suite: extracting from the text joined across triple-backtick
+splits, i.e. removing the fence markers before extraction.
+
+Worth recording for future mutation work in this module: the naive
+`text.replace("```", "")` form of that mutation fails **only** via the AST
+write-guard, because `replace` is in `_WRITE_ATTRS`. That is an artifact, not a
+behavioural catch, and it must not be allowed to stand in for real coverage.
+
+## Also closed this round
+
+- `_excluded_reason` returned a classification string no caller read (its only
+  use was `is not None`). Now `_is_excluded`, returning `bool`.
+- Two of three line-pinned cross-references in the `build_run_inputs` docstring
+  had already rotted by one revision (`:2372` and `:2048-2050` against real
+  lines 2395 and 2072). Cross-references there name **symbols** now, so they
+  cannot rot.
+- `test_citation_repair_wiring.py` asserted `"corroborated" in r`, which the
+  substring inside `"uncorroborated"` satisfies — it could not distinguish the
+  two labels, the one thing its name claimed. Every label assertion is now
+  parenthesised and exact.
+- The census test in `test_citation_repair.py` overclaimed: its docstring said
+  four citations produce four findings, it asserted three, and its fourth line
+  `README.md` is not a citation at all (`_REPO_PATH_RE` requires a slash), so
+  the `_resolves` arm it credited was never reached. Name, docstring and
+  assertions agree now, and the resolving citation is a real slashed path.
+- The failure line used a bare `path.name` while the finding line used the
+  repo-relative label, so `citation_diagnosis_failed: index.md: …` did not say
+  which page — and `add_partial` dedupes identical strings, collapsing many
+  pages into one line. Both lines use `label`.
+
+## Coverage added this round
+
+Eight tests. Every one was mutation-checked against the FULL suite: the guard
+it names was deleted or inverted, the suite was confirmed to FAIL, and the
+source was restored byte-identically. Twelve mutations, twelve kills — the four
+from defect 5, the seam move of defect 1, the `no_candidate` re-emission, the
+truncation and the cap of defect 4, the fence-marker strip of defect 6, the
+bare-basename failure line, the `_resolves` guard, and a label swap that the
+old substring assertion would have passed.

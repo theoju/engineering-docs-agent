@@ -1597,6 +1597,15 @@ reason the caller drops `no_candidate` — the token does not resolve, so
 `citation_exists` blocks the page and `lint_block` names that exact path.
 Pinned by `test_one_pathological_token_costs_only_itself`.
 
+**The fixture that found it could not pin it.** Provoking a real ENAMETOOLONG
+with a 3000-char filename is platform-dependent: on macOS (APFS) it raises out
+of `stat` and the test failed as intended, and on Linux CI the same fixture
+returned False and the token merely degraded to `no_candidate` — so the
+natural test passed locally, failed in CI, and was testing nothing on either
+platform. The OSError is now INJECTED into `_resolves`. The guard is not
+platform-dependent, so its test must not be either; a fixture that only
+reproduces on the author's machine is a vacuous test with a travel itinerary.
+
 **2 — the digest was bounded per page and unbounded per run.** Correction 6
 capped one page at `_CITATION_FINDINGS_CAP` and called the digest BOUNDED.
 `_format_partial_digest` joins every reason unconditionally, so N pages × 10

@@ -660,13 +660,22 @@ def test_no_prior_and_no_sources_yields_no_run_inputs():
     assert cr.build_run_inputs(None, set(), {"a/b.md"}) == set()
 
 
-def test_one_pathological_token_costs_only_itself(repo):
+def test_one_pathological_token_costs_only_itself(repo, monkeypatch):
     """ROUND 6. `_resolves` reaches `(repo_root / rel).exists()`, and pathlib
     RE-RAISES OSError for errno values outside its ignored set — ENAMETOOLONG
-    among them. The exception propagated out of `diagnose` and discarded the
-    local `findings` list wholesale, so ONE 3000-char token destroyed the whole
-    page's census, including good findings that appeared EARLIER in document
-    order. The page label survived; every finding did not.
+    is not in that set. The exception propagated out of `diagnose` and
+    discarded the local `findings` list wholesale, so ONE bad token destroyed
+    the whole page's census, including good findings that appeared EARLIER in
+    document order. The page label survived; every finding did not.
+
+    The OSError is INJECTED rather than provoked with a 3000-char filename,
+    because provoking it is platform-dependent and the guard is not. On macOS
+    (APFS) a 3000-char component raises ENAMETOOLONG out of `stat`, which is
+    how this defect was found; on Linux CI the same fixture returned False and
+    the token merely degraded to `no_candidate`, so the natural fixture passed
+    locally and failed in CI while testing nothing on either. What is being
+    pinned is that an OSError from anywhere inside the per-citation body costs
+    that token and no other — inject it, and the platform stops mattering.
     """
     (repo / "pkg/weird").mkdir(parents=True)
     (repo / "pkg/weird/notes.md").write_text("# notes\n")
@@ -674,9 +683,18 @@ def test_one_pathological_token_costs_only_itself(repo):
     _git(repo, "commit", "-qm", "second")
     text = (
         "See `references/checklist.md`.\n"
-        "And `a/" + "b" * 3000 + ".md`.\n"
+        "And `doomed/token.md`.\n"
         "And `weird/notes.md`.\n"
     )
+
+    real = cr._resolves
+
+    def boom(rel, *a, **kw):
+        if rel == "doomed/token.md":
+            raise OSError(63, "File name too long", rel)
+        return real(rel, *a, **kw)
+
+    monkeypatch.setattr(cr, "_resolves", boom)
 
     got = cr.diagnose(text, repo, CFG, cr.tracked_files(repo), set())
 

@@ -1583,56 +1583,79 @@ def _prior_page_text(repo_root: Path, path: Path) -> str | None:
     return r.stdout.decode("utf-8", errors="replace")
 
 
-def _repair_citation_paths(
+def _diagnose_citation_paths(
     path: Path, repo_root: Path, config: dict, state: dict, source_paths: set[str]
 ) -> None:
-    """CCE-141: repair citations the author shortened into unresolvable paths.
+    """CCE-141: report the tracked file a blocked citation was shortened from.
 
-    Runs beside _enforce_agent_frontmatter so content-validator only ever sees
-    an already-correct page. A repair is reported info_only: nothing was lost,
-    so the run is not degraded — but the digest line is the only signal that
-    would ever justify revisiting the author prompt, so it must not be silent.
+    DETECTION ONLY. This never rewrites the page — `citation_repair` has no
+    `write_text` and this function must never grow one. Its module docstring
+    records why the rewrite was deleted: four adversarial review rounds
+    produced four Criticals, each the same class in a new disguise (a repair
+    moving a citation into a region `citation_exists` does not verify, so a
+    BLOCK became a silent PASS), against a measured production value of zero
+    firings across the whole archived record.
 
-    `source_paths` is the batch's grounding set and is REQUIRED — it is half of
-    the corroborator ladder. A default would let an un-threaded call site fall
-    back to unconditional repair, which is exactly the defect this signature
-    exists to prevent.
+    Runs beside _enforce_agent_frontmatter, on the authored page, before
+    content-validator. It reads, it reports, it returns.
+
+    Classification: every line here is info_only=True. The decline line was
+    degraded=True while a decline meant a page did not ship; THAT REASONING IS
+    GONE. Nothing this function does affects whether the page ships. The page
+    blocks because `citation_exists` blocks it, and that block is already
+    reported and already classified (`lint_block`, degraded=True) — a second
+    degraded reason would double-count one failure, and would cost the run
+    auto-merge through CCE-140's `partial and not advance_cursor_backed` gate
+    for a line that is pure advice. add_partial still records an info_only
+    reason in `partial_reasons` and still emits it to stderr, so advisory is
+    not silent.
+
+    `source_paths` is the batch's grounding set and is REQUIRED. It is half of
+    the corroborator ladder, which is what separates a confidently-labelled
+    suggestion from a bare one; a default would let an un-threaded call site
+    silently downgrade every finding to `uncorroborated`.
+
+    The whole body is wrapped, and deliberately catches broadly. A diagnostic
+    must never be fatal to an unattended nightly, and there is no top-level
+    handler in `run()` or `main()` to fall back on: a `mkdocs.yml` whose top
+    level is a YAML list or a bare scalar parses fine and then raises
+    AttributeError on `.get` inside the linter helpers this reaches, which
+    would take down the entire run for an advisory. The failure is itself
+    reported as an advisory, for the same reason the findings are — it has no
+    bearing on page correctness — but reported, because a diagnostic that
+    silently stopped working is indistinguishable from one with nothing to say.
     """
-    import citation_repair
+    try:
+        import citation_repair
 
-    try:
-        text = path.read_text()
-    except (OSError, UnicodeDecodeError):
-        return
-    files = citation_repair.tracked_files(repo_root)
-    corroborators = citation_repair.build_corroborators(
-        _prior_page_text(repo_root, path), source_paths, files
-    )
-    new_text, repairs, declines = citation_repair.repair_text(
-        text, repo_root, config, files, corroborators
-    )
-    try:
-        label = path.relative_to(repo_root).as_posix()
-    except ValueError:
-        label = path.name
-    for old, new, why in declines:
-        # NOT info_only: a decline means the page does not ship. citation_exists
-        # still blocks it, the lint-block revert discards it, and CCE-140 defers
-        # its PRs — the same shape as `lint_block`, so the same classification.
-        # Silent here reproduces exactly the CCE-141 harm this feature exists to
-        # fix, one band narrower.
-        add_partial(
-            state,
-            f"citation_repair_declined: {label}: '{old}' -> candidate '{new}' ({why})",
-            degraded=True,
+        try:
+            text = path.read_text()
+        except (OSError, UnicodeDecodeError):
+            # citation_exists reports an unreadable/undecodable page itself; a
+            # second, vaguer line from here would be noise.
+            return
+        files = citation_repair.tracked_files(repo_root)
+        corroborators = citation_repair.build_corroborators(
+            _prior_page_text(repo_root, path), source_paths, files
         )
-    if not repairs:
-        return
-    path.write_text(new_text)
-    for old, new in repairs:
+        findings = citation_repair.diagnose(
+            text, repo_root, config, files, corroborators
+        )
+        try:
+            label = path.relative_to(repo_root).as_posix()
+        except ValueError:
+            label = path.name
+        for cited, candidate, confidence in findings:
+            add_partial(
+                state,
+                f"citation_shortening_suspected: {label}: '{cited}' -> "
+                f"'{candidate}' ({confidence})",
+                info_only=True,
+            )
+    except Exception as exc:  # noqa: BLE001 - a diagnostic must never be fatal
         add_partial(
             state,
-            f"citation_path_repaired: {label}: '{old}' -> '{new}'",
+            f"citation_diagnosis_failed: {path.name}: {type(exc).__name__}: {exc}",
             info_only=True,
         )
 
@@ -2458,11 +2481,12 @@ def run(
                     # already matches.
                     _enforce_agent_frontmatter(target_path, agent_fields)
                 if target_path.exists():
-                    # CCE-141: repair shortened citations before content-validator
-                    # runs. Deliberately NOT nested under the agent_fields guard —
-                    # a shortened citation blocks any page, not only the
+                    # CCE-141: DIAGNOSE shortened citations before
+                    # content-validator runs — report only, the page is never
+                    # rewritten. Deliberately NOT nested under the agent_fields
+                    # guard: a shortened citation blocks any page, not only the
                     # agent-authored-frontmatter ones.
-                    _repair_citation_paths(
+                    _diagnose_citation_paths(
                         target_path, repo_root, config, state, source_paths=grounding
                     )
 

@@ -22,6 +22,7 @@ _Operations: deployment workflows, configuration guides, and runbooks._
 - **Factual-Accuracy Guard** — The nightly pipeline historically validated structure — frontmatter contract, Tier-1 lint, strict site build — but never checked whether a page's prose was true. CCE-110 documented the failure mode: the page-author wrote conventional-but-wrong descriptions of deliberately counterintuitive code and cited tests that do not exist. The factual-accuracy guard closes that gap with three independent layers.
 - **GitHub CLI + Subagent Gotchas** — Two repeatable failure modes surfaced during the CCE-83 meta-orchestrator work. Both are silent: the orchestrator gets a result that looks plausible, parses it incorrectly or not at all, and proceeds on bad data. Neither shows up without an end-to-end integration test.
 - **GitHub Pages Bootstrap** — GitHub Pages must be bootstrapped once before the docs-pages workflow can publish to it. This page explains why the workflow itself cannot do this, how the setup skill handles it, what can go wrong, and how to recover.
+- **Graphify semantic-extraction findings** — `graphify` builds this repo's knowledge graph. If you've looked at
 - **Jira Auto-Transition on Merge** — When a CCE pull request merges to `main`, the repo automatically transitions its linked Jira issue(s) to **Done**. No manual triage step is needed.
 - **Jira Conventions** — All Jira work for this project lives in the **Claude-Code-Extensions** project at `https://designitright.atlassian.net`. The key prefix is `CCE`.
 - **Nightly Cron Cadence** — The docs-agent runs automatically once per day at **07:07 UTC** via `.github/workflows/docs-agent-nightly.yml`. Each run opens a new `docs-agent/YYYY-MM-DDTHH` branch and PR against the host repo's docs site. The runner never appends commits to a prior PR — each nightly is a fresh snapshot.
@@ -42,5 +43,5 @@ _Operations: deployment workflows, configuration guides, and runbooks._
 - **Step summary observability** — When a nightly run encounters a partial or hard-failed subagent, the runner writes a formatted digest to GitHub Actions' built-in step summary. You can read this digest directly in the workflow run UI without downloading any forensics artifact.
 - **The nightly workflow** — Every onboarded host runs `docs-agent-nightly` — rendered from `templates/workflow-run.yml` at scaffold time into `.github/workflows/docs-agent-nightly.yml` — on a schedule, plus two extra triggers. `scripts/scaffold_workflow.py` rewrites the cron minute per host so 100 onboarded repos don't all fire at the same instant; the template default is a `7 7 * * *` off-minute cron, and setup picks a deterministic minute in `[5, 55]` for each new host.
 
-_31 pages · regenerated nightly_
+_32 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

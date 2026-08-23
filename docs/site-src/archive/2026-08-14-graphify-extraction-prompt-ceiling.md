@@ -98,6 +98,18 @@ already flat across file sizes — but it matters for request budgeting: a
 large plan silently costs roughly 7x its apparent share of any daily request
 allowance.
 
+## Outcome
+
+The hypothesis CCE-146 left open — "the prompt itself was untested" — is
+closed. Four batching passes had already shown the ratio does not move under
+any batching change; this test shows it moves 6-8x under a prompt change
+alone, on the same shared library path. The out-of-scope filter itself was
+never the defect: it was discarding correctly-attributed nodes because the
+stock prompt gave the model no reason to attribute a document's own concepts
+to that document. DOCUMENT MODE fixes the attribution, not the filter, which
+is why the fix composes cleanly with the filter instead of requiring a patch
+to it.
+
 ## Source of truth
 
 The full methodology, the complete measurement history this test closes out

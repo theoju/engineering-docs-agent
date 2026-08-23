@@ -4,7 +4,7 @@ source_files:
   - docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md
   - scripts/lint/citation_exists.py
   - tests/lint/test_citation_exists.py
-last_reviewed: '2026-08-22'
+last_reviewed: '2026-08-23'
 status: draft
 ---
 # Linting: citation existence
@@ -107,6 +107,8 @@ pages per run this way before the fix, because no JavaScript or TypeScript
 definition form matched at all under the old symbol resolver: not
 `export const`, not `export function`, not `export class`. On a JS host,
 every `path.mjs:symbol` citation blocked, full stop.
+
+Reference: CCE-145 (2026-08-21).
 
 ## What this rule is not
 

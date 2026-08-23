@@ -88,4 +88,14 @@ exemption from day one, rather than waiting for its own incident.
 ## Reference
 
 Incident: 2026-08-21, `theoju/claude-code-self-assessment` runs `32460602658`
-and `32495019606`. Fix: PR #239.
+and `32495019606`. Fix: PR #239, `scripts/lint/internal_links.py`.
+
+The regression suite pins every claim above as a separate case in
+`tests/lint/test_internal_links.py`: a fenced example link, an inline-span
+example link, and a double-backtick-delimited example link each pass; a real
+broken link beside an example, a broken link after a closed fence, and a
+broken link hidden behind an unterminated fence each still block. That last
+case is the CCE-131 parity check — it asserts the imported
+`strip_fenced_blocks` fails closed here the same way it does in
+`citation_exists`, rather than swallowing the rest of the file on an unclosed
+fence.

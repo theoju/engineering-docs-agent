@@ -71,9 +71,9 @@ reaches the filter's comparison set; a prompt instruction reaches its input
 — `source_file` — directly, and that's why the prompt change beat every
 batching experiment combined.
 
-## Two things the original runbook got wrong, now corrected
+## Three things the original runbook got wrong, now corrected
 
-The runbook's earlier drafts made two claims that turned out to be false and
+The runbook's earlier drafts made three claims that turned out to be false and
 have since been corrected in place:
 
 - It claimed the extraction pipeline's daily-quota-driven character cap
@@ -88,6 +88,13 @@ have since been corrected in place:
   the Haiku backend. (It does not survive on Gemini — the crowding tax
   measured in the reference-aware batching experiment is a Gemini-specific
   property, not a property of the fix itself.)
+- It estimated a full pass at roughly $2.50. That figure was derived from
+  Gemini's token accounting and doesn't transfer to Haiku: the actual cost
+  is **~10x higher**, because `claude -p` carries the entire Claude Code
+  harness — system prompt, CLAUDE.md, MCP tool definitions — in every
+  request, and `--no-session-persistence` prevents reuse across chunks. On
+  a Claude subscription none of this is billed per token, so the number
+  that actually matters now is wall clock, not the old dollar figure.
 
 ## When you touch extraction
 

@@ -56,3 +56,5 @@ An explicit `authoring_hard_cap_seconds` at or below the resolved budget is reje
 ## See also
 
 [Orchestrator](../architecture/orchestrator.md) documents the full soft-time-budget mechanism, including the other three checkpoints (PR admission, fact-checking, gap-detection) that this fix left unchanged.
+
+[Subagent Forensic Capture in CI](../operations/2026-05-28-subagent-forensics.md) notes the downstream consequence of the hard-cap arithmetic above: since CCE-152, the 90-minute job `timeout-minutes` is no longer the binding ceiling on a run — the GitHub App installation token's one-hour TTL is — so the forensic-capture latency overhead documented there is spent inside that tighter budget, not the job timeout.

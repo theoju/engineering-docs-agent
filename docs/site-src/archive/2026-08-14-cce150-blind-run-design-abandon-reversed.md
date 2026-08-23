@@ -21,7 +21,7 @@ So the sequence, in order, was:
 1. PR #223 merges, archiving the blind-run-detection design as abandoned and closing CCE-150.
 2. Nine minutes later, PR #224 merges the same implementation to `main`.
 
-Everything PR #223 asserted about the design being unimplemented was true only for those nine minutes, and false for the entire time since.
+Everything PR #223 asserted about the design being unimplemented was true only for those nine minutes, and false for the entire time since. PR #223's own title and body flag this directly: every factual claim below its warning banner is marked false as of 2026-08-14T07:25:23Z, superseded by PR #224. The self-correction is part of the PR record, not something reconstructed after the fact.
 
 ## Why this page exists
 

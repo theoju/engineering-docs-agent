@@ -74,3 +74,4 @@ If a nightly is green, `current_run.partial` is `true`, and the baseline still m
 - `scripts/orchestrator_runner.py`: `run`, `advance_cursor_list`, `partition_deferrals`, `_should_advance_watermark`.
 - `tests/orchestrator/fakes_mixed_block/README.md`: the per-PR fixture override this incident's regression coverage depends on.
 - `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`: the spec whose known residual this ticket closes.
+- `docs/site-src/architecture/orchestrator.md`: the live description of the watermark-promotion step this fix changed — read that page for the current end-to-end pipeline shape, this one for why step 8 now walks the cursor unconditionally.

@@ -80,3 +80,4 @@ A same-day PR (#223) briefly stamped this design "NOT IMPLEMENTED — archived, 
 
 - Design: `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`
 - Implementation: `scripts/state_io.py:add_partial`, `scripts/orchestrator_runner.py:_record_dispatch_reasons`, `scripts/orchestrator_runner.py:_exit_code`, `scripts/orchestrator_runner.py:_should_advance_watermark`, `scripts/orchestrator_runner.py:_maybe_auto_merge`
+- Tests: `tests/state_io/test_add_partial_blind.py` (blind/degraded/info_only precedence on `add_partial`), `tests/orchestrator/test_classification_coverage.py` (every blocking call site must pass an explicit classification kwarg or the suite fails), `tests/orchestrator/test_blind_run_interlocks.py` and `tests/orchestrator/test_cursor_backed_merge.py` (auto-merge gate ordering against the CCE-140 carve-out)

@@ -58,7 +58,7 @@ Three consumers read the resulting `current_run.blind` flag, all classified by c
 - **Watermark.** `_should_advance_watermark` refuses the `last_successful_run` advance whenever the run is blind. Re-processing a window is cheap and idempotent; skipping one, as the incident showed, is not.
 - **Auto-merge.** `_maybe_auto_merge` gained a `blind` keyword and skips unconditionally, ahead of the CCE-140 `partial and not advance_cursor_backed` carve-out. That ordering matters: a run that time-truncates sets `advance_cursor_backed = True`, and if its `content-validator` dispatch then returns `None`, the run is blind, `partial`, *and* cursor-backed at once — the CCE-140 carve-out alone would let that PR merge.
 
-A classification-coverage test enumerates every blocking `add_partial` call site in `scripts/orchestrator_runner.py` and fails on one left unclassified, so the audit performed for this change doesn't silently decay as the file grows.
+`tests/orchestrator/test_classification_coverage.py` enumerates every blocking `add_partial` call site — walking `scripts/orchestrator_runner.py` and, since the same ambiguity exists there, `scripts/verify_runner.py` — and fails on any site that passes neither `info_only` nor `degraded`. It is deliberately not a registry mapping call site to classification: a registry decays as sites move; requiring the keyword at the call site itself cannot.
 
 ## What stayed green on purpose
 
@@ -80,3 +80,4 @@ A same-day PR (#223) briefly stamped this design "NOT IMPLEMENTED — archived, 
 
 - Design: `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`
 - Implementation: `scripts/state_io.py:add_partial`, `scripts/orchestrator_runner.py:_record_dispatch_reasons`, `scripts/orchestrator_runner.py:_exit_code`, `scripts/orchestrator_runner.py:_should_advance_watermark`, `scripts/orchestrator_runner.py:_maybe_auto_merge`
+- Tests: `tests/orchestrator/test_classification_coverage.py`, `tests/orchestrator/test_dispatch_reasons_classification.py`, `tests/orchestrator/test_blind_run_interlocks.py`, `tests/state_io/test_add_partial_blind.py`

@@ -65,7 +65,13 @@ bug this fix closes.
 This is not a blanket amnesty on link checking. A real broken link in prose,
 sitting right next to an exempted example, still blocks — the fix strips code
 spans and fences, nothing else. Links that survive a closed fence, or that
-appear after a fence closes, are still checked normally.
+appear after a fence closes, are still checked normally. That's pinned by
+`tests/lint/test_internal_links.py::test_real_broken_link_beside_an_example_still_blocks`
+(a real link next to a code-span example and a fenced example still blocks,
+and the example targets don't leak into the reported message) and
+`test_broken_link_after_a_closed_fence_still_blocks` (checking resumes once a
+fence closes). A working relative link — the rule's actual job — still passes
+alongside an example span, per `test_working_relative_link_still_passes`.
 
 One known limit is explicit in the module docstring: indented (4-space) code
 blocks are not stripped. They're ambiguous with list continuation, and telling
@@ -88,4 +94,5 @@ exemption from day one, rather than waiting for its own incident.
 ## Reference
 
 Incident: 2026-08-21, `theoju/claude-code-self-assessment` runs `32460602658`
-and `32495019606`. Fix: PR #239.
+and `32495019606`. Fix: PR #239. Implementation: `scripts/lint/internal_links.py`.
+Tests: `tests/lint/test_internal_links.py`.

@@ -3,7 +3,7 @@ description: 'Documents architecture glossary: Adds two net-new documentation fi
 source_files:
   - CONTEXT.md
   - docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md
-last_reviewed: '2026-08-22'
+last_reviewed: '2026-08-24'
 status: draft
 ---
 # Glossary

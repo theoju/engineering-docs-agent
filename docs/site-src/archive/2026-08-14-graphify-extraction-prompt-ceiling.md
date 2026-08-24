@@ -93,6 +93,13 @@ chunking, so the model sees all of the file's content — spread across N
 requests. A 123.8 KB plan expands to 7 slices and costs 7 requests, not 1,
 even at `chunk_size=1`.
 
+Because the cap is a fixed character count rather than a token- or
+line-aware boundary, a slice edge can land inside a token instead of between
+two of them — the split is clean in bytes, not in tokens. That doesn't change
+what the model eventually sees (every character still arrives, in some
+slice), only how the content is divided across the N requests that deliver
+it.
+
 The correction doesn't change the node-ratio finding above — the ratio was
 already flat across file sizes — but it matters for request budgeting: a
 large plan silently costs roughly 7x its apparent share of any daily request

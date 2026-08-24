@@ -71,10 +71,10 @@ reaches the filter's comparison set; a prompt instruction reaches its input
 — `source_file` — directly, and that's why the prompt change beat every
 batching experiment combined.
 
-## Two things the original runbook got wrong, now corrected
+## Three things the original runbook got wrong, now corrected
 
-The runbook's earlier drafts made two claims that turned out to be false and
-have since been corrected in place:
+The runbook's earlier drafts made three claims that turned out to be false
+and have since been corrected in place:
 
 - It claimed the extraction pipeline's daily-quota-driven character cap
   truncates files before the prompt is built. It doesn't — oversized files
@@ -82,6 +82,11 @@ have since been corrected in place:
   the whole file, spread across more requests. The correction matters for
   budgeting: a large plan silently costs several times its "one file, one
   request" share of a rate-limited allowance.
+- It described Gemini's free-tier ceiling as a per-minute limit and built a
+  7-second inter-batch sleep around that reading. The limit is actually
+  20 requests per **day**, not per minute — the sleep was harmless but
+  addressed the wrong constraint. Moot now on the Haiku backend, but it's
+  the reason earlier Gemini-era experiments took days rather than hours.
 - It carried an "untested at scale" caveat on the DOCUMENT MODE prompt fix.
   That's discharged: the 81-document corpus run above is the at-scale
   result, and it confirms the per-file gain survives multi-file chunks on

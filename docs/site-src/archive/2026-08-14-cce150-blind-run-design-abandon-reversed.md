@@ -14,7 +14,7 @@ doc_kind: decision
 
 On 2026-08-14 an operator instructed a session to abandon the unmerged `feat/CCE-144-blind-run-detection` branch, on the premise that its work was stranded and unreachable. PR #223 archived the CCE-144 plan and spec under that premise, stamping them as abandoned and closing ticket CCE-150.
 
-The premise was wrong. The branch had in fact been pushed, and its commits were not unreachable. The operator reversed the abandon decision almost immediately — within nine minutes of PR #223 merging — and the CCE-144 implementation itself merged to `main` as PR #224.
+The premise was wrong. The branch had in fact been pushed at `5021f11`, and its commits were not unreachable. Every factual claim below PR #223's own warning banner is flagged, in the PR itself, as false as of 2026-08-14T07:25:23Z — the moment PR #224 superseded it. The operator reversed the abandon decision almost immediately, within nine minutes of PR #223 merging, and the CCE-144 implementation itself merged to `main` as PR #224.
 
 So the sequence, in order, was:
 
@@ -31,4 +31,4 @@ This page exists to close that gap for future readers. It does not add architect
 
 ## What to do if you land here
 
-Don't treat PR #223's body, or the archived plan/spec it points at, as authoritative for what the docs-agent runner does. Go to the CCE-144 spec and the CLAUDE.md entry instead — those describe the shipped `blind` vs. `degraded` split, the three consumers that read the flag, and the incident that motivated it. Treat CCE-150 as closed-in-error: the ticket is done, but not for the reason its closure said.
+Don't treat PR #223's body, or the archived plan/spec it points at, as authoritative for what the docs-agent runner does. Go to the CCE-144 spec and the CLAUDE.md entry instead — those describe the shipped `blind` vs. `degraded` split, the three consumers that read the flag, and the incident that motivated it. The CCE-144 spec itself carries the symmetric cross-reference: its own header states it "supersedes the CCE-150 archive" and explains the same false premise from the other side. Treat CCE-150 as closed-in-error: the ticket is done, but not for the reason its closure said.

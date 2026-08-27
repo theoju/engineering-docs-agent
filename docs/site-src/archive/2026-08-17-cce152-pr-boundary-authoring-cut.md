@@ -49,9 +49,15 @@ time_budget_exceeded: authored 2/5 page batches (hard cap 2415s over budget 2100
 
 An explicit `authoring_hard_cap_seconds` at or below the resolved budget is rejected as a config error (exit 2) rather than silently clamped up — equal collapses the hard deadline onto the soft one and quietly restores the pre-fix mid-group cut in exactly the place an operator was trying to configure it away.
 
+## The config key was documented but unreachable
+
+`run.authoring_hard_cap_seconds` was written into the resolver's own docstring and read by `resolve_authoring_hard_cap` from the start of this fix — but `templates/config.schema.json`'s `run` block still declared `additionalProperties: false` without listing the new key. A host that added `run.authoring_hard_cap_seconds` to its config exactly as documented failed schema validation at load and exited 2 before authoring ever ran, every single night. Every existing unit test missed this because it handed the resolver a raw Python dict the schema never sees; only a test that loads a real config file through `load_config_validated` exercises the gap.
+
+`templates/config.schema.json` now declares `authoring_hard_cap_seconds` in the `run` block (integer, minimum 1) alongside its siblings. The "must exceed `time_budget_seconds`" rule stays out of the schema on purpose — JSON Schema draft-07 cannot compare two sibling properties — so that comparison still lives in `resolve_authoring_hard_cap` at load time, and the schema's own `description` says so rather than implying structural enforcement it can't provide.
+
 ## Verification
 
-`tests/orchestrator/test_pr_boundary_authoring_cut.py` drives the fix end to end: a past-soft-deadline cut mid-group keeps running to the PR boundary and the baseline advances to it; a shared batch between two PRs is recognized as owned by the older one; a hard-cap cut still lands inside the group and reports that the baseline cannot advance; and a skipped (`unknown_lens`) batch doesn't fabricate a spurious boundary. `tests/orchestrator/test_authoring_hard_cap_bounds.py` covers the cap resolver's clamping and squeeze arithmetic in isolation.
+`tests/orchestrator/test_pr_boundary_authoring_cut.py` drives the fix end to end: a past-soft-deadline cut mid-group keeps running to the PR boundary and the baseline advances to it; a shared batch between two PRs is recognized as owned by the older one; a hard-cap cut still lands inside the group and reports that the baseline cannot advance; a skipped (`unknown_lens`) batch doesn't fabricate a spurious boundary; and a configured `authoring_hard_cap_seconds` loads through the host's own config file and governs the cut, closing the schema gap above. `tests/orchestrator/test_authoring_hard_cap_bounds.py` covers the cap resolver's clamping and squeeze arithmetic in isolation, and round-trips a config carrying the new key through `load_config_validated` rather than handing the resolver a raw dict, which is the exact substitution that let the schema gap ship unnoticed.
 
 ## See also
 

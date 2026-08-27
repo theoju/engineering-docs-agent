@@ -50,6 +50,11 @@ cache miss, never a crash — on a missing key, a malformed entry, or a bad
 merge_sha/fingerprint. `next_pr_summaries` is the write side that computes
 the following run's cache from this run's window and dispatch results.
 
+A served entry's `pr_number` is re-stamped from the PR object driving the
+admission loop before it's used, exactly as a fresh `pr-summarizer` dispatch
+already is — a cached entry's own echo is never trusted over the PR that
+triggered the hit.
+
 ## What survives between runs
 
 Storage is `state.json.pr_summaries`, keyed `{owner}/{name}#{pr}`, the same
@@ -92,13 +97,16 @@ degrade gracefully, it aborts the host's nightly at config validation.
 
 ## Reporting
 
-A run that served entries from cache records an `info_only`
-`pr_summaries_reused: n/m` reason. This is deliberately non-blocking: the
-saving describes work the run did *not* have to do, the opposite of a
-degradation, and flipping `partial` on a successful optimization would cost
-auto-merge every night through CCE-140's `partial and not
-advance_cursor_backed` gate — turning the optimization itself into an
-outage. It's recorded at all only because a saving nobody can see is
+A run that served entries from cache records an `info_only` reason of the
+form `pr_summaries_reused: N/M PRs served from cache, N pr-summarizer
+dispatches skipped`, where `M` is the size of the full collection window
+(`window_prs`, captured before admission truncation) and `N` is how many of
+those PRs this run served from cache rather than dispatching for. This is
+deliberately non-blocking: the saving describes work the run did *not* have
+to do, the opposite of a degradation, and flipping `partial` on a successful
+optimization would cost auto-merge every night through CCE-140's `partial
+and not advance_cursor_backed` gate — turning the optimization itself into
+an outage. It's recorded at all only because a saving nobody can see is
 indistinguishable from a feature that silently stopped working.
 
 ## Related

@@ -1156,6 +1156,18 @@
       "architecture/cce32-github-pages-publish-target.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/plans/2026-08-21-cce141-citation-path-repair.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/plans/2026-08-21-cce141-corroborated-repair.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/specs/2026-05-19-engineering-docs-agent-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1502,6 +1514,11 @@
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/specs/2026-08-21-cce141-citation-path-repair-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1733,6 +1750,9 @@
     "tests/orchestrator/test_cursor_backed_merge.py": [
       "architecture/orchestrator.md"
     ],
+    "tests/orchestrator/test_deferral_skip.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_degraded_advance_non_truncated.py": [
       "architecture/orchestrator.md"
     ],
@@ -1784,6 +1804,9 @@
     ],
     "tests/orchestrator/test_source_map_stage.py": [
       "architecture/cce-capability-c-canonical-core-citations.md"
+    ],
+    "tests/orchestrator/test_state_advancement_invariant.py": [
+      "architecture/orchestrator.md"
     ],
     "tests/orchestrator/test_verify_runner.py": [
       "architecture/cce4-schema-enforcement.md",
@@ -1948,6 +1971,8 @@
       "tests/orchestrator/test_pr_summary_reuse.py",
       "tests/orchestrator/test_pr_boundary_authoring_cut.py",
       "tests/orchestrator/test_degraded_advance_non_truncated.py",
+      "tests/orchestrator/test_state_advancement_invariant.py",
+      "tests/orchestrator/test_deferral_skip.py",
       "tests/templates/test_workflow_run_parity.py"
     ],
     "architecture/publish-verifier.md": [

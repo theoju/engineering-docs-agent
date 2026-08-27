@@ -85,6 +85,29 @@ is to quote that example. Any future Tier-1 rule that matches on link-shaped
 or citation-shaped text in prose should assume it needs the same code-aware
 exemption from day one, rather than waiting for its own incident.
 
+## Test coverage
+
+The exemption and its limits are each pinned by a dedicated test in
+`tests/lint/test_internal_links.py`, not just asserted in prose:
+
+- `tests/lint/test_internal_links.py:test_fenced_example_link_is_not_a_broken_link`
+  and `tests/lint/test_internal_links.py:test_inline_code_span_example_link_is_not_a_broken_link`
+  pin the two shapes of the original incident — a link shown inside a fenced
+  block, and one shown inside a single-backtick inline span.
+- `tests/lint/test_internal_links.py:test_double_backtick_span_example_link_is_not_a_broken_link`
+  pins the double-backtick-run case specifically, since that's the delimiter
+  form the design spec actually used and the one a single-backtick-only
+  matcher would miss.
+- `tests/lint/test_internal_links.py:test_real_broken_link_beside_an_example_still_blocks`
+  and `tests/lint/test_internal_links.py:test_broken_link_after_a_closed_fence_still_blocks`
+  guard against the fix becoming a blanket amnesty: a genuine broken link
+  sitting next to an exempted example, or appearing after a fence closes,
+  still fails the build.
+- `tests/lint/test_internal_links.py:test_unterminated_fence_fails_closed` pins
+  the CCE-131 fail-closed behaviour carrying over from the imported
+  `strip_fenced_blocks` helper — an unclosed fence must not silently swallow
+  every link to end of file.
+
 ## Reference
 
 Incident: 2026-08-21, `theoju/claude-code-self-assessment` runs `32460602658`

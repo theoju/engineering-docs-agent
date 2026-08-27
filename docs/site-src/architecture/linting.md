@@ -4,7 +4,7 @@ source_files:
   - docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md
   - scripts/lint/citation_exists.py
   - tests/lint/test_citation_exists.py
-last_reviewed: '2026-08-22'
+last_reviewed: '2026-08-27'
 status: draft
 ---
 # Linting: citation existence
@@ -107,6 +107,12 @@ pages per run this way before the fix, because no JavaScript or TypeScript
 definition form matched at all under the old symbol resolver: not
 `export const`, not `export function`, not `export class`. On a JS host,
 every `path.mjs:symbol` citation blocked, full stop.
+
+That headline count is no longer current, and for a second, unrelated reason:
+a separate change now cuts authoring at a PR boundary, so far fewer pages are
+authored per run in the first place. The false-positive *rate* on JS symbol
+citations was 100% until this fix landed — the per-run page count fell for a
+different reason than the rate did.
 
 ## What this rule is not
 

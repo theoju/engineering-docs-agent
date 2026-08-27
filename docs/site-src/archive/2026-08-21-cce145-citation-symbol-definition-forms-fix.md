@@ -144,6 +144,13 @@ the false-positive *rate* on JS symbol citations was 100% until this change.
 
 Ticket: [CCE-145](https://designitright.atlassian.net/browse/CCE-145). Spec:
 `docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md`.
+Landed as [PR #237](https://github.com/theoju/engineering-docs-agent/pull/237).
 Touches: `scripts/lint/citation_exists.py`, `tests/lint/test_citation_exists.py`.
 Related: CCE-122 (line-free citation grammar), CCE-141/CCE-152 (stranding
 prevention for pages dropped by a blocking-pipeline failure).
+
+A note on framing: the fix is sometimes shorthanded as covering "Python
+symbol citations." That undersells it — `_DEFINITION_FORMS` is deliberately
+language-agnostic (see above), and the live-reproduction case that motivated
+the fix (`memory` in `scripts/score.mjs`) was JavaScript, not Python. The
+matcher it replaced was Python-shaped; the matcher it shipped is not.

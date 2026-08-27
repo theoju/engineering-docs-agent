@@ -20,7 +20,7 @@ by less than 0.5, which is consistent with a ceiling that batching cannot
 reach.
 
 CCE-148 tested that hypothesis directly instead of carrying it forward as
-another guess.
+another guess. The test and its writeup landed as PR #221.
 
 ## Method
 

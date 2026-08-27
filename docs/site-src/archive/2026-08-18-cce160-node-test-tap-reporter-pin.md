@@ -29,3 +29,7 @@ The suite also gained a regression test that sets `FORCE_COLOR` explicitly rathe
 ## Why this matters beyond the one test
 
 No production code changed — only `CHANGELOG.md` and `tests/templates/test_sdd_fidelity_gate_node.py`. But the underlying gotcha generalizes: any stdout-parsing test or script that pattern-matches CLI output line-anchored, without pinning a machine-readable output mode, is exposed to the same `FORCE_COLOR`-shaped blind spot in agent sessions. If you're writing a parser against `node:test`, `npm`, or any other Node-ecosystem tool's default output, prefer its explicit machine-readable mode (TAP, `--json`, etc.) over the human-facing default, and test the coloured path deliberately rather than trusting session inheritance to exercise it for you.
+
+## Where this fits
+
+`tests/templates/test_sdd_fidelity_gate_node.py` is the integrated-pytest wrapper around the JS unit suite for `docs/superpowers/templates/sdd-fidelity-gate.mjs` — the verification-ladder implementation described in `docs/superpowers/templates/sdd-fidelity-gate.md`. This fix is scoped to the wrapper's own summary-parsing regex, not to the ladder's Tier 0/1/2 gating logic; the `.mjs` module and its behavior are unchanged. If you're debugging why the JS gate suite reports as unparseable rather than red or green, check the reporter flag on the `node --test` invocation before suspecting the ladder itself.

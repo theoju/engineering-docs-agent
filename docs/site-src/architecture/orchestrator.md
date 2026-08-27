@@ -18,8 +18,10 @@ source_files:
   - tests/orchestrator/test_pr_summary_reuse.py
   - tests/orchestrator/test_pr_boundary_authoring_cut.py
   - tests/orchestrator/test_degraded_advance_non_truncated.py
+  - tests/orchestrator/test_state_advancement_invariant.py
+  - tests/orchestrator/test_deferral_skip.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-08-22"
+last_reviewed: "2026-08-27"
 status: draft
 doc_kind: architecture
 ---
@@ -163,10 +165,13 @@ Until CCE-151, that whole apparatus — computing `held_back`, deciding forgiven
 
 CCE-151's fix is structural, not a new veto: `partition_deferrals` and `held_back` are now computed UNCONDITIONALLY every run, and the cursor walk is entered whenever `time_truncated or held_back` — not only on `time_truncated`. A clean run with nothing held back still takes the plain window-HEAD advance (the `else` branch, now gated on `held_back` being empty), so ordinary behavior is unchanged.
 
-Two traps this took to get right:
+The inversion reaches into the test suite, not just the runner. `test_partial_run_via_lint_block_holds_state_when_nothing_was_documented` (`tests/orchestrator/test_state_advancement_invariant.py:test_partial_run_via_lint_block_holds_state_when_nothing_was_documented`) used to assert the opposite of what it asserts now — that a lint-block run still advanced the watermark to full window HEAD, on a literal reading of the old CCE-40 §7 row 4 contract ("a partial run still advances"). CCE-151 flips that assertion in place, and the flip is the point of the ticket rather than collateral damage: the fixture behind it holds exactly one PR whose only page is blocked, so every admitted PR is held back and there is no documented PR left to anchor a cursor-backed advance on. What CCE-40 §7 row 4 was protecting survives in the weaker form CCE-151 leaves it in — a run that documents SOME PRs still advances past them, which is what keeps a permanently-unlintable page from wedging the cursor forever.
+
+Three traps this took to get right:
 
 - **Gating the watermark refusal on `partial` instead of on `held_back` would have reinstated the CCE-109 doom loop.** A permanently-unlintable page would freeze the baseline forever — the cursor has to keep MOVING, just never past undocumented work. `held_back` names exactly the unfinished content; `partial` alone does not.
 - **Hoisting only the READ of `deferred_pages_by_pr` was not enough — `partition_deferrals` had to move too.** With `still_deferred` left at its default empty list on the non-truncated path, `next_deferral_counts` (`scripts/orchestrator_runner.py:next_deferral_counts`) silently cleared the deferral count of every held-back PR on every run that didn't time-truncate, so no PR could ever accumulate enough consecutive deferrals to reach the CCE-140 skip threshold. That release valve is what stops the first trap from recurring by another route.
+- **Merge-as-promotion was never the containment the pre-fix design assumed.** The reasoning before CCE-151 held that an operator merging the nightly PR by hand was itself a safety check on a bad advance. But merging is all-or-nothing: on the host that surfaced this incident, one nightly PR (#203) carried a recovered page and a poisoned watermark advance in the same diff, so the operator's only choices were to accept both or lose the recovery. A gate that cannot be applied to half a PR is not a gate on the half that is wrong — the fix has to live in the advance logic itself, not in the merge step downstream of it.
 
 The reason strings the walk emits are cause-dependent: `time_budget_*` on the time-truncated path (kept byte-identical, since `test_time_budget.py` and `test_deferral_skip.py` assert those exact strings and the CCE-109/CCE-140 runbooks tell operators to grep for them) and `held_back_*` on the newly-covered non-time path — e.g. `held_back_no_advance_no_cursor` when no admitted PR carries a usable `merge_sha`, or `held_back_no_advance_unanchored_deferred` when a still-deferred PR has none. Neither family is in `_MERGE_VETO_REASON_PREFIXES` (`scripts/orchestrator_runner.py:_MERGE_VETO_REASON_PREFIXES` — one entry, `app_token_unavailable`), and both keep `degraded=True`, so this change is orthogonal to the blind/degraded split above.
 

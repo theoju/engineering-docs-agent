@@ -4,7 +4,7 @@ source_files:
   - docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md
   - scripts/lint/citation_exists.py
   - tests/lint/test_citation_exists.py
-last_reviewed: '2026-08-22'
+last_reviewed: '2026-08-28'
 status: draft
 ---
 # Linting: citation existence
@@ -118,3 +118,8 @@ agent, which is explicitly out of scope for citation location or line drift.
 Keeping the two concerns on separate sides of that line is what lets
 `citation_exists` block hard on Tier-1 without also becoming a second,
 redundant fact-checker.
+
+The symbol-resolution fix landed in PR #237, closing CCE-145. See the
+CCE-145 decision record in the architecture archive for the full incident
+account — the reproduction, the root-cause diff, and the before/after
+measurement across the two reference nightly runs.

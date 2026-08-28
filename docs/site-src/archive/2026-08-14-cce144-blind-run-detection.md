@@ -68,6 +68,14 @@ The four `time_budget_exceeded` sites (CCE-109 truncation) and `lint_block` stay
 
 The design explicitly left several things untouched: provisioning a Slack alarm (no `SLACK_WEBHOOK_URL` was configured on the dogfood at the time), moving the nightly cron earlier in the week, and recovering the three PRs already lost behind the frozen cursor — rewinding `last_successful_run.head_sha` to replay that window is a live-state operator decision, tracked separately.
 
+## Test coverage
+
+`tests/state_io/test_add_partial_blind.py` pins `add_partial`'s three-way precedence directly: a bare call flips both `partial` and `blind` and records the reason in `blind_reasons`; `degraded=True` flips `partial` only; `info_only=True` flips neither and wins even when `degraded=True` is also passed. It also asserts `blind` is monotonic within a run — one blind reason recorded after several degraded ones still leaves `blind` `True` — and that `blind_reasons` is redacted the same way `partial_reasons` is.
+
+`tests/orchestrator/test_blind_run_interlocks.py` covers the three consumers end to end: `_exit_code` returns `1` only when `current_run.blind` is true; the watermark guard leaves `last_successful_run` untouched on a blind run (including the truncated case, where the `time_truncated` block must not write `window_head_sha` into the old cursor); and `_maybe_auto_merge` skips with reason `blind_run` ahead of the CCE-140 `partial and not advance_cursor_backed` carve-out — the suite's own regression test is the blind-and-cursor-backed case, which is the exact combination the CCE-140 gate alone would have let through. A separate test drives a blind reason and a time-budget truncation through the real `orchestrator_runner.run` in one invocation, so the guard is proven against the production code path, not only against a hand-copied mirror of its logic.
+
+`tests/orchestrator/test_classification_coverage.py` enumerates every `add_partial` call in `scripts/orchestrator_runner.py` and `scripts/verify_runner.py` by AST and fails if any call site passes neither `info_only` nor `degraded` — the mechanism that keeps the fail-safe default from decaying silently as the file grows.
+
 ## Later correction: CCE-151
 
 CCE-144's watermark and auto-merge interlocks only reached as far as the `if time_truncated:` branch — a run that was `partial` for a non-time reason (a lint block, a `page_author_invalid`) still advanced straight to window HEAD without ever reading `deferred_pages_by_pr`. CCE-151 (2026-08-21) hoisted the cursor walk to trigger on `time_truncated or held_back`, closing that gap; see `scripts/orchestrator_runner.py:_should_advance_watermark` and the surrounding cursor-walk block for current behavior. That correction does not change any of the blind/degraded classifications recorded above.

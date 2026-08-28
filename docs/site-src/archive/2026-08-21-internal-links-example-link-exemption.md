@@ -36,7 +36,8 @@ the page is never written, and nothing stays red to tell you it's missing.
 
 `internal_links` now strips code before matching links, the same way
 `citation_exists` has since CCE-110 ("fenced examples are legitimately
-hypothetical"). Concretely, `check_path` runs `strip_code` over the file
+hypothetical"). Concretely, `check_path` (`scripts/lint/internal_links.py:check_path`)
+runs `strip_code` (`scripts/lint/internal_links.py:strip_code`) over the file
 before `LINK_RE` ever sees it, and `strip_code` does two things in sequence:
 
 1. Strip fenced blocks by calling `strip_fenced_blocks`, **imported directly
@@ -65,7 +66,10 @@ bug this fix closes.
 This is not a blanket amnesty on link checking. A real broken link in prose,
 sitting right next to an exempted example, still blocks — the fix strips code
 spans and fences, nothing else. Links that survive a closed fence, or that
-appear after a fence closes, are still checked normally.
+appear after a fence closes, are still checked normally. `tests/lint/test_internal_links.py`
+pins both cases directly: a genuine broken link sitting beside an exempted
+example still fails the build, and a broken link placed after a closed fence
+still fails even though the fence's own contents are exempt.
 
 One known limit is explicit in the module docstring: indented (4-space) code
 blocks are not stripped. They're ambiguous with list continuation, and telling

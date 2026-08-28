@@ -32,6 +32,13 @@ field to flip. If you need to force Haiku, remove those keys rather than
 looking for a setting — re-exporting either one anywhere silently reverts
 extraction to Gemini with no warning.
 
+On an identical 3-file chunk with an identical DOCUMENT MODE prompt, Haiku
+returned 19 nodes against Gemini's 10, with no out-of-scope drops on either
+side. Haiku also shows **no crowding tax**: it held 6.33 nodes/doc at chunk
+size 3, matching its own solo depth. The chunk-3 degradation from the
+reference-aware batching experiment (below) is a Gemini-specific property and
+does not carry over to Haiku.
+
 Two more environment traps worth knowing before you run a corpus pass:
 
 - `GRAPHIFY_CLAUDE_CLI_PARALLEL` is compared with an exact string match against

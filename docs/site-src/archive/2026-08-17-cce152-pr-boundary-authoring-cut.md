@@ -40,7 +40,7 @@ A batch's owning PR is its oldest contributor — `batch_summaries[0]` in the gr
 
 This guarantees that whenever the deadline forces a stop, the run has authored a **complete prefix of PRs** — so the cursor is always non-empty and the baseline always has somewhere to advance to, unless the very first PR in the window is itself too large to finish (see the hard cap below).
 
-Deferring to a PR boundary is unbounded on its own: one PR fanning out to twenty pages could run the authoring loop well past the GitHub App installation token's TTL. `resolve_authoring_hard_cap` (`scripts/orchestrator_runner.py:resolve_authoring_hard_cap`) bounds the overrun — `run.authoring_hard_cap_seconds` from config, or `time_budget_seconds * 1.15` by default — and clamps that value down against the token TTL ceiling (`GITHUB_APP_TOKEN_TTL_SECONDS` minus the merge-check poll minus a fixed post-run tail). Past the hard cap, the loop cuts inside the group rather than waiting for the boundary, and the run reports it cannot advance — the same standstill as before this fix, and never worse:
+Deferring to a PR boundary is unbounded on its own: one PR fanning out to twenty pages could run the authoring loop well past the GitHub App installation token's TTL. `resolve_authoring_hard_cap` (`scripts/orchestrator_runner.py:resolve_authoring_hard_cap`) bounds the overrun — `run.authoring_hard_cap_seconds` from config, or `time_budget_seconds * 1.15` by default — and clamps that value down against the token TTL ceiling: `GITHUB_APP_TOKEN_TTL_SECONDS` minus the merge-check poll (`merge.checks_timeout_seconds`, dropped entirely for a `merge.policy: manual` host, which never runs that poll) minus a fixed 285-second post-run tail. That reserve is 285 because it's the largest value that still leaves a 2100s host its full 1.15 overrun (`2100 * 1.15 = 2415 <= 3600 - 900 - S` solves to `S <= 285`), and it has to cover a whole page-author dispatch: the cut check runs at the top of each authoring iteration, before that iteration dispatches, so the last admitted batch runs entirely past the hard deadline. Past the hard cap, the loop cuts inside the group rather than waiting for the boundary, and the run reports it cannot advance — the same standstill as before this fix, and never worse:
 
 ```text
 time_budget_exceeded: authored 2/5 page batches (budget 2100s); deferring the rest
@@ -49,9 +49,26 @@ time_budget_exceeded: authored 2/5 page batches (hard cap 2415s over budget 2100
 
 An explicit `authoring_hard_cap_seconds` at or below the resolved budget is rejected as a config error (exit 2) rather than silently clamped up — equal collapses the hard deadline onto the soft one and quietly restores the pre-fix mid-group cut in exactly the place an operator was trying to configure it away.
 
+## The squeeze: a stock host has no overrun to grant at all
+
+The clamp bounds the *overrun* above `time_budget_seconds`, not the budget itself. On the stock `DEFAULT_TIME_BUDGET_SECONDS` (2700s) host, `budget + merge poll` (2700 + 900) already fills the whole 3600s token TTL with nothing left for the 285s tail — the resolver has no headroom to grant, so it holds the cap at the budget itself and behavior degrades to the pre-CCE-152 cut: never worse, but no better either on that host. This is not a config error (it's arithmetic on a token the operator doesn't control) and it is never silent — the resolver appends an advisory `authoring_hard_cap_squeezed` reason naming the two keys to lower (`run.time_budget_seconds`, `merge.checks_timeout_seconds`), and, because a squeezed cap equals its own budget, the ordinary "hard cap over budget" phrasing would render as a number over itself. The squeezed cut reason is worded distinctly instead:
+
+```text
+time_budget_exceeded: authored 2/5 page batches (hard cap held at budget 2700s by the App-token TTL); cut inside PR #646, whose pages are now incomplete, so the baseline cannot advance to it
+```
+
+A cap that is merely *narrowed* by the clamp — legal, not squeezed, but smaller than what it resolved to (the ratio default or an explicit override) — gets its own advisory too: `authoring_hard_cap_clamped` names the resolved cap, which source produced it, the ceiling, and the poll term spending the difference. Neither advisory flips `partial` on its own; a squeezed or clamped host that otherwise completes its window stays eligible for the CCE-101 auto-merge gate.
+
+## Two invariants the boundary comparison depends on
+
+"Owned by the oldest PR" and "a boundary only exists where the owner actually changes" both had to hold for the fix to be correct, not just for the common case:
+
+- **A batch two PRs share is owned by the older one.** `per_target.setdefault(key, []).append(s)` walks PRs oldest-first, so a page hint referenced by two PRs collects a summary list whose first element is the older PR's — and the loop reads `batch_summaries[0]`, not the last, to decide ownership. Reading the last element instead would report a shared batch as belonging to the newer PR, inventing a boundary in the middle of the older PR's group.
+- **A skipped batch doesn't fabricate a boundary.** The authoring loop's `unknown_lens` and `unsafe_page_path` branches `continue` before reaching the end of the loop body, and `_prev_owner` has to advance on those paths too — not only on batches that actually author. Otherwise the batch following a skip compares its owner against a stale value and reports a boundary that isn't there, cutting inside the PR group that follows the skip.
+
 ## Verification
 
-`tests/orchestrator/test_pr_boundary_authoring_cut.py` drives the fix end to end: a past-soft-deadline cut mid-group keeps running to the PR boundary and the baseline advances to it; a shared batch between two PRs is recognized as owned by the older one; a hard-cap cut still lands inside the group and reports that the baseline cannot advance; and a skipped (`unknown_lens`) batch doesn't fabricate a spurious boundary. `tests/orchestrator/test_authoring_hard_cap_bounds.py` covers the cap resolver's clamping and squeeze arithmetic in isolation.
+`tests/orchestrator/test_pr_boundary_authoring_cut.py` drives the fix end to end: a past-soft-deadline cut mid-group keeps running to the PR boundary and the baseline advances to it; a shared batch between two PRs is recognized as owned by the older one; a hard-cap cut still lands inside the group and reports that the baseline cannot advance; a squeezed host's cut reason reads honestly instead of as "hard cap N over budget N"; and a skipped (`unknown_lens`) batch doesn't fabricate a spurious boundary. `tests/orchestrator/test_authoring_hard_cap_bounds.py` covers the cap resolver's clamping and squeeze arithmetic in isolation.
 
 ## See also
 

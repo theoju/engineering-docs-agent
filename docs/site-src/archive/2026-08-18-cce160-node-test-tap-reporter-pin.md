@@ -20,9 +20,13 @@ The result: a genuinely green JS suite was reported to `pytest` as unparseable, 
 
 The failure mode has an unusually bad visibility profile: it is deterministic for every agent-run invocation and invisible to both CI and a human terminal, because neither of those sets `FORCE_COLOR`. A fix that merely tolerates both the coloured and plain formats would let a later removal of whatever pins the format regress silently — green in CI, red only for agents.
 
+The obvious patch — set `NO_COLOR=1` alongside `FORCE_COLOR` — does not work. Node gives `FORCE_COLOR` precedence over `NO_COLOR`, so a caller can't override the colourisation from the outside; anything that respects both env vars still colourises when `FORCE_COLOR` is set. That patch would have looked right, passed review, and changed nothing.
+
 ## The fix
 
 Pin the reporter explicitly rather than rely on node's default selection: `node --test --test-reporter=tap`. TAP's summary lines are a machine-readable contract (`# pass 53`, `# fail 0`), not human-facing prose, so they carry no colour regardless of `FORCE_COLOR`. `tests/templates/test_sdd_fidelity_gate_node.py` now builds its `node --test` invocation with `--test-reporter=tap` and matches the summary with the `#` prefix instead of the reporter-dependent `[ℹ#]` alternation.
+
+Stripping ANSI escape codes from the captured output before parsing was considered and rejected. It ties with pinning the reporter on the cases both can handle, but it can't rescue the one case pinning is designed for: a reporter that gets withdrawn or renamed produces no output to strip in the first place, so escape-stripping alone leaves the parser exposed to the next default-reporter change. Pinning the reporter removes the dependency on the default entirely, rather than tolerating whatever the default currently emits.
 
 The suite also gained a regression test that sets `FORCE_COLOR` explicitly rather than relying on session inheritance — the pre-existing test alone only exercises the coloured path when the person running it happens to be in an agent session, and passes vacuously everywhere else.
 

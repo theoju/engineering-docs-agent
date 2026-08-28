@@ -77,6 +77,10 @@ behaves, not from the obvious implementation:
 - **`next_pr_summaries` is pure.** It never mutates the cache dict it's
   given, matching the existing contract of `next_deferral_counts` — callers
   diff before and after to decide whether anything changed.
+- **The stored `pr_number` is not authoritative.** `templates/state.schema.json`
+  documents that a served summary's `pr_number` is re-stamped from the PR
+  object at reuse time, not trusted from the cached copy — so a hand-edited
+  or stale cache entry can't misattribute a summary to the wrong PR.
 
 Regression coverage for all of the above lives in
 `tests/orchestrator/test_pr_summary_reuse.py`.
@@ -100,6 +104,12 @@ auto-merge every night through CCE-140's `partial and not
 advance_cursor_backed` gate — turning the optimization itself into an
 outage. It's recorded at all only because a saving nobody can see is
 indistinguishable from a feature that silently stopped working.
+
+`tests/orchestrator/test_classification_coverage.py` enforces that every
+blocking `add_partial` call site in the runner is classified explicitly as
+`degraded` or `info_only` — nothing may rely on the runtime's blind-by-default
+fallback. `pr_summaries_reused` is one of the sites it audits, pinned there as
+`info_only=True` for exactly the reasoning above.
 
 ## Related
 

@@ -81,6 +81,13 @@ AST-based:
   The trailing `{` is load-bearing: it's what separates a definition from a
   bare call, `handle();`, which must not resolve.
 
+None of the four forms anchor to column 0. That's what actually fixes the
+reported class of false positive: a method, a nested function, and a class
+attribute are all just a `declaration` or `binding` form at a deeper indent,
+so they now resolve the same way a top-level `def`/`class`/`export const`
+does. The old matcher's column-0 anchor on the assignment arm is exactly what
+excluded them.
+
 Regex, not a parser, is the deliberate choice: the plugin is generic-first,
 and a Python-`ast` path covers exactly one of the languages a host might use,
 while a JS parser is a third-party runtime dependency the stdlib-first

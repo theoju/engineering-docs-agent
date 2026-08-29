@@ -8,7 +8,7 @@ doc_kind: decision
 
 # CCE-150: the blind-run-detection abandon call, reversed nine minutes later
 
-> **This page is a decision-history record, not a description of current behavior.** If you want the actual, currently-shipped design for blind-run detection, read the CCE-144 entry in `CLAUDE.md` and its spec at `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`. Nothing below describes what the runner does today.
+> **This page is a decision-history record, not a description of current behavior.** PR #223's own title and body flag every factual claim below this banner as false as of 2026-08-14T07:25:23Z, superseded by PR #224. If you want the actual, currently-shipped design for blind-run detection, read the CCE-144 entry in `CLAUDE.md` and its spec at `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`. Nothing below describes what the runner does today.
 
 ## What happened
 

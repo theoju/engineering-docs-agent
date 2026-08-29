@@ -142,7 +142,8 @@ the false-positive *rate* on JS symbol citations was 100% until this change.
 
 ## Reference
 
-Ticket: [CCE-145](https://designitright.atlassian.net/browse/CCE-145). Spec:
+Ticket: [CCE-145](https://designitright.atlassian.net/browse/CCE-145). Shipped
+as PR #237 on `theoju/engineering-docs-agent`. Spec:
 `docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md`.
 Touches: `scripts/lint/citation_exists.py`, `tests/lint/test_citation_exists.py`.
 Related: CCE-122 (line-free citation grammar), CCE-141/CCE-152 (stranding

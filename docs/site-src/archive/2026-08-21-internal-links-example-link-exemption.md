@@ -74,6 +74,30 @@ risks silently skipping a genuinely broken link. An example link written in an
 indented block therefore still blocks. That's read as the safe failure
 direction: loud and visible, rather than a quiet false negative.
 
+`CODE_SPAN_RE` itself fails closed the same way `strip_fenced_blocks` does: an
+unmatched backtick run simply doesn't match, so the surrounding text is left
+in place rather than blanked out. Unbalanced backticks stay linted, they don't
+silently disable the rule for the rest of the file.
+
+## Test coverage
+
+`tests/lint/test_internal_links.py` pins the fix at both the unit and the
+regression level. `test_fenced_example_link_is_not_a_broken_link` and
+`test_inline_code_span_example_link_is_not_a_broken_link` are the two forms of
+the original bug — a link inside a fenced block, and a link inside a single-
+backtick inline span. `test_double_backtick_span_example_link_is_not_a_broken_link`
+covers the double-backtick-delimited form the design spec actually uses, since
+the example text itself contains a bare backtick.
+
+Three tests guard against the fix becoming a blanket amnesty:
+`test_real_broken_link_beside_an_example_still_blocks` asserts a genuine
+broken link in prose, sitting right next to an exempted example on the same
+page, still fails the build; `test_broken_link_after_a_closed_fence_still_blocks`
+asserts checking resumes once a fence closes; and
+`test_unterminated_fence_fails_closed` pins the CCE-131 parity behavior — an
+unclosed fence must not swallow the rest of the file and silently turn off
+the rule for every link after it.
+
 ## Why this is a recurring pattern, not a one-off
 
 This is the same pathology CCE-131 closed for `citation_exists` (the reserved

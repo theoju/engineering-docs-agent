@@ -18,8 +18,9 @@ source_files:
   - tests/orchestrator/test_pr_summary_reuse.py
   - tests/orchestrator/test_pr_boundary_authoring_cut.py
   - tests/orchestrator/test_degraded_advance_non_truncated.py
+  - tests/orchestrator/test_state_advancement_invariant.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-08-22"
+last_reviewed: "2026-08-29"
 status: draft
 doc_kind: architecture
 ---
@@ -170,7 +171,9 @@ Two traps this took to get right:
 
 The reason strings the walk emits are cause-dependent: `time_budget_*` on the time-truncated path (kept byte-identical, since `test_time_budget.py` and `test_deferral_skip.py` assert those exact strings and the CCE-109/CCE-140 runbooks tell operators to grep for them) and `held_back_*` on the newly-covered non-time path — e.g. `held_back_no_advance_no_cursor` when no admitted PR carries a usable `merge_sha`, or `held_back_no_advance_unanchored_deferred` when a still-deferred PR has none. Neither family is in `_MERGE_VETO_REASON_PREFIXES` (`scripts/orchestrator_runner.py:_MERGE_VETO_REASON_PREFIXES` — one entry, `app_token_unavailable`), and both keep `degraded=True`, so this change is orthogonal to the blind/degraded split above.
 
-**Diagnostic reflex:** a green nightly with `partial: true` whose baseline moved anyway is not a linting bug — check `deferred_pages_by_pr` and `held_back` before suspecting the page-author.
+The zero-progress edge case is worth spelling out explicitly, because it inverts a longstanding assumption. `test_state_advancement_invariant.py` (`tests/orchestrator/test_state_advancement_invariant.py`) used to assert that a lint-`block` run advances the baseline to full window HEAD regardless — a literal reading of CCE-40 §7 row 4 from back when `partial` was undifferentiated. CCE-151 inverted that assertion on purpose: when every admitted PR in the window is held back (for example, a single-PR window whose only page batch is blocked), there is no documented PR left to anchor a cursor-backed advance on, so `last_successful_run.head_sha` does not move AT ALL — not to HEAD, and not partway. What CCE-40 §7 row 4 was actually protecting survives unchanged: a run that documents SOME PRs still advances past them, which is what keeps a permanently-unlintable page from wedging the cursor forever. The two behaviors sit on the same mechanism — `held_back` empty or non-empty, and whether it covers every admitted PR or only some — not on two different code paths.
+
+**Diagnostic reflex:** a green nightly with `partial: true` whose baseline moved anyway is not a linting bug — check `deferred_pages_by_pr` and `held_back` before suspecting the page-author. A baseline that did NOT move on a lint-block run is not a stall either, if every admitted PR that run was held back.
 
 ## Advisory agents: a "couldn't judge" verdict must not degrade the run
 

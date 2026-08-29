@@ -108,3 +108,12 @@ runbook sits outside this docs lens by design — it documents an internal
 tuning investigation into the graphify tool itself, not this repo's shipped
 behavior — so this page exists to make the CCE-148 conclusion discoverable
 from the published site.
+
+Both findings on this page — the prompt-ceiling result and the
+`_FILE_CHAR_CAP` correction — are what the runbook currently records as
+settled: the runbook's own header states plainly that the extraction prompt,
+not the batching, is the ceiling, and that the corrected `_FILE_CHAR_CAP`
+reading is not a reopened bug but a fix to a prior misreading of the
+constant. Nothing on this page is superseded by the runbook's later
+"Haiku backend" section, which documents an unrelated PR (the Gemini→Haiku
+backend switch) and is out of scope here.

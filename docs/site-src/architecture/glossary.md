@@ -3,7 +3,7 @@ description: 'Documents architecture glossary: Adds two net-new documentation fi
 source_files:
   - CONTEXT.md
   - docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md
-last_reviewed: '2026-08-22'
+last_reviewed: '2026-08-29'
 status: draft
 ---
 # Glossary
@@ -84,3 +84,11 @@ The page is removed and the PRs that needed it go back to owing one.
 
 **Drift** is a claim in a published page that no longer matches the source
 it cites.
+
+## See also
+
+- `archive/0001-baseline-advances-on-disk-for-partial-runs.md` — the
+  decision record behind **baseline**, **promotion**, and **ephemeral
+  advance**: why the on-disk advance is written regardless of whether a run
+  is partial, and why refusal belongs at promotion rather than at
+  computation.

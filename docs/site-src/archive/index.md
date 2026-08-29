@@ -10,6 +10,7 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **CCE-141: shortened citations are detected, never repaired** — `page-author` sometimes shortens an already-resolvable citation. One
 - **CCE-145: `citation_exists` Symbol Resolution Widened to Any Definition Site** — `citation_exists` is the Tier-1 **block** rule that verifies a `path:symbol`
 - **CCE-151: Watermark Advance Is Cursor-Backed on Every Path (2026-08-21)** — CCE-140 built the cursor-backed advance: a PR list of PRs the run either processed or deferred, walked in window order by `advance_cursor_list`, that stops at the oldest PR the run did not finish. CCE-144 built the writer that decides which PRs those are — `deferred_pages_by_pr` — and the `held_back` set derived from it.
 - **internal_links now exempts example links quoted in prose (CCE-131 pattern, recurring)** — The `internal_links` Tier-1 lint rule (`scripts/lint/internal_links.py`) checks
@@ -18,7 +19,7 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **CCE-152: cutting page authoring at a PR boundary** — The CCE-109 soft time-budget check now cuts the page-authoring fan-out at a **PR boundary**, not at an arbitrary batch index. Before this fix, a host whose oldest PR in a window fanned out to more page batches than the time budget could author would truncate mid-PR on every single nightly — and never finish authoring it, so the baseline cursor could never advance past it.
 - **CCE-144: Blind-Run Detection** — **Date:** 2026-08-14
 - **CCE-148: The Extraction Prompt, Not Batching, Was Graphify's Doc-Layer Ceiling** — Four prior extraction passes over `docs/superpowers/{specs,plans}` all landed
-- **CCE-150: the blind-run-detection abandon call, reversed nine minutes later** — > **This page is a decision-history record, not a description of current behavior.** If you want the actual, currently-shipped design for blind-run detection, read the CCE-144 entry in `CLAUDE.md` and its spec at `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`. Nothing below describes what the runner does today.
+- **CCE-150: the blind-run-detection abandon call, reversed nine minutes later** — > **This page is a decision-history record, not a description of current behavior.** PR #223's own title and body flag every factual claim below this banner as false as of 2026-08-14T07:25:23Z, superseded by PR #224. If you want the actual, currently-shipped design for blind-run detection, read the CCE-144 entry in `CLAUDE.md` and its spec at `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`. Nothing below describes what the runner does today.
 - **Graphify Semantic-Extraction Findings (2026-08-13)** — **PR:** #216
 - **Reference-aware batching: rejected (2026-08-13)** — Reference-aware batching — dispatching each spec or plan to the extraction
 - **CCE-134: Citation Exempt Token, Not Example Prefix** — Nightly run 31275900434 went `partial`. `citation_exists` (Tier-1, block)
@@ -61,9 +62,9 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **Auth-tier migration: drop explicit API key threading** — **PR #91 · merged 2026-06-09 · non-breaking**
 - **Measurements archive** — _Auto-generated; 7 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **Nightly partial-run banner now matches the actual `partial` flag** — PR #177 fixes a display bug: a clean, auto-merge-eligible nightly run could still
-- **Plans archive** — _Auto-generated; 75 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Plans archive** — _Auto-generated; 77 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
-- **Specs archive** — _Auto-generated; 70 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+- **Specs archive** — _Auto-generated; 71 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_54 pages · regenerated nightly_
+_55 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

@@ -1,11 +1,13 @@
 # Plans archive
 
-_Auto-generated; 75 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 77 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
 ## 2026-08
 
 | Title | Status | Summary |
 |---|---|---|
+| [CCE-141 Corroborated Repair Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-08-21-cce141-corroborated-repair.md) | — | > # ⛔ SUPERSEDED — DO NOT EXECUTE THIS PLAN |
+| [CCE-141 Citation Path Repair Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-08-21-cce141-citation-path-repair.md) | — | > # ⛔ SUPERSEDED — DO NOT EXECUTE THIS PLAN |
 | [CCE-144 Blind-Run Detection Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-08-13-cce144-blind-run-detection.md) | — | > **Executed and landed 2026-08-14.** All seven tasks shipped on `feat/CCE-144-blind-run-detection` and merged to `main`… |
 | [Track B — Autonomous Merge Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-08-10-cce-140-autonomous-merge.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 | [Track C — citation resolution (plugin) Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-08-10-cce-139-citation-source-roots.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development |

@@ -108,3 +108,14 @@ runbook sits outside this docs lens by design — it documents an internal
 tuning investigation into the graphify tool itself, not this repo's shipped
 behavior — so this page exists to make the CCE-148 conclusion discoverable
 from the published site.
+
+This page is a point-in-time archive of the CCE-148 result specifically: the
+prompt, not the batching strategy, sets the doc-layer node ceiling, and
+`_FILE_CHAR_CAP` slices oversized files across multiple requests rather than
+truncating them. The runbook itself moved on the same day (2026-08-13) to
+record an unrelated change — the extraction backend switched from Gemini to
+`claude-cli` on Haiku — and a subsequent corpus run over 81 documents on that
+backend discharged this page's "untested at scale" caveat above (6.37
+nodes/doc at chunk 3, no crowding tax). Neither of those developments alters
+the prompt-ceiling conclusion recorded here; consult the runbook directly for
+current backend and at-scale status.

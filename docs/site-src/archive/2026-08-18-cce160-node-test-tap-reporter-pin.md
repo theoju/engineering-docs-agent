@@ -24,7 +24,7 @@ The failure mode has an unusually bad visibility profile: it is deterministic fo
 
 Pin the reporter explicitly rather than rely on node's default selection: `node --test --test-reporter=tap`. TAP's summary lines are a machine-readable contract (`# pass 53`, `# fail 0`), not human-facing prose, so they carry no colour regardless of `FORCE_COLOR`. `tests/templates/test_sdd_fidelity_gate_node.py` now builds its `node --test` invocation with `--test-reporter=tap` and matches the summary with the `#` prefix instead of the reporter-dependent `[ℹ#]` alternation.
 
-The suite also gained a regression test that sets `FORCE_COLOR` explicitly rather than relying on session inheritance — the pre-existing test alone only exercises the coloured path when the person running it happens to be in an agent session, and passes vacuously everywhere else.
+The suite also gained a regression test, `tests/templates/test_sdd_fidelity_gate_node.py:test_the_gate_survives_an_environment_that_forces_colour`, that sets `FORCE_COLOR` explicitly rather than relying on session inheritance — the pre-existing test alone only exercises the coloured path when the person running it happens to be in an agent session, and passes vacuously everywhere else.
 
 ## Why this matters beyond the one test
 

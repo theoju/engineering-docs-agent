@@ -9,6 +9,8 @@ source_files:
   - agents/schemas/gap_detector.schema.json
   - scripts/lint/description_quality.py
   - templates/workflow-run.yml
+  - templates/config.schema.json
+  - templates/state.schema.json
   - tests/orchestrator/test_enforce_agent_frontmatter.py
   - tests/orchestrator/test_agent_authored_create_frontmatter.py
   - tests/orchestrator/test_gap_detector_unjudged.py
@@ -18,8 +20,10 @@ source_files:
   - tests/orchestrator/test_pr_summary_reuse.py
   - tests/orchestrator/test_pr_boundary_authoring_cut.py
   - tests/orchestrator/test_degraded_advance_non_truncated.py
+  - tests/orchestrator/test_dispatch_reasons_classification.py
+  - tests/state_io/test_add_partial_blind.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-08-22"
+last_reviewed: "2026-08-31"
 status: draft
 doc_kind: architecture
 ---
@@ -151,7 +155,7 @@ Every `time_budget_exceeded` reason is recorded `degraded=True` (see "Blind vs. 
 
 CCE-159 caches a PR's summary by merge SHA and reuses it. `cached_pr_summary` (`scripts/orchestrator_runner.py:cached_pr_summary`) returns a stored summary only when three conditions all hold: an entry exists under the PR's identity (`{owner}/{name}#{pr}`, built by `deferral_key`); its stored `merge_sha` matches the PR's actual `merge_sha`; and its stored `fingerprint` matches `pr_summarizer_fingerprint()` (`scripts/orchestrator_runner.py:pr_summarizer_fingerprint` — a SHA-256 hash of `agents/pr-summarizer.md`, truncated to 16 hex chars). Editing the agent's own instructions therefore invalidates every cached entry automatically; an unreadable agent file hashes to `""`, which matches nothing, so the cache fails CLOSED to a full re-summarize rather than serving a summary it cannot prove is current.
 
-The cache is opt-out, not opt-in: `run.reuse_pr_summaries` defaults to `True`, so an existing host gains the savings with no config edit. `next_pr_summaries` (`scripts/orchestrator_runner.py:next_pr_summaries`) writes the persisted `state["pr_summaries"]` map each run, evicting entries after `PR_SUMMARY_RETENTION_DAYS` (30) days of not being seen — by last-seen date, not by window membership, because the window can shrink transiently when source-collector degrades, and wiping the cache at exactly the moment the pipeline is already struggling would be the worst time to lose it. A PR that keeps being deferred (and so never gets a fresh summary) still has its `last_seen_at` refreshed each run, so it never ages out while it is still in play.
+The cache is opt-out, not opt-in: `run.reuse_pr_summaries` (declared in `templates/config.schema.json`) defaults to `True`, so an existing host gains the savings with no config edit; setting it `false` restores the pre-CCE-159 behavior of re-summarizing every PR in the window every run. `next_pr_summaries` (`scripts/orchestrator_runner.py:next_pr_summaries`) writes the persisted `state["pr_summaries"]` map each run — its shape (`merge_sha`, `fingerprint`, `last_seen_at`, `summary`, keyed by `{owner}/{name}#{pr}`) is declared in `templates/state.schema.json` — evicting entries after `PR_SUMMARY_RETENTION_DAYS` (30) days of not being seen — by last-seen date, not by window membership, because the window can shrink transiently when source-collector degrades, and wiping the cache at exactly the moment the pipeline is already struggling would be the worst time to lose it. A PR that keeps being deferred (and so never gets a fresh summary) still has its `last_seen_at` refreshed each run, so it never ages out while it is still in play.
 
 A reused summary is re-stamped with the PR's actual `pr_number` before use, the same as a fresh dispatch — a cached entry's own echo is never trusted over the PR object driving the loop. When any summaries are served from cache, the run records an info-only `pr_summaries_reused: N/M PRs served from cache, N pr-summarizer dispatches skipped` reason, so the saving is visible in the digest rather than invisible.
 

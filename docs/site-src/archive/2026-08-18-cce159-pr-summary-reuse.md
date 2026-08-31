@@ -58,6 +58,13 @@ to carry `merge_sha`, `fingerprint`, `last_seen_at`, and the raw `summary`
 object. The key is never seeded empty — a host that caches nothing writes a
 state file byte-identical to its pre-CCE-159 content.
 
+The stored `summary` is the raw `pr-summarizer` output, but its `pr_number`
+field is not authoritative once served from cache: the runner re-stamps it
+from the PR actually being processed on reuse. A summary served for PR #648
+always reports `pr_number: 648`, even though the cached object was written
+against whatever PR it was first summarized for — the entry is addressed by
+its state key, not by trusting the echo inside it.
+
 A few behaviors follow directly from how the collection window actually
 behaves, not from the obvious implementation:
 

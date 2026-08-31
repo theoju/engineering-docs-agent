@@ -87,6 +87,14 @@ while a JS parser is a third-party runtime dependency the stdlib-first
 convention rejects. One language-agnostic set of binding positions serves
 every host the same way.
 
+One mechanical trap the implementation hit: Python 3.11 rejects an inline
+`(?m)` flag that isn't at position 0, so composing the four per-form patterns
+into a single alternation string raised `re.error: global flags not at the
+start of the expression` — each fragment was individually valid; only the
+composition failed. `_definition_pattern` in `scripts/lint/citation_exists.py`
+avoids this by passing `re.MULTILINE` to `re.compile` as a flag argument
+instead of embedding `(?m)` in the pattern text.
+
 Strictness held constant. The forms match only where an identifier is
 *bound*: a name that merely appears in a comment, a string literal, a bare
 `import`, or a call is not a definition site. Matching those would let a

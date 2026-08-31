@@ -65,7 +65,17 @@ bug this fix closes.
 This is not a blanket amnesty on link checking. A real broken link in prose,
 sitting right next to an exempted example, still blocks — the fix strips code
 spans and fences, nothing else. Links that survive a closed fence, or that
-appear after a fence closes, are still checked normally.
+appear after a fence closes, are still checked normally. Two regression tests
+in `tests/lint/test_internal_links.py` pin this directly: a genuine broken
+link next to a fenced and an inline-span example still fails the build
+(`test_real_broken_link_beside_an_example_still_blocks`), and a broken link
+placed after a closed fence still fails too
+(`test_broken_link_after_a_closed_fence_still_blocks`) — fence-stripping
+resumes checking once the fence ends rather than staying off for the rest of
+the file. A third test,
+`test_unterminated_fence_fails_closed`, pins the CCE-131 fail-closed behavior
+the imported `strip_fenced_blocks` carries: an unclosed fence must not
+swallow the rest of the file and silently disable the rule.
 
 One known limit is explicit in the module docstring: indented (4-space) code
 blocks are not stripped. They're ambiguous with list continuation, and telling

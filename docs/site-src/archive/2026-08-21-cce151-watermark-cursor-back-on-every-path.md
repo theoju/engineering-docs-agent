@@ -73,4 +73,6 @@ If a nightly is green, `current_run.partial` is `true`, and the baseline still m
 - CCE-109: the doom-loop failure mode that makes an unconditional cursor freeze the wrong fix.
 - `scripts/orchestrator_runner.py`: `run`, `advance_cursor_list`, `partition_deferrals`, `_should_advance_watermark`.
 - `tests/orchestrator/fakes_mixed_block/README.md`: the per-PR fixture override this incident's regression coverage depends on.
+- `tests/orchestrator/fakes_degraded_advance/README.md`: the page-author-absent fixture that reproduces the non-truncated, degraded (`page_author_invalid`) path this record covers.
 - `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`: the spec whose known residual this ticket closes.
+- `docs/site-src/architecture/orchestrator.md`: the current-state description ("Cursor-backed watermark advance holds on every path") kept in sync with this record; read that page for the mechanism as it stands today, this one for why it changed.

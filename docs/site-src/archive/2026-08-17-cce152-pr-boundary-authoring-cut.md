@@ -40,18 +40,23 @@ A batch's owning PR is its oldest contributor — `batch_summaries[0]` in the gr
 
 This guarantees that whenever the deadline forces a stop, the run has authored a **complete prefix of PRs** — so the cursor is always non-empty and the baseline always has somewhere to advance to, unless the very first PR in the window is itself too large to finish (see the hard cap below).
 
-Deferring to a PR boundary is unbounded on its own: one PR fanning out to twenty pages could run the authoring loop well past the GitHub App installation token's TTL. `resolve_authoring_hard_cap` (`scripts/orchestrator_runner.py:resolve_authoring_hard_cap`) bounds the overrun — `run.authoring_hard_cap_seconds` from config, or `time_budget_seconds * 1.15` by default — and clamps that value down against the token TTL ceiling (`GITHUB_APP_TOKEN_TTL_SECONDS` minus the merge-check poll minus a fixed post-run tail). Past the hard cap, the loop cuts inside the group rather than waiting for the boundary, and the run reports it cannot advance — the same standstill as before this fix, and never worse:
+Deferring to a PR boundary is unbounded on its own: one PR fanning out to twenty pages could run the authoring loop well past the GitHub App installation token's TTL. `resolve_authoring_hard_cap` (`scripts/orchestrator_runner.py:resolve_authoring_hard_cap`) bounds the overrun — `run.authoring_hard_cap_seconds` from config, or `time_budget_seconds * 1.15` by default — and clamps that value down against the token TTL ceiling (`GITHUB_APP_TOKEN_TTL_SECONDS` minus the merge-check poll this host will actually run minus a fixed 285-second post-run tail). Past the hard cap, the loop cuts inside the group rather than waiting for the boundary, and the run reports it cannot advance — the same standstill as before this fix, and never worse:
 
 ```text
 time_budget_exceeded: authored 2/5 page batches (budget 2100s); deferring the rest
 time_budget_exceeded: authored 2/5 page batches (hard cap 2415s over budget 2100s); cut inside PR #646, whose pages are now incomplete, so the baseline cannot advance to it
+time_budget_exceeded: authored 2/5 page batches (hard cap held at budget 2700s by the App-token TTL); cut inside PR #646, whose pages are now incomplete, so the baseline cannot advance to it
 ```
 
 An explicit `authoring_hard_cap_seconds` at or below the resolved budget is rejected as a config error (exit 2) rather than silently clamped up — equal collapses the hard deadline onto the soft one and quietly restores the pre-fix mid-group cut in exactly the place an operator was trying to configure it away.
 
+The ceiling isn't always slack. `run.time_budget_seconds`'s own stock default (2700s) plus the default 900-second merge-check poll fills the entire 3600-second token with nothing left over — so a host running on defaults gets no overrun at all. That's not a config error: the budget can be perfectly serviceable on its own, it just leaves no headroom for the cap to grant. The resolver holds the cap at the budget and records an advisory `authoring_hard_cap_squeezed` reason instead of aborting — behavior degrades to the pre-CCE-152 mid-group cut, but loudly, in the digest, not silently. That third reason line above is the one a stock-default host actually meets; it's worded so the number isn't reported as "over" itself.
+
 ## Verification
 
-`tests/orchestrator/test_pr_boundary_authoring_cut.py` drives the fix end to end: a past-soft-deadline cut mid-group keeps running to the PR boundary and the baseline advances to it; a shared batch between two PRs is recognized as owned by the older one; a hard-cap cut still lands inside the group and reports that the baseline cannot advance; and a skipped (`unknown_lens`) batch doesn't fabricate a spurious boundary. `tests/orchestrator/test_authoring_hard_cap_bounds.py` covers the cap resolver's clamping and squeeze arithmetic in isolation.
+`tests/orchestrator/test_pr_boundary_authoring_cut.py` drives the fix end to end: a past-soft-deadline cut mid-group keeps running to the PR boundary and the baseline advances to it; a shared batch between two PRs is recognized as owned by the older one; a hard-cap cut still lands inside the group and reports that the baseline cannot advance; a squeezed host's cut is worded so it doesn't read as a number over itself; and a skipped (`unknown_lens`) batch doesn't fabricate a spurious boundary.
+
+`tests/orchestrator/test_authoring_hard_cap_bounds.py` covers the resolver in isolation: the rejection boundary (`cap <= budget` refused, `cap == budget + 1` accepted), the TTL clamp and where it turns into a squeeze, and the schema round-trip through `load_config_validated` — `run.authoring_hard_cap_seconds` was documented and read by the resolver while `templates/config.schema.json` still declared the `run` block `additionalProperties: false`, so a host that followed the documentation exited 2 at config load every night before this test caught it.
 
 ## See also
 

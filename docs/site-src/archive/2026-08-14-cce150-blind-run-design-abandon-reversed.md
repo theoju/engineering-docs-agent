@@ -32,3 +32,5 @@ This page exists to close that gap for future readers. It does not add architect
 ## What to do if you land here
 
 Don't treat PR #223's body, or the archived plan/spec it points at, as authoritative for what the docs-agent runner does. Go to the CCE-144 spec and the CLAUDE.md entry instead — those describe the shipped `blind` vs. `degraded` split, the three consumers that read the flag, and the incident that motivated it. Treat CCE-150 as closed-in-error: the ticket is done, but not for the reason its closure said.
+
+Both artifacts PR #223 archived now carry their own correction banners rather than staying silent about the reversal: `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md` states the design was "implemented and merged 2026-08-14" and calls the CCE-150 premise false, and `docs/superpowers/plans/2026-08-13-cce144-blind-run-detection.md` likewise records that all seven of its tasks landed on `main` under CCE-144, not on a deleted branch. If you land on either of those files directly, the banner at the top is enough — you don't need this page to know they're current.

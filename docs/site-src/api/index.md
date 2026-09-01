@@ -16,7 +16,7 @@ _This section is scaffolded. Content will be added here._
 - **Setup** — 5 modules
 - **Verification** — 3 modules
 - **Integrations** — 3 modules
-- **Other** — 5 modules
+- **Other** — 6 modules
 
 **Contracts**
 

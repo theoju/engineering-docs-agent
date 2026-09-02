@@ -58,11 +58,22 @@ Three consumers read the resulting `current_run.blind` flag, all classified by c
 - **Watermark.** `_should_advance_watermark` refuses the `last_successful_run` advance whenever the run is blind. Re-processing a window is cheap and idempotent; skipping one, as the incident showed, is not.
 - **Auto-merge.** `_maybe_auto_merge` gained a `blind` keyword and skips unconditionally, ahead of the CCE-140 `partial and not advance_cursor_backed` carve-out. That ordering matters: a run that time-truncates sets `advance_cursor_backed = True`, and if its `content-validator` dispatch then returns `None`, the run is blind, `partial`, *and* cursor-backed at once — the CCE-140 carve-out alone would let that PR merge.
 
-A classification-coverage test enumerates every blocking `add_partial` call site in `scripts/orchestrator_runner.py` and fails on one left unclassified, so the audit performed for this change doesn't silently decay as the file grows.
+A classification-coverage test, `tests/orchestrator/test_classification_coverage.py`, enumerates every blocking `add_partial` call site in `scripts/orchestrator_runner.py` and `scripts/verify_runner.py` and fails on one that passes neither `info_only` nor `degraded`, so the audit performed for this change doesn't silently decay as the files grow. It is deliberately not a site-to-classification registry — a registry's keys collide in `verify_runner`, where three separate reason loops share a key but not a classification — so it enforces explicitness at the call site instead.
 
 ## What stayed green on purpose
 
 The four `time_budget_exceeded` sites (CCE-109 truncation) and `lint_block` stay `degraded=True`. Classifying truncation as blind would turn every truncated nightly red and, through the watermark interlock, freeze its advance — deleting the cursor-backed advance CCE-140 exists to produce and reinstating the CCE-109 doom loop permanently. `gap_detector_invalid` also stays degraded: gap-detector output feeds only a PR note and sits outside the CCE-101 auto-merge gate, so a dispatch failure there consumes no docs content.
+
+## Testing
+
+Coverage lands split across the layer each piece touches:
+
+- `tests/state_io/test_add_partial_blind.py` pins `add_partial`'s three-way precedence directly: a bare blocking call is blind by default, `degraded=True` flips `partial` without touching `blind`, `info_only=True` flips neither (and wins even if `degraded=True` is also passed), and `blind_reasons` stays a subset of `partial_reasons`.
+- `tests/orchestrator/test_dispatch_reasons_classification.py` pins the same precedence one level up, through `_record_dispatch_reasons`.
+- `tests/orchestrator/test_blind_run_interlocks.py` covers the three consumers directly: `_exit_code` returns `1` only when `current_run.blind` is true (an absent `current_run`, an absent `blind` key, and an explicit `blind: false` all read as `0`), and the watermark and auto-merge interlocks are exercised against the same flag.
+- `tests/orchestrator/test_classification_coverage.py` is the decay guard described above.
+
+`tests/orchestrator/test_cursor_backed_merge.py`, `tests/orchestrator/test_deferral_skip.py`, and `tests/orchestrator/test_pipeline_integration.py` exercise blind/degraded classification through the fixture-driven dry-run path rather than in isolation, and are also the regression suite for the CCE-151 correction below. `tests/orchestrator/test_schema_invalid_soft_fail.py` pins one sharp edge directly: a `schema_invalid` reason from source-collector is a blind blocking reason (exit `1`) even though the run falls through to the same empty-`prs` path a clean run takes — the classification comes from the call site, not from whether the run went on to do anything. `tests/orchestrator/test_state_advancement_invariant.py` carries the CCE-62 §8 state-advancement invariant and records, in its own docstring, how CCE-151 narrows it.
 
 ## Out of scope
 

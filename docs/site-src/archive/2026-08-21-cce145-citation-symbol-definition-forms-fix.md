@@ -11,10 +11,12 @@ doc_kind: decision
 
 `citation_exists` is the Tier-1 **block** rule that verifies a `path:symbol`
 citation names something real. Until this fix, it recognized Python syntax
-only — and a narrower slice of Python than it looked like. Real, correctly
-cited symbols were reported as nonexistent, and a page that fails this rule is
-dropped, not retried: `last_successful_run.head_sha` still advances, so the
-page falls permanently out of the collection window.
+only — and a narrower slice of Python than it looked like: `_symbol_defined`
+resolved a symbol only if it was defined at the top level of the module, so a
+citation to a method, a nested function, or a class attribute — all real,
+correctly cited definitions — was reported as nonexistent. A page that fails
+this rule is dropped, not retried: `last_successful_run.head_sha` still
+advances, so the page falls permanently out of the collection window.
 
 ## What was actually reported
 

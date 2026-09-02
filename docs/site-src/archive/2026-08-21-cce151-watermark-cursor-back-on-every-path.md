@@ -68,6 +68,7 @@ If a nightly is green, `current_run.partial` is `true`, and the baseline still m
 
 ## See also
 
+- `architecture/orchestrator.md`, "Cursor-backed watermark advance holds on every path" — the standing architectural description this incident's fix produced; this page is the incident record, that page is the durable reference.
 - CCE-140: the original cursor-backed advance and `advance_cursor_list`.
 - CCE-144: the `deferred_pages_by_pr` complement writer and the blind/degraded `partial` split this fix's reason strings are careful not to disturb.
 - CCE-109: the doom-loop failure mode that makes an unconditional cursor freeze the wrong fix.

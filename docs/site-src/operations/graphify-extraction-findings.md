@@ -71,10 +71,11 @@ reaches the filter's comparison set; a prompt instruction reaches its input
 — `source_file` — directly, and that's why the prompt change beat every
 batching experiment combined.
 
-## Two things the original runbook got wrong, now corrected
+## Three things the original runbook got wrong, now corrected
 
-The runbook's earlier drafts made two claims that turned out to be false and
-have since been corrected in place:
+The runbook's earlier drafts made three claims that turned out to be false —
+two of them false outright, one false once the backend switched — and all
+three have since been corrected in place:
 
 - It claimed the extraction pipeline's daily-quota-driven character cap
   truncates files before the prompt is built. It doesn't — oversized files
@@ -85,9 +86,12 @@ have since been corrected in place:
 - It carried an "untested at scale" caveat on the DOCUMENT MODE prompt fix.
   That's discharged: the 81-document corpus run above is the at-scale
   result, and it confirms the per-file gain survives multi-file chunks on
-  the Haiku backend. (It does not survive on Gemini — the crowding tax
-  measured in the reference-aware batching experiment is a Gemini-specific
-  property, not a property of the fix itself.)
+  the Haiku backend.
+- It reported a crowding tax — doc-node yield dropping as more code
+  companions were added to a batch — as a property of the fix itself. It
+  isn't: that tax was measured entirely on Gemini, and Haiku shows no
+  chunk-3 depth tax at all. Don't carry a crowding budget from the Gemini
+  experiments across the backend change.
 
 ## When you touch extraction
 

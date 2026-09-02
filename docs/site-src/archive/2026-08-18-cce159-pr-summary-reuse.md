@@ -100,9 +100,18 @@ auto-merge every night through CCE-140's `partial and not
 advance_cursor_backed` gate — turning the optimization itself into an
 outage. It's recorded at all only because a saving nobody can see is
 indistinguishable from a feature that silently stopped working.
+`tests/orchestrator/test_classification_coverage.py` pins that
+classification directly: `add_partial` call sites in
+`scripts/orchestrator_runner.py` must each declare `degraded` or
+`info_only` explicitly (a bare call fails the test), and the
+`pr_summaries_reused` site is one of the audited population recorded
+there as `info_only=True`.
 
 ## Related
 
 - CCE-140 established the cursor-backed advance mechanics this reuse logic
   builds on — the same slow-advancing lookback window that makes PRs stay in
   scope long enough for this cache to matter.
+- CCE-144's blind/degraded/info_only classification scheme is what lets
+  `pr_summaries_reused` stay silent about run health while still being
+  visible in the digest — see `tests/orchestrator/test_classification_coverage.py`.

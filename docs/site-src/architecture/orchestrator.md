@@ -17,9 +17,13 @@ source_files:
   - tests/orchestrator/test_cursor_backed_merge.py
   - tests/orchestrator/test_pr_summary_reuse.py
   - tests/orchestrator/test_pr_boundary_authoring_cut.py
+  - tests/orchestrator/test_authoring_hard_cap_bounds.py
   - tests/orchestrator/test_degraded_advance_non_truncated.py
+  - tests/orchestrator/test_state_advancement_invariant.py
+  - tests/orchestrator/test_dispatch_reasons_classification.py
+  - tests/state_io/test_add_partial_blind.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-08-22"
+last_reviewed: "2026-09-02"
 status: draft
 doc_kind: architecture
 ---
@@ -171,6 +175,8 @@ Two traps this took to get right:
 The reason strings the walk emits are cause-dependent: `time_budget_*` on the time-truncated path (kept byte-identical, since `test_time_budget.py` and `test_deferral_skip.py` assert those exact strings and the CCE-109/CCE-140 runbooks tell operators to grep for them) and `held_back_*` on the newly-covered non-time path — e.g. `held_back_no_advance_no_cursor` when no admitted PR carries a usable `merge_sha`, or `held_back_no_advance_unanchored_deferred` when a still-deferred PR has none. Neither family is in `_MERGE_VETO_REASON_PREFIXES` (`scripts/orchestrator_runner.py:_MERGE_VETO_REASON_PREFIXES` — one entry, `app_token_unavailable`), and both keep `degraded=True`, so this change is orthogonal to the blind/degraded split above.
 
 **Diagnostic reflex:** a green nightly with `partial: true` whose baseline moved anyway is not a linting bug — check `deferred_pages_by_pr` and `held_back` before suspecting the page-author.
+
+CCE-151 also inverted the meaning of an existing regression test rather than adding a new one: `test_state_advancement_invariant.py::test_partial_run_via_lint_block_advances_state` (`tests/orchestrator/test_state_advancement_invariant.py`) used to pin CCE-40 §7 row 4's rule that "a partial run still advances" as advancing all the way to window HEAD. Under CCE-151 that same assertion now means "advances past what it documented, not past what it withheld" — the test name is unchanged, but a green run of it today is asserting the narrower, cursor-backed claim, not the old one.
 
 ## Advisory agents: a "couldn't judge" verdict must not degrade the run
 

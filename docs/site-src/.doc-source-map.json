@@ -1156,6 +1156,18 @@
       "architecture/cce32-github-pages-publish-target.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/plans/2026-08-21-cce141-citation-path-repair.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/plans/2026-08-21-cce141-corroborated-repair.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/specs/2026-05-19-engineering-docs-agent-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1502,6 +1514,11 @@
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/specs/2026-08-21-cce141-citation-path-repair-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1721,6 +1738,9 @@
     "tests/orchestrator/test_agent_authored_create_frontmatter.py": [
       "architecture/orchestrator.md"
     ],
+    "tests/orchestrator/test_authoring_hard_cap_bounds.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_blind_run_interlocks.py": [
       "architecture/orchestrator.md"
     ],
@@ -1738,6 +1758,9 @@
     ],
     "tests/orchestrator/test_dispatch_debug_capture.py": [
       "archive/cce14-source-collector-prompt-hardening.md"
+    ],
+    "tests/orchestrator/test_dispatch_reasons_classification.py": [
+      "architecture/orchestrator.md"
     ],
     "tests/orchestrator/test_dispatch_rescue.py": [
       "archive/cce15-source-collector-root-cause-sweep.md"
@@ -1785,6 +1808,9 @@
     "tests/orchestrator/test_source_map_stage.py": [
       "architecture/cce-capability-c-canonical-core-citations.md"
     ],
+    "tests/orchestrator/test_state_advancement_invariant.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_verify_runner.py": [
       "architecture/cce4-schema-enforcement.md",
       "architecture/publish-verifier.md",
@@ -1798,6 +1824,9 @@
     ],
     "tests/site/test_api_build_smoke.py": [
       "architecture/cce23-api-reference.md"
+    ],
+    "tests/state_io/test_add_partial_blind.py": [
+      "architecture/orchestrator.md"
     ],
     "tests/stderr_emit/test_stderr_emit.py": [
       "architecture/publish-verifier.md"
@@ -1947,7 +1976,11 @@
       "tests/orchestrator/test_cursor_backed_merge.py",
       "tests/orchestrator/test_pr_summary_reuse.py",
       "tests/orchestrator/test_pr_boundary_authoring_cut.py",
+      "tests/orchestrator/test_authoring_hard_cap_bounds.py",
       "tests/orchestrator/test_degraded_advance_non_truncated.py",
+      "tests/orchestrator/test_state_advancement_invariant.py",
+      "tests/orchestrator/test_dispatch_reasons_classification.py",
+      "tests/state_io/test_add_partial_blind.py",
       "tests/templates/test_workflow_run_parity.py"
     ],
     "architecture/publish-verifier.md": [

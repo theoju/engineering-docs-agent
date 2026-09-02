@@ -74,6 +74,22 @@ risks silently skipping a genuinely broken link. An example link written in an
 indented block therefore still blocks. That's read as the safe failure
 direction: loud and visible, rather than a quiet false negative.
 
+## Test coverage
+
+`tests/lint/test_internal_links.py` pins both halves of the fix. The exemption
+cases — `test_fenced_example_link_is_not_a_broken_link`,
+`test_inline_code_span_example_link_is_not_a_broken_link`, and
+`test_double_backtick_span_example_link_is_not_a_broken_link` — reproduce the
+incident's fenced, single-backtick, and double-backtick forms and assert each
+one passes. The strictness guards sit right next to them:
+`test_real_broken_link_beside_an_example_still_blocks` asserts a genuine
+broken link in prose still fails even when an exempted example sits on the
+same page, `test_broken_link_after_a_closed_fence_still_blocks` asserts
+checking resumes once a fence closes, and `test_unterminated_fence_fails_closed`
+pins the CCE-131 fail-closed behavior carried over from the imported
+`strip_fenced_blocks` helper — an unclosed fence must not swallow the rest of
+the file and silently disable the rule.
+
 ## Why this is a recurring pattern, not a one-off
 
 This is the same pathology CCE-131 closed for `citation_exists` (the reserved

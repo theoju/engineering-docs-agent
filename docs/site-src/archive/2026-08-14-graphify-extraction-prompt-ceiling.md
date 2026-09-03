@@ -1,9 +1,9 @@
 ---
 status: draft
-doc_kind: decision
 sources:
 - https://github.com/theoju/engineering-docs-agent/pull/221
 synthesized_into: []
+doc_kind: decision
 ---
 
 # CCE-148: The Extraction Prompt, Not Batching, Was Graphify's Doc-Layer Ceiling

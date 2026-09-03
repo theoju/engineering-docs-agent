@@ -47,7 +47,11 @@ time_budget_exceeded: authored 2/5 page batches (budget 2100s); deferring the re
 time_budget_exceeded: authored 2/5 page batches (hard cap 2415s over budget 2100s); cut inside PR #646, whose pages are now incomplete, so the baseline cannot advance to it
 ```
 
-An explicit `authoring_hard_cap_seconds` at or below the resolved budget is rejected as a config error (exit 2) rather than silently clamped up — equal collapses the hard deadline onto the soft one and quietly restores the pre-fix mid-group cut in exactly the place an operator was trying to configure it away.
+An explicit `authoring_hard_cap_seconds` at or below the resolved budget is rejected as a config error (exit 2) rather than silently clamped up — equal collapses the hard deadline onto the soft one and quietly restores the pre-fix mid-group cut in exactly the place an operator was trying to configure it away. `run` carries `additionalProperties: false` (`templates/config.schema.json`), so a typo like `authoring_hardcap_seconds` is rejected at config load rather than silently ignored and falling back to the default ratio. The at-or-below-budget rejection compares against the **resolved** budget, not the one written in the config file — an operator invoking `--time-budget-seconds` at the CLI can trip the rejection against an unedited config's `authoring_hard_cap_seconds`, since the override changes what "at or below" means without touching the file at all.
+
+## Interaction with the blind/degraded classification
+
+Every `time_budget_exceeded` reason this cut emits — deferral, hard-cap, or squeezed — is recorded `degraded=True` via `_record_dispatch_reasons` (CCE-144's split, documented on the [Orchestrator](../architecture/orchestrator.md) page). That matters here specifically: a PR-boundary cut is, by definition, a case where the run judged that it ran out of time and deliberately deferred the newest PRs rather than being prevented from judging anything. Staying `degraded` rather than `blind` is what keeps a time-truncated run eligible for CCE-140's cursor-backed watermark advance and for the CCE-101 auto-merge gate — the whole point of cutting at a PR boundary is wasted if the resulting partial run can't advance or merge on its own.
 
 ## Verification
 

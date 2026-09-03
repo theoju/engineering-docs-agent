@@ -56,7 +56,7 @@ Three consumers read the resulting `current_run.blind` flag, all classified by c
 
 - **Exit code.** `_exit_code` returns `1` when `current_run.blind` is true, `0` otherwise — joining the existing "docs PR could not be opened" `1` rather than adding a third value.
 - **Watermark.** `_should_advance_watermark` refuses the `last_successful_run` advance whenever the run is blind. Re-processing a window is cheap and idempotent; skipping one, as the incident showed, is not.
-- **Auto-merge.** `_maybe_auto_merge` gained a `blind` keyword and skips unconditionally, ahead of the CCE-140 `partial and not advance_cursor_backed` carve-out. That ordering matters: a run that time-truncates sets `advance_cursor_backed = True`, and if its `content-validator` dispatch then returns `None`, the run is blind, `partial`, *and* cursor-backed at once — the CCE-140 carve-out alone would let that PR merge.
+- **Auto-merge.** `_maybe_auto_merge` gained a `blind` keyword and skips unconditionally, ahead of the CCE-140 `partial and not advance_cursor_backed` carve-out — a blind run is excluded from the CCE-101 auto-merge gate outright, not merely disfavored by it. That ordering matters: a run that time-truncates sets `advance_cursor_backed = True`, and if its `content-validator` dispatch then returns `None`, the run is blind, `partial`, *and* cursor-backed at once — the CCE-140 carve-out alone would let that PR merge.
 
 A classification-coverage test enumerates every blocking `add_partial` call site in `scripts/orchestrator_runner.py` and fails on one left unclassified, so the audit performed for this change doesn't silently decay as the file grows.
 

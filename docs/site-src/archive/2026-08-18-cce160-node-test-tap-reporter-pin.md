@@ -18,6 +18,8 @@ That anchoring is exactly what broke.
 
 The result: a genuinely green JS suite was reported to `pytest` as unparseable, which the wrapper treats as a hard failure. This surfaced while landing CCE-159, in a Claude Code agent session — the one environment where `FORCE_COLOR` is reliably set and CI is not.
 
+The obvious counter-patch — set `NO_COLOR=1` — does not work. Node gives `FORCE_COLOR` precedence over it, so a fix built on that assumption would look right, pass review, and change nothing.
+
 The failure mode has an unusually bad visibility profile: it is deterministic for every agent-run invocation and invisible to both CI and a human terminal, because neither of those sets `FORCE_COLOR`. A fix that merely tolerates both the coloured and plain formats would let a later removal of whatever pins the format regress silently — green in CI, red only for agents.
 
 ## The fix
@@ -29,3 +31,5 @@ The suite also gained a regression test that sets `FORCE_COLOR` explicitly rathe
 ## Why this matters beyond the one test
 
 No production code changed — only `CHANGELOG.md` and `tests/templates/test_sdd_fidelity_gate_node.py`. But the underlying gotcha generalizes: any stdout-parsing test or script that pattern-matches CLI output line-anchored, without pinning a machine-readable output mode, is exposed to the same `FORCE_COLOR`-shaped blind spot in agent sessions. If you're writing a parser against `node:test`, `npm`, or any other Node-ecosystem tool's default output, prefer its explicit machine-readable mode (TAP, `--json`, etc.) over the human-facing default, and test the coloured path deliberately rather than trusting session inheritance to exercise it for you.
+
+Scope was established, not assumed: the fix checked every production stdout-parsing site in `scripts/` for the same exposure before concluding this was the only one. All seven — the git subcommands (`rev-parse`, `ls-files`, `ls-remote`, `remote get-url`, `branch --show-current`) and `gh_client._run_json`'s `gh --json` reads — are safe on different grounds than the fix applied here: git ignores `FORCE_COLOR` entirely (it's a Node-ecosystem convention, not a general one) and defaults `color.ui=auto`, which is off whenever stdout isn't a TTY, so neither git nor `gh --json` output carries the ANSI codes that broke this parser.

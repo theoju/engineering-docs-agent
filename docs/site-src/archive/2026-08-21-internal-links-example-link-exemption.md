@@ -74,6 +74,17 @@ risks silently skipping a genuinely broken link. An example link written in an
 indented block therefore still blocks. That's read as the safe failure
 direction: loud and visible, rather than a quiet false negative.
 
+Three regression tests pin these boundaries so a future change to `strip_code`
+can't quietly widen the exemption into a real gap:
+`tests/lint/test_internal_links.py:test_real_broken_link_beside_an_example_still_blocks`
+guards against an example link's amnesty swallowing a genuinely broken link's
+error message next to it,
+`tests/lint/test_internal_links.py:test_broken_link_after_a_closed_fence_still_blocks`
+guards that checking resumes once a fence closes, and
+`tests/lint/test_internal_links.py:test_unterminated_fence_fails_closed` pins
+the CCE-131 fail-closed behavior — an unterminated fence must not swallow the
+rest of the file — carrying over correctly from the imported helper.
+
 ## Why this is a recurring pattern, not a one-off
 
 This is the same pathology CCE-131 closed for `citation_exists` (the reserved

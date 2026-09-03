@@ -4,7 +4,7 @@ source_files:
   - docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md
   - scripts/lint/citation_exists.py
   - tests/lint/test_citation_exists.py
-last_reviewed: '2026-08-22'
+last_reviewed: '2026-09-03'
 status: draft
 ---
 # Linting: citation existence

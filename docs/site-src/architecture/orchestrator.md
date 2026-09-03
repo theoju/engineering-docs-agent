@@ -19,7 +19,7 @@ source_files:
   - tests/orchestrator/test_pr_boundary_authoring_cut.py
   - tests/orchestrator/test_degraded_advance_non_truncated.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-08-22"
+last_reviewed: "2026-09-03"
 status: draft
 doc_kind: architecture
 ---

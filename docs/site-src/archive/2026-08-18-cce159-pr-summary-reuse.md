@@ -92,13 +92,15 @@ degrade gracefully, it aborts the host's nightly at config validation.
 
 ## Reporting
 
-A run that served entries from cache records an `info_only`
-`pr_summaries_reused: n/m` reason. This is deliberately non-blocking: the
-saving describes work the run did *not* have to do, the opposite of a
-degradation, and flipping `partial` on a successful optimization would cost
-auto-merge every night through CCE-140's `partial and not
-advance_cursor_backed` gate — turning the optimization itself into an
-outage. It's recorded at all only because a saving nobody can see is
+A run that served entries from cache records an `info_only` reason of the
+form `pr_summaries_reused: n/m PRs served from cache, n pr-summarizer
+dispatches skipped`, where `m` is the size of that run's full window
+(`window_prs`, before admission truncation). This is deliberately
+non-blocking: the saving describes work the run did *not* have to do, the
+opposite of a degradation, and flipping `partial` on a successful
+optimization would cost auto-merge every night through CCE-140's `partial
+and not advance_cursor_backed` gate — turning the optimization itself into
+an outage. It's recorded at all only because a saving nobody can see is
 indistinguishable from a feature that silently stopped working.
 
 ## Related

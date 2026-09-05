@@ -108,3 +108,5 @@ runbook sits outside this docs lens by design — it documents an internal
 tuning investigation into the graphify tool itself, not this repo's shipped
 behavior — so this page exists to make the CCE-148 conclusion discoverable
 from the published site.
+
+Reference: CCE-148 (2026-08-14).

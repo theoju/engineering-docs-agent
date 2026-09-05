@@ -64,6 +64,13 @@ A classification-coverage test enumerates every blocking `add_partial` call site
 
 The four `time_budget_exceeded` sites (CCE-109 truncation) and `lint_block` stay `degraded=True`. Classifying truncation as blind would turn every truncated nightly red and, through the watermark interlock, freeze its advance — deleting the cursor-backed advance CCE-140 exists to produce and reinstating the CCE-109 doom loop permanently. `gap_detector_invalid` also stays degraded: gap-detector output feeds only a PR note and sits outside the CCE-101 auto-merge gate, so a dispatch failure there consumes no docs content.
 
+## Test coverage
+
+- `tests/state_io/test_add_partial_blind.py` pins the precedence table directly on `add_partial`: a bare call defaults blind, `degraded=True` flips `partial` only, `info_only=True` wins even when `degraded=True` is also passed, and `blind` is monotonic — one bare call inside an otherwise-degraded run leaves the run blind for good.
+- `tests/orchestrator/test_dispatch_reasons_classification.py` pins the same precedence one level up, through `_record_dispatch_reasons`.
+- `tests/orchestrator/test_blind_run_interlocks.py` covers all three consumers named above: the exit code, the watermark guard (including the case where the `time_truncated` in-place mutation must not escape the guard and corrupt the old cursor), and the auto-merge gate — including `test_blind_and_cursor_backed_does_not_merge`, the regression test for the exact case pre-fix code merged: `blind=True, partial=True, cursor_backed=True`.
+- `tests/orchestrator/test_classification_coverage.py::test_orchestrator_has_the_expected_call_site_population` is a tripwire on the audited call-site count in `scripts/orchestrator_runner.py` rather than a registry keyed by site — a registry decayed once in `scripts/verify_runner.py`, where three separate reason loops share a key but not a classification. The count is intentionally allowed to drift as new sites are added; each addition documents its own classification in the comment above the assertion.
+
 ## Out of scope
 
 The design explicitly left several things untouched: provisioning a Slack alarm (no `SLACK_WEBHOOK_URL` was configured on the dogfood at the time), moving the nightly cron earlier in the week, and recovering the three PRs already lost behind the frozen cursor — rewinding `last_successful_run.head_sha` to replay that window is a live-state operator decision, tracked separately.
@@ -80,3 +87,4 @@ A same-day PR (#223) briefly stamped this design "NOT IMPLEMENTED — archived, 
 
 - Design: `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`
 - Implementation: `scripts/state_io.py:add_partial`, `scripts/orchestrator_runner.py:_record_dispatch_reasons`, `scripts/orchestrator_runner.py:_exit_code`, `scripts/orchestrator_runner.py:_should_advance_watermark`, `scripts/orchestrator_runner.py:_maybe_auto_merge`
+- Tests: `tests/state_io/test_add_partial_blind.py`, `tests/orchestrator/test_dispatch_reasons_classification.py`, `tests/orchestrator/test_blind_run_interlocks.py`, `tests/orchestrator/test_classification_coverage.py`

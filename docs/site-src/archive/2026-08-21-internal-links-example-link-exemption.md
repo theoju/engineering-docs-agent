@@ -74,6 +74,24 @@ risks silently skipping a genuinely broken link. An example link written in an
 indented block therefore still blocks. That's read as the safe failure
 direction: loud and visible, rather than a quiet false negative.
 
+## Test coverage
+
+`tests/lint/test_internal_links.py` pins all of this down directly, not just
+by inference from the source:
+
+- A fenced example link and both inline-span forms (single-backtick and the
+  double-backtick run the spec actually uses) each pass clean.
+- A real broken link sitting right next to an exempted example still blocks,
+  and the exempted paths don't leak into the failure message.
+- A broken link after a closed fence still blocks — stripping resumes once
+  the fence ends.
+- An unterminated fence still fails closed: it doesn't swallow the rest of
+  the file and silently wave through a later broken link.
+
+Between them, these tests are the strictness guard: they're what would catch
+a future change that turned "strip code before matching" into a blanket
+amnesty on link checking.
+
 ## Why this is a recurring pattern, not a one-off
 
 This is the same pathology CCE-131 closed for `citation_exists` (the reserved

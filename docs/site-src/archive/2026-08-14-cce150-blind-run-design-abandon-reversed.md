@@ -14,7 +14,7 @@ doc_kind: decision
 
 On 2026-08-14 an operator instructed a session to abandon the unmerged `feat/CCE-144-blind-run-detection` branch, on the premise that its work was stranded and unreachable. PR #223 archived the CCE-144 plan and spec under that premise, stamping them as abandoned and closing ticket CCE-150.
 
-The premise was wrong. The branch had in fact been pushed, and its commits were not unreachable. The operator reversed the abandon decision almost immediately — within nine minutes of PR #223 merging — and the CCE-144 implementation itself merged to `main` as PR #224.
+The premise was wrong. The branch had in fact been pushed, and its commits were not unreachable. The operator reversed the abandon decision almost immediately — within nine minutes of PR #223 merging — and the CCE-144 implementation itself merged to `main` as PR #224. PR #223's own title and body flag every factual claim below this page's warning banner as false as of 2026-08-14T07:25:23Z, superseded by PR #224 — treat that timestamp as the boundary between "the branch was abandoned" (never true beyond nine minutes) and "the branch is on `main`" (true since).
 
 So the sequence, in order, was:
 

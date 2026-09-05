@@ -4,7 +4,7 @@ source_files:
   - docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md
   - scripts/lint/citation_exists.py
   - tests/lint/test_citation_exists.py
-last_reviewed: '2026-08-22'
+last_reviewed: '2026-09-05'
 status: draft
 ---
 # Linting: citation existence
@@ -118,3 +118,10 @@ agent, which is explicitly out of scope for citation location or line drift.
 Keeping the two concerns on separate sides of that line is what lets
 `citation_exists` block hard on Tier-1 without also becoming a second,
 redundant fact-checker.
+
+## Reference
+
+This fix shipped as PR #237, closing CCE-145. The full incident write-up —
+the live reproduction on a real host, the root-cause analysis of the
+column-0 anchor, and the measured before/after page-block counts — is in
+`docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md`.

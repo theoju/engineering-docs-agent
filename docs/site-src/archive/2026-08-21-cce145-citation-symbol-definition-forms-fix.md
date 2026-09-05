@@ -16,6 +16,15 @@ cited symbols were reported as nonexistent, and a page that fails this rule is
 dropped, not retried: `last_successful_run.head_sha` still advances, so the
 page falls permanently out of the collection window.
 
+In plain terms: a citation to a class method, a function nested inside
+another function, or a class attribute names a real definition site. Before
+this fix, `_symbol_defined` only recognized a symbol bound at a Python file's
+top level or matching a `class`/`def` keyword — a method body, a nested
+function, or an attribute assigned inside a class body reported as
+confabulated even though the code correctly defined it. `page-author`'s own
+`file.py:Class.method` grammar (CCE-122) was, until this fix, citing a shape
+the linter that checks it could not always verify.
+
 ## What was actually reported
 
 Live reproduction, nightly run `32460602658` on `theoju/claude-code-self-assessment`

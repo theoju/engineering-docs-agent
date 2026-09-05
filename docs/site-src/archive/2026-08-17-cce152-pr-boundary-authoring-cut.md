@@ -49,6 +49,8 @@ time_budget_exceeded: authored 2/5 page batches (hard cap 2415s over budget 2100
 
 An explicit `authoring_hard_cap_seconds` at or below the resolved budget is rejected as a config error (exit 2) rather than silently clamped up — equal collapses the hard deadline onto the soft one and quietly restores the pre-fix mid-group cut in exactly the place an operator was trying to configure it away.
 
+The clamp only bounds the *overrun* above `time_budget_seconds`, not the budget itself. When the token-TTL ceiling lands at or below the budget, `resolve_authoring_hard_cap` returns the budget unchanged, applies no ceiling at all, and records an advisory `authoring_hard_cap_squeezed` reason — that host is bounded only by its own `time_budget_seconds`, with the pre-CCE-152 mid-group cut as its worst case, never a hang past the token's TTL. The stock `DEFAULT_TIME_BUDGET_SECONDS` (2700s) lands exactly in this squeezed state, so it's the wording most operators will actually meet: `hard cap held at budget 2700s by the App-token TTL`, phrased to avoid reading as a number over itself.
+
 ## Verification
 
 `tests/orchestrator/test_pr_boundary_authoring_cut.py` drives the fix end to end: a past-soft-deadline cut mid-group keeps running to the PR boundary and the baseline advances to it; a shared batch between two PRs is recognized as owned by the older one; a hard-cap cut still lands inside the group and reports that the baseline cannot advance; and a skipped (`unknown_lens`) batch doesn't fabricate a spurious boundary. `tests/orchestrator/test_authoring_hard_cap_bounds.py` covers the cap resolver's clamping and squeeze arithmetic in isolation.

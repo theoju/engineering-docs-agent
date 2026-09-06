@@ -106,3 +106,12 @@ indistinguishable from a feature that silently stopped working.
 - CCE-140 established the cursor-backed advance mechanics this reuse logic
   builds on — the same slow-advancing lookback window that makes PRs stay in
   scope long enough for this cache to matter.
+- CCE-151 later made that cursor-backed advance run on every code path, not
+  only the time-truncated one — a PR held back by a lint block or a failed
+  dispatch is now excluded from the watermark the same way a time-budget cut
+  already excluded it. This cache doesn't change with that fix: a PR held
+  out of the advance stays in the window, keeps getting collected, and its
+  cached entry is exactly what `next_pr_summaries` refreshes on sight rather
+  than lets age out.
+- See [Orchestrator](../architecture/orchestrator.md) for how PR-summary
+  reuse fits into the rest of the nightly run loop.

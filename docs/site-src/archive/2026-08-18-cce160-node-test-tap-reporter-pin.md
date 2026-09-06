@@ -18,14 +18,18 @@ That anchoring is exactly what broke.
 
 The result: a genuinely green JS suite was reported to `pytest` as unparseable, which the wrapper treats as a hard failure. This surfaced while landing CCE-159, in a Claude Code agent session — the one environment where `FORCE_COLOR` is reliably set and CI is not.
 
+Setting `NO_COLOR=1` does not fix it: node gives `FORCE_COLOR` precedence over `NO_COLOR`, so the obvious one-line patch looks right, passes review, and changes nothing.
+
 The failure mode has an unusually bad visibility profile: it is deterministic for every agent-run invocation and invisible to both CI and a human terminal, because neither of those sets `FORCE_COLOR`. A fix that merely tolerates both the coloured and plain formats would let a later removal of whatever pins the format regress silently — green in CI, red only for agents.
 
 ## The fix
 
-Pin the reporter explicitly rather than rely on node's default selection: `node --test --test-reporter=tap`. TAP's summary lines are a machine-readable contract (`# pass 53`, `# fail 0`), not human-facing prose, so they carry no colour regardless of `FORCE_COLOR`. `tests/templates/test_sdd_fidelity_gate_node.py` now builds its `node --test` invocation with `--test-reporter=tap` and matches the summary with the `#` prefix instead of the reporter-dependent `[ℹ#]` alternation.
+Pin the reporter explicitly rather than rely on node's default selection: `node --test --test-reporter=tap`. TAP's summary lines are a machine-readable contract (`# pass 53`, `# fail 0`), not human-facing prose, so they carry no colour regardless of `FORCE_COLOR`. `tests/templates/test_sdd_fidelity_gate_node.py` now builds its `node --test` invocation with `--test-reporter=tap` and matches the summary with the `#` prefix instead of the reporter-dependent `[ℹ#]` alternation. Verified on node v26.5.0: `FORCE_COLOR=3 node --test --test-reporter=tap` emits zero escape bytes, and removing the flag again fails to match in both a coloured and a clean environment — deletion breaks everywhere at once rather than only inside agent sessions.
 
 The suite also gained a regression test that sets `FORCE_COLOR` explicitly rather than relying on session inheritance — the pre-existing test alone only exercises the coloured path when the person running it happens to be in an agent session, and passes vacuously everywhere else.
 
 ## Why this matters beyond the one test
 
 No production code changed — only `CHANGELOG.md` and `tests/templates/test_sdd_fidelity_gate_node.py`. But the underlying gotcha generalizes: any stdout-parsing test or script that pattern-matches CLI output line-anchored, without pinning a machine-readable output mode, is exposed to the same `FORCE_COLOR`-shaped blind spot in agent sessions. If you're writing a parser against `node:test`, `npm`, or any other Node-ecosystem tool's default output, prefer its explicit machine-readable mode (TAP, `--json`, etc.) over the human-facing default, and test the coloured path deliberately rather than trusting session inheritance to exercise it for you.
+
+The exposure here was measured, not assumed: all seven production stdout-parsing call sites in `scripts/` shell out to git (`rev-parse`, `ls-files`, `ls-remote`, `remote get-url`, `branch --show-current`) plus `gh_client._run_json`, which reads `gh --json`. Neither is at risk — git ignores `FORCE_COLOR` entirely (it's a Node-ecosystem convention, not a git one) and defaults `color.ui=auto`, which stays off whenever stdout isn't a TTY, exactly the case in a subprocess pipe. The hazard is specific to Node-ecosystem tooling, and `test_sdd_fidelity_gate_node.py` is the plugin's only such site today.

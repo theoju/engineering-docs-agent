@@ -19,7 +19,9 @@ source_files:
   - tests/orchestrator/test_pr_boundary_authoring_cut.py
   - tests/orchestrator/test_degraded_advance_non_truncated.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-08-22"
+  - templates/state.schema.json
+  - templates/config.schema.json
+last_reviewed: "2026-09-06"
 status: draft
 doc_kind: architecture
 ---
@@ -155,6 +157,8 @@ The cache is opt-out, not opt-in: `run.reuse_pr_summaries` defaults to `True`, s
 
 A reused summary is re-stamped with the PR's actual `pr_number` before use, the same as a fresh dispatch — a cached entry's own echo is never trusted over the PR object driving the loop. When any summaries are served from cache, the run records an info-only `pr_summaries_reused: N/M PRs served from cache, N pr-summarizer dispatches skipped` reason, so the saving is visible in the digest rather than invisible.
 
+The persisted shape is a schema-enforced contract, not an implementation detail: `state["pr_summaries"]` (`templates/state.schema.json`) requires `merge_sha`, `fingerprint`, `last_seen_at`, and the raw `summary` object on every cached entry, keyed the same way as `deferral_counts` — the schema is what makes an entry with a stale fingerprint or a mismatched `merge_sha` a validation-visible cache miss rather than a silently-served wrong answer. The opt-out toggle is likewise schema-declared: `run.reuse_pr_summaries` (`templates/config.schema.json`) documents the default of `true` and the fallback to pre-CCE-159 always-resummarize behavior when a host sets it `false`.
+
 ## Cursor-backed watermark advance holds on every path
 
 CCE-140 built a cursor walk that advances the baseline only as far as the last PR whose page batches all landed — `advance_cursor_list` (`scripts/orchestrator_runner.py:advance_cursor_list`) stops at the first PR number in a `held_back` set, so the watermark never crosses a PR whose content is still owed. CCE-144 added the complement writer that computes that set: every `per_target` batch key NOT in `landed_batches` folds its PRs into `deferred_pages_by_pr` — a complement rather than an enumeration of failure sites on purpose, so a new `continue` added to the authoring loop later is covered for free.
@@ -169,6 +173,8 @@ Two traps this took to get right:
 - **Hoisting only the READ of `deferred_pages_by_pr` was not enough — `partition_deferrals` had to move too.** With `still_deferred` left at its default empty list on the non-truncated path, `next_deferral_counts` (`scripts/orchestrator_runner.py:next_deferral_counts`) silently cleared the deferral count of every held-back PR on every run that didn't time-truncate, so no PR could ever accumulate enough consecutive deferrals to reach the CCE-140 skip threshold. That release valve is what stops the first trap from recurring by another route.
 
 The reason strings the walk emits are cause-dependent: `time_budget_*` on the time-truncated path (kept byte-identical, since `test_time_budget.py` and `test_deferral_skip.py` assert those exact strings and the CCE-109/CCE-140 runbooks tell operators to grep for them) and `held_back_*` on the newly-covered non-time path — e.g. `held_back_no_advance_no_cursor` when no admitted PR carries a usable `merge_sha`, or `held_back_no_advance_unanchored_deferred` when a still-deferred PR has none. Neither family is in `_MERGE_VETO_REASON_PREFIXES` (`scripts/orchestrator_runner.py:_MERGE_VETO_REASON_PREFIXES` — one entry, `app_token_unavailable`), and both keep `degraded=True`, so this change is orthogonal to the blind/degraded split above.
+
+`authoring_hard_cap_seconds` (`templates/config.schema.json`) is the CCE-152 companion knob to this whole section: it bounds how far a PR-boundary deferral may push authoring past `time_budget_seconds`, must be strictly greater than the soft budget (a value at or below it is rejected at startup rather than silently clamped, because JSON Schema has no sibling-property comparison to express the rejection itself), and defaults to `time_budget_seconds * 1.15` clamped against the App-token TTL — the same arithmetic walked through in "Where the deadline is checked" above.
 
 **Diagnostic reflex:** a green nightly with `partial: true` whose baseline moved anyway is not a linting bug — check `deferred_pages_by_pr` and `held_back` before suspecting the page-author.
 

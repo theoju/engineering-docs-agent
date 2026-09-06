@@ -1156,6 +1156,18 @@
       "architecture/cce32-github-pages-publish-target.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/plans/2026-08-21-cce141-citation-path-repair.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
+    "docs/superpowers/plans/2026-08-21-cce141-corroborated-repair.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/specs/2026-05-19-engineering-docs-agent-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1502,6 +1514,11 @@
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/specs/2026-08-21-cce141-citation-path-repair-design.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1643,6 +1660,7 @@
     ],
     "templates/config.schema.json": [
       "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/orchestrator.md",
       "architecture/publish-verifier.md",
       "archive/v0-1-1-hardening.md"
     ],
@@ -1650,6 +1668,7 @@
       "archive/v0-1-1-hardening.md"
     ],
     "templates/state.schema.json": [
+      "architecture/orchestrator.md",
       "archive/v0-1-1-hardening.md"
     ],
     "templates/workflow-pages.yml": [
@@ -1948,7 +1967,9 @@
       "tests/orchestrator/test_pr_summary_reuse.py",
       "tests/orchestrator/test_pr_boundary_authoring_cut.py",
       "tests/orchestrator/test_degraded_advance_non_truncated.py",
-      "tests/templates/test_workflow_run_parity.py"
+      "tests/templates/test_workflow_run_parity.py",
+      "templates/state.schema.json",
+      "templates/config.schema.json"
     ],
     "architecture/publish-verifier.md": [
       "agents/notifier.md",

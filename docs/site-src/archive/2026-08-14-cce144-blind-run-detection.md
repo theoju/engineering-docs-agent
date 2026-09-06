@@ -60,6 +60,8 @@ Three consumers read the resulting `current_run.blind` flag, all classified by c
 
 A classification-coverage test enumerates every blocking `add_partial` call site in `scripts/orchestrator_runner.py` and fails on one left unclassified, so the audit performed for this change doesn't silently decay as the file grows.
 
+`schema_invalid:` is the concrete case for "by call site, never by reason string": the same reason prefix is emitted from three separate places and carries two different classifications depending on where it fires. The source-collector call site keeps the fail-safe blind default — a malformed source-collector response means the pipeline never got usable PR data to judge, so it falls through to the empty-PRs path and exits `1`. The page-author and gap-detector call sites both pass `degraded=True` for the same prefix, because a malformed response from either of those agents holds one batch or one verdict back rather than consuming input the run can no longer account for. A reason-string match on `schema_invalid:` alone would classify all three identically and get two of them wrong.
+
 ## What stayed green on purpose
 
 The four `time_budget_exceeded` sites (CCE-109 truncation) and `lint_block` stay `degraded=True`. Classifying truncation as blind would turn every truncated nightly red and, through the watermark interlock, freeze its advance — deleting the cursor-backed advance CCE-140 exists to produce and reinstating the CCE-109 doom loop permanently. `gap_detector_invalid` also stays degraded: gap-detector output feeds only a PR note and sits outside the CCE-101 auto-merge gate, so a dispatch failure there consumes no docs content.

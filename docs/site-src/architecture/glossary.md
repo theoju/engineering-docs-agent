@@ -3,7 +3,7 @@ description: 'Documents architecture glossary: Adds two net-new documentation fi
 source_files:
   - CONTEXT.md
   - docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md
-last_reviewed: '2026-08-22'
+last_reviewed: '2026-09-07'
 status: draft
 ---
 # Glossary
@@ -24,7 +24,11 @@ as `baseline..head`. A run never looks outside its window.
 
 **Baseline** is the committed lower bound of the window, recorded in the
 host's `state.json`. It answers "where did we get to last time?", and it is
-the only value that decides what the next run collects.
+the only value that decides what the next run collects. A run writes its
+computed advance to this value on disk regardless of whether the run is
+partial — refusal to make that advance real belongs at promotion, not at
+write time. See [ADR 0001](../archive/0001-baseline-advances-on-disk-for-partial-runs.md)
+for the rationale.
 
 **Cursor** is the position that moves through the window during a run. It
 walks the window's PRs oldest-first and may stop before the end. Where it
@@ -68,7 +72,10 @@ because they are still owed pages.
 
 **Partial run** is a run that completed but did not do everything it set
 out to do. Partial is a statement about completeness, not about failure — a
-partial run may still have produced good pages.
+partial run may still have produced good pages. Its computed advance is
+still written to the baseline on disk; whether that advance is ever
+promoted is a separate decision, made at merge
+([ADR 0001](../archive/0001-baseline-advances-on-disk-for-partial-runs.md)).
 
 **Truncation** is stopping early because a budget ran out, as distinct from
 stopping early because work could not be completed. Both produce deferrals;

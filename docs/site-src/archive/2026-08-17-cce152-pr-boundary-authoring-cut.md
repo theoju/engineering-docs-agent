@@ -45,13 +45,22 @@ Deferring to a PR boundary is unbounded on its own: one PR fanning out to twenty
 ```text
 time_budget_exceeded: authored 2/5 page batches (budget 2100s); deferring the rest
 time_budget_exceeded: authored 2/5 page batches (hard cap 2415s over budget 2100s); cut inside PR #646, whose pages are now incomplete, so the baseline cannot advance to it
+time_budget_exceeded: authored 2/5 page batches (hard cap held at budget 2700s by the App-token TTL); cut inside PR #646, whose pages are now incomplete, so the baseline cannot advance to it
 ```
+
+The first is an ordinary deferral: the group behind the cut is complete and the run still advances. The second is the bounded forced cut. The third is the same forced cut on a host whose cap was **squeezed** flat — the stock `DEFAULT_TIME_BUDGET_SECONDS` (2700) is in exactly this state, because `2700 + 900` (the default merge-check poll) already fills the whole 3600s App-token TTL with nothing left for the tail, so there is no overrun to grant at all. That is not a config error; the resolver holds the cap at the budget, records an advisory `authoring_hard_cap_squeezed` reason, and behavior degrades to the pre-CCE-152 cut — never worse, never silent. The wording is deliberately not "hard cap 2700s over budget 2700s": a number reading as over itself would hide the one fact that explains the run, so the squeezed variant says the TTL is what's holding the cap rather than implying a genuine budget overrun.
 
 An explicit `authoring_hard_cap_seconds` at or below the resolved budget is rejected as a config error (exit 2) rather than silently clamped up — equal collapses the hard deadline onto the soft one and quietly restores the pre-fix mid-group cut in exactly the place an operator was trying to configure it away.
 
+## A second, easy-to-miss trap: the cap has to be reachable, not just correct
+
+Getting the arithmetic right in `resolve_authoring_hard_cap` (`scripts/orchestrator_runner.py:resolve_authoring_hard_cap`) wasn't sufficient on its own. `run.authoring_hard_cap_seconds` was documented in the resolver's own docstring and read by the resolver, but `templates/config.schema.json` still declared the `run` block `additionalProperties: false` without listing the new key — so a host that followed the documentation and wrote `authoring_hard_cap_seconds` into its config exited 2 at config validation (`scripts/state_io.py:load_config_validated`) before the resolver was ever called, every night. Every unit test for the resolver had been handing it a raw Python dict directly, which the schema never saw, so nothing in the suite could have caught it — the fix required a test that round-trips a config file through the real loader instead.
+
+The fix adds `authoring_hard_cap_seconds` to the `run` block's declared properties (integer, `minimum: 1`), so an operator's documented, correctly-typed override now survives the loader instead of aborting the nightly on a schema the resolver's own docs didn't match. The same `additionalProperties: false` on `run` is also what makes a typo like `authoring_hardcap_seconds` fail loud at config load rather than silently doing nothing all night.
+
 ## Verification
 
-`tests/orchestrator/test_pr_boundary_authoring_cut.py` drives the fix end to end: a past-soft-deadline cut mid-group keeps running to the PR boundary and the baseline advances to it; a shared batch between two PRs is recognized as owned by the older one; a hard-cap cut still lands inside the group and reports that the baseline cannot advance; and a skipped (`unknown_lens`) batch doesn't fabricate a spurious boundary. `tests/orchestrator/test_authoring_hard_cap_bounds.py` covers the cap resolver's clamping and squeeze arithmetic in isolation.
+`tests/orchestrator/test_pr_boundary_authoring_cut.py` drives the fix end to end: a past-soft-deadline cut mid-group keeps running to the PR boundary and the baseline advances to it; a shared batch between two PRs is recognized as owned by the older one; a hard-cap cut still lands inside the group and reports that the baseline cannot advance; a squeezed host's cut reason reads distinctly from the ordinary hard-cap one; and a skipped (`unknown_lens`) batch doesn't fabricate a spurious boundary. `tests/orchestrator/test_authoring_hard_cap_bounds.py` covers the cap resolver's clamping and squeeze arithmetic in isolation, plus the schema round-trip described above — it loads configs through `load_config_validated` rather than handing the resolver a raw dict, which is what makes the reachability gap visible at all.
 
 ## See also
 

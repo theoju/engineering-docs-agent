@@ -47,16 +47,22 @@ holds rather than to guess when it might not:
 `cached_pr_summary` in `scripts/orchestrator_runner.py` is the read side: it
 serves an entry only when both checks pass, and returns `None` — a clean
 cache miss, never a crash — on a missing key, a malformed entry, or a bad
-merge_sha/fingerprint. `next_pr_summaries` is the write side that computes
-the following run's cache from this run's window and dispatch results.
+merge_sha/fingerprint. It returns the raw stored summary; the caller
+re-stamps `pr_number` from the PR itself, exactly as it does for a fresh
+dispatch, so a stale echo in a cache entry can't leak through as this run's
+assigned number. `next_pr_summaries` is the write side that computes the
+following run's cache from this run's window and dispatch results.
 
 ## What survives between runs
 
 Storage is `state.json.pr_summaries`, keyed `{owner}/{name}#{pr}`, the same
 shape as `deferral_counts`. `templates/state.schema.json` requires each entry
 to carry `merge_sha`, `fingerprint`, `last_seen_at`, and the raw `summary`
-object. The key is never seeded empty — a host that caches nothing writes a
-state file byte-identical to its pre-CCE-159 content.
+object, and documents `summary.pr_number` as a stored echo that "is
+re-stamped from the PR on reuse, so the stored echo is not authoritative" —
+the schema comment and the runner behavior agree deliberately. The key is
+never seeded empty — a host that caches nothing writes a state file
+byte-identical to its pre-CCE-159 content.
 
 A few behaviors follow directly from how the collection window actually
 behaves, not from the obvious implementation:

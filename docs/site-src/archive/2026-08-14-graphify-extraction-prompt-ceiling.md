@@ -20,7 +20,10 @@ by less than 0.5, which is consistent with a ceiling that batching cannot
 reach.
 
 CCE-148 tested that hypothesis directly instead of carrying it forward as
-another guess.
+another guess. Closing the question here matters beyond this one pass: it
+gives the CCE-145/CCE-146 lineage of extraction-yield investigations, and any
+future graphify tuning work, a validated cause to build on instead of a
+guess.
 
 ## Method
 

@@ -117,7 +117,7 @@ Run against the real consumer, not `test -f`:
   disk) → `ok: True` with `unverifiable (gitignored)` notes, not a block.
 - The same clone with a confabulated symbol, a missing file, and a symbol
   defined in another module → still blocks, all three reported.
-- Full plugin suite green.
+- Full plugin suite: 1449 passed, 4 skipped.
 
 ## Deliberately out of scope
 

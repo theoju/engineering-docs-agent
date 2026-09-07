@@ -26,6 +26,8 @@ Pin the reporter explicitly rather than rely on node's default selection: `node 
 
 The suite also gained a regression test that sets `FORCE_COLOR` explicitly rather than relying on session inheritance — the pre-existing test alone only exercises the coloured path when the person running it happens to be in an agent session, and passes vacuously everywhere else.
 
+The parsed pass count is also checked against a floor (`_MIN_EXPECTED_TESTS = 20` in `tests/templates/test_sdd_fidelity_gate_node.py`), well below the real suite size. That's a second, independent guard against the same phantom-pass shape as the original bug: a suite that runs nothing (or was gutted down to a handful of tests) still exits 0 and prints a parseable `pass 0` or `pass 3` summary, and a bare "did it parse, did it fail" check would wave that through.
+
 ## Why this matters beyond the one test
 
 No production code changed — only `CHANGELOG.md` and `tests/templates/test_sdd_fidelity_gate_node.py`. But the underlying gotcha generalizes: any stdout-parsing test or script that pattern-matches CLI output line-anchored, without pinning a machine-readable output mode, is exposed to the same `FORCE_COLOR`-shaped blind spot in agent sessions. If you're writing a parser against `node:test`, `npm`, or any other Node-ecosystem tool's default output, prefer its explicit machine-readable mode (TAP, `--json`, etc.) over the human-facing default, and test the coloured path deliberately rather than trusting session inheritance to exercise it for you.

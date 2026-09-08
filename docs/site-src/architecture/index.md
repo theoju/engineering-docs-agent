@@ -15,9 +15,9 @@ _Architecture: component design, agent contracts, data flows, and system interna
 <!-- docs-agent:overview:start -->
 **In this section**
 
-- **Glossary** — The orchestrator has accumulated overlapping terms — baseline, cursor, window
 - **Linting: citation existence** — Every page a `page-author` subagent writes cites code — a file, a test, or a
 - **Orchestrator** — `run()` in `scripts/orchestrator_runner.py:run` is the nightly pipeline entry point. It runs as a straight-line sequence of stages against one window of merged PRs (`last_successful_run.head_sha` to the current `HEAD`):
+- **Glossary** — The orchestrator has accumulated overlapping terms — baseline, cursor, window
 - **Engineering Docs Agent** — A Claude Code plugin that turns merged PRs, Jira issues, and commits into a nightly docs-update PR — with voice-matched authoring, tiered linting, gap detection, and post-merge publish verification.
 - **Capability C — Canonical Core Citations** — Capability C keeps documentation honest about the code it describes. **C1**
 - **Capability C2: Canonical Core Authoring** — Capability C2 is the part of the engineering-docs-agent pipeline responsible for writing and maintaining canonical core documentation pages. It runs as the `page-author` subagent and produces files under the `agent-authored` site section. Every page C2 touches carries a machine-verifiable frontmatter contract that downstream lint, source-map, and publish-verification stages depend on.

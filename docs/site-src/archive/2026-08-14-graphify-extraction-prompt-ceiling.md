@@ -91,7 +91,10 @@ prefix of any oversized file. That's wrong: `graphify/llm.py:expand_oversized_fi
 replaces each oversized splittable-text file with N `FileSlice` objects before
 chunking, so the model sees all of the file's content — spread across N
 requests. A 123.8 KB plan expands to 7 slices and costs 7 requests, not 1,
-even at `chunk_size=1`.
+even at `chunk_size=1`. The slice boundary is a raw character count, not a
+token- or line-aware split, so an individual slice can end mid-token — the
+same guarantee (all content eventually seen) holds, but slicing is not a
+clean per-slice truncation either.
 
 The correction doesn't change the node-ratio finding above — the ratio was
 already flat across file sizes — but it matters for request budgeting: a

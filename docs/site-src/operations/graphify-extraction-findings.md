@@ -71,11 +71,16 @@ reaches the filter's comparison set; a prompt instruction reaches its input
 — `source_file` — directly, and that's why the prompt change beat every
 batching experiment combined.
 
-## Two things the original runbook got wrong, now corrected
+## Three things the original runbook got wrong, now corrected
 
-The runbook's earlier drafts made two claims that turned out to be false and
+The runbook's earlier drafts made three claims that turned out to be false and
 have since been corrected in place:
 
+- It framed every finding around Gemini's 20-requests-per-day free-tier quota
+  as a fixed constraint. That framing is stale: since the Haiku switch, the
+  quota no longer applies, and the runbook now marks each Gemini-specific
+  finding (the crowding tax in particular) as a property of that backend,
+  not of extraction in general.
 - It claimed the extraction pipeline's daily-quota-driven character cap
   truncates files before the prompt is built. It doesn't — oversized files
   are sliced into multiple `FileSlice` requests instead, so the model sees

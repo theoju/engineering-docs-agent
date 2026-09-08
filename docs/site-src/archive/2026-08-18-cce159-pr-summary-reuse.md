@@ -106,3 +106,7 @@ indistinguishable from a feature that silently stopped working.
 - CCE-140 established the cursor-backed advance mechanics this reuse logic
   builds on — the same slow-advancing lookback window that makes PRs stay in
   scope long enough for this cache to matter.
+- `docs/site-src/architecture/orchestrator.md` documents this cache as part
+  of the run-loop narrative (the "PR-summary caching" section) — read this
+  page for the decision record and rationale, that one for how it sits
+  alongside admission, authoring, and the cursor-backed watermark advance.

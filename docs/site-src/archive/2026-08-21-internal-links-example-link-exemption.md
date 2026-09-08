@@ -74,6 +74,19 @@ risks silently skipping a genuinely broken link. An example link written in an
 indented block therefore still blocks. That's read as the safe failure
 direction: loud and visible, rather than a quiet false negative.
 
+The strictness is pinned, not just asserted in prose. `check_path` runs the
+same `strip_code` pass over the whole file before matching links, so a real
+broken link sitting next to an exempted example must survive stripping and
+still get reported —
+`tests/lint/test_internal_links.py:test_real_broken_link_beside_an_example_still_blocks`
+covers exactly that case, and a sibling,
+`tests/lint/test_internal_links.py:test_broken_link_after_a_closed_fence_still_blocks`,
+covers the case where the real link comes after a fence closes rather than
+next to an inline span.
+`tests/lint/test_internal_links.py:test_unterminated_fence_fails_closed`
+covers the CCE-131 parity case: an unclosed fence must not swallow the rest of
+the file and silently stop checking every link after it.
+
 ## Why this is a recurring pattern, not a one-off
 
 This is the same pathology CCE-131 closed for `citation_exists` (the reserved

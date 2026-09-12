@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -207,9 +208,9 @@ def _is_gitignored(repo_root: Path, rel: str) -> bool:
     `--no-index` asks the pattern question directly ("would .gitignore exclude
     this?") rather than the index question. Only unresolved paths reach here,
     so they are untracked by definition, but the explicit flag states intent.
-    Exit codes: 0 ignored, 1 not ignored, 128 error (a path outside the repo,
-    e.g. a `../../` relative citation) -- anything but 0 fails CLOSED and the
-    citation still blocks.
+    Exit codes: 0 ignored, 1 not ignored, 128 error -- anything but 0 fails
+    CLOSED and the citation still blocks. (Since CCE-171 an escaping `../../`
+    token no longer reaches here at all: _relativize returns None for it.)
 
     Cached per (repo_root, rel): main() loops over every page in a run and
     .gitignore does not change mid-run.
@@ -243,10 +244,41 @@ def cited_test_exists(repo_root: Path, name: str) -> bool:
 
 
 def _relativize(path_str: str, repo_root: Path) -> str | None:
-    """Repo-relative form of a cited path; None when an absolute path falls
-    outside the repo (an environment reference, not a repo citation)."""
+    """Repo-relative form of a cited path; None when the path falls outside the
+    repo (an environment reference, not a repo citation).
+
+    CCE-171: the two branches used to disagree, and the asymmetry was the bug.
+    The absolute branch normalises AND contains -- `.resolve()` then
+    `.relative_to()`, None on escape. The relative branch did neither: it
+    returned every non-absolute token verbatim. `_REPO_PATH_RE`'s character
+    class admits `..`, and pathlib's `/` operator is string concatenation that
+    never collapses it, so `repo_root / rel` handed an un-collapsed path to
+    stat(2) and the KERNEL walked it out of the repo. A page citing
+    `docs/../../sibling-repo/README.md` resolved, and this BLOCKING rule passed
+    a citation naming nothing a fresh CI checkout or any reader can see -- the
+    same BLOCK-to-PASS class CCE-141 catalogued.
+
+    Normalising here rather than in `_resolves` is deliberate: all three of
+    that function's `.exists()` arms were exposed (`repo_root/rel`,
+    `docs_dir/rel`, `roots/rel`), and so was `resolve_cited_sources`, which
+    feeds the fact-checker's admission gate. One change covers every call site
+    and reuses this function's existing "None means not a repo citation"
+    contract. (The `rel in files` arm was never exposed: `git ls-files` cannot
+    emit a `..` component.)
+
+    `os.path.normpath`, not `Path.resolve`, for the relative branch. The token
+    is a repo-relative string, so resolving it would anchor it to the process
+    CWD and make the verdict depend on where the linter was invoked from.
+    Symlinks are deliberately not followed, for the same reason.
+
+    Containment, not a ban on `..`: `docs/../scripts/x.py` normalises to
+    `scripts/x.py` and resolves as usual. Only a token that ESCAPES is dropped.
+    """
     if not path_str.startswith("/"):
-        return path_str
+        norm = os.path.normpath(path_str)
+        if norm == ".." or norm.startswith("../"):
+            return None
+        return norm
     try:
         return str(Path(path_str).resolve().relative_to(repo_root.resolve()))
     except ValueError:

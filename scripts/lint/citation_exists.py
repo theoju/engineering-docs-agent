@@ -8,6 +8,17 @@ pages cite tests/files that were never written; this rule blocks them.
 Scope notes:
 - Fenced code blocks are stripped first — fenced examples are legitimately
   hypothetical. Only inline code spans in prose are checked.
+- Bare filenames are OUT OF SCOPE and pass unchecked (CCE-171 finding 2). A
+  citation must carry a directory separator to be verified: `scripts/foo.py`
+  is checked, a lone `README.md` is not. Resolving a bare name against the
+  tracked-file list would be basename matching -- suffix matching under
+  another name -- and suffix matching admits the confabulated paths this rule
+  exists to block; source_roots() drops multi-segment entries for that exact
+  reason, and CCE-141 withdrew a whole capability over the BLOCK-to-PASS class
+  it produces. Bare filenames that still pin a `:line` suffix
+  (`orchestrator_runner.py:128`) ARE reported, advisory, by citation_line_free;
+  a suffix-less bare filename is reported by nothing, and that residue is a
+  known, accepted gap rather than an oversight.
 - Distinct from capability C1 (scripts/verify_citations.py), which verifies
   pinned `path:line` + `<!--pin:TOKEN-->` citations on existing pages. This
   rule needs no pins and checks bare existence on newly authored pages.

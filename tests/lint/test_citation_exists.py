@@ -1203,3 +1203,58 @@ def test_escaping_citation_does_not_block(tmp_path):
     files = citation_exists.tracked_files(repo)
     ok, msg = citation_exists.check_path(page, repo, files, {})
     assert ok is True, msg
+
+
+# ---------- bare filenames are OUT OF SCOPE, on purpose (CCE-171 finding 2) ---
+#
+# _REPO_PATH_RE requires a directory separator, so `README.md` never enters
+# cites["paths"]. Option (c) of the ticket: say so where users read the rule,
+# rather than leaving it in a code comment.
+#
+# Why not option (a) — resolve bare filenames against tracked files? That is
+# basename matching, which is suffix matching under another name, and this
+# codebase has rejected suffix matching twice: source_roots() drops
+# multi-segment entries because "suffix-matching admits confabulated paths",
+# and CCE-141 withdrew an entire capability over the BLOCK-to-PASS class it
+# produces. A new block class also risks wedging a run (CCE-109/140/151).
+#
+# Why not option (b) — route them to an advisory surface? Half of that is
+# already true, measured: `orchestrator_runner.py:128` IS caught by
+# line_pinned_citations and reported by citation_line_free (Tier-1, warn). The
+# residue is the suffix-LESS bare filename, and covering it means either
+# widening citation_line_free past the `:line` grammar its docstring calls
+# itself the single source of, or adding a rule. That is its own ticket.
+
+
+def test_bare_filename_is_not_extracted_as_a_path():
+    """Pin the scope decision at the extraction layer."""
+    cites = citation_exists.extract_citations("See `README.md` and `notes.md`.")
+    assert cites["paths"] == []
+
+
+def test_nonexistent_bare_filename_does_not_block(tmp_path):
+    """Out of scope means it passes, not that it is checked and found present."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("See `never_written_at_all.md`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg
+
+
+def test_bare_filename_with_a_line_pin_is_still_advisory_visible():
+    """The measured half of option (b): this population already has a surface."""
+    pins = citation_exists.line_pinned_citations("See `orchestrator_runner.py:128`.")
+    assert pins == ["orchestrator_runner.py:128"]
+
+
+def test_help_output_states_the_bare_filename_scope():
+    """The choice must be explicit where users read the rule -- argparse prints
+    this module's docstring as --help -- not only in a code comment."""
+    r = subprocess.run(
+        [sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True
+    )
+    help_text = " ".join(r.stdout.split()).lower()
+    assert "bare filenames" in help_text
+    assert "citation_line_free" in help_text

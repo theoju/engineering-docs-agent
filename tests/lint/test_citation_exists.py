@@ -1089,3 +1089,59 @@ def test_untracked_path_that_is_not_gitignored_still_blocks(tmp_path):
     assert "cites nonexistent path 'scripts/never_written.py'" in (
         out["results"][0]["message"]
     )
+
+
+# ---------- pathological tokens must cost only themselves (CCE-171 finding 1) --
+#
+# `_REPO_PATH_RE` constrains a token's SHAPE but not its LENGTH, so a citation
+# whose component exceeds NAME_MAX reaches `(repo_root / rel).exists()`.
+# pathlib re-raises OSError for errno values outside its ignored set —
+# ENAMETOOLONG among them — so one such token propagated out of `check_path`
+# and discarded every finding the page had already produced. The identical
+# defect was fixed one module away in `scripts/citation_repair.py` (CCE-141
+# round 6); this is the BLOCKING rule, where it matters more.
+
+_OVERLONG = "a" * 300  # one path component past NAME_MAX (255) on macOS/Linux
+
+
+def test_overlong_token_does_not_abort_the_paths_loop(tmp_path):
+    """A pathological token must not discard the page's other findings."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text(f"See `{_OVERLONG}/x.py` and `scripts/invented.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "scripts/invented.py" in msg
+
+
+def test_overlong_token_does_not_abort_the_symbol_loop(tmp_path):
+    """The symbol loop calls _resolve_target OUTSIDE its try: the `:549`
+    handler wraps only target.read_text(), so it looks like cover and is not."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "real.py").write_text("def present():\n    pass\n")
+    page = repo / "page.md"
+    page.write_text(
+        f"See `{_OVERLONG}/x.py:sym` and `scripts/real.py:missing_symbol`.\n"
+    )
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "missing_symbol" in msg
+
+
+def test_overlong_token_is_reported_and_truncated(tmp_path):
+    """Fail CLOSED — a token that cannot name a real file is not a pass — and
+    do not paste 300 characters into a message that reaches the PR body."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text(f"See `{_OVERLONG}/x.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "unusable path" in msg
+    assert len(msg) < 300

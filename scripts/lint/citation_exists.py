@@ -487,6 +487,20 @@ def _resolve_target(rel: str, repo_root: Path, roots: tuple[str, ...]) -> Path |
     return None
 
 
+# CCE-171: a cited token is LLM-authored and length-unbounded — _REPO_PATH_RE
+# constrains a token's SHAPE, never its LENGTH. Lint messages reach the docs PR
+# body, which GitHub caps at 65,536 bytes, so an oversized token is elided
+# rather than pasted whole.
+_MAX_REPORTED_TOKEN = 80
+
+
+def _truncate(token: str) -> str:
+    """The token as reported: elided past _MAX_REPORTED_TOKEN characters."""
+    if len(token) <= _MAX_REPORTED_TOKEN:
+        return token
+    return token[:_MAX_REPORTED_TOKEN] + "..."
+
+
 def check_path(
     path: Path, repo_root: Path | None, files: set[str], config: dict
 ) -> tuple[bool, str]:
@@ -509,22 +523,38 @@ def check_path(
     problems: list[str] = []
     notes: list[str] = []
     for cited in cites["paths"]:
-        rel = _relativize(cited, repo_root)
-        if rel is None:
-            continue
-        if cited in exempt:
-            if _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
-                notes.append(f"stale exemption: '{cited}' now resolves")
-            continue
-        if any(rel.startswith(p) for p in prefixes):
-            continue  # reserved illustrative namespace, never expected to resolve
-        if not _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
-            if _is_gitignored(repo_root, rel):
-                # Ignored by design: absent from a fresh checkout, but the host
-                # declared it. Unverifiable, not confabulated (CCE-145).
-                notes.append(f"unverifiable (gitignored): '{cited}'")
+        try:
+            rel = _relativize(cited, repo_root)
+            if rel is None:
                 continue
-            problems.append(f"cites nonexistent path '{cited}'")
+            if cited in exempt:
+                if _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
+                    notes.append(f"stale exemption: '{cited}' now resolves")
+                continue
+            if any(rel.startswith(p) for p in prefixes):
+                continue  # reserved illustrative namespace, never expected to resolve
+            if not _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
+                if _is_gitignored(repo_root, rel):
+                    # Ignored by design: absent from a fresh checkout, but the
+                    # host declared it. Unverifiable, not confabulated (CCE-145).
+                    notes.append(f"unverifiable (gitignored): '{cited}'")
+                    continue
+                problems.append(f"cites nonexistent path '{cited}'")
+        except OSError as e:
+            # CCE-171: one pathological token costs only itself. _resolves
+            # reaches `(repo_root / rel).exists()`, and pathlib RE-RAISES
+            # OSError for errno values outside its ignored set -- ENAMETOOLONG
+            # among them -- so a single over-long token propagated out of
+            # check_path and discarded every finding made EARLIER on this page.
+            # Same guard as scripts/citation_repair.py (CCE-141 round 6).
+            #
+            # Reported, not skipped, because this is the BLOCKING rule: a token
+            # the filesystem cannot even name does not name a real file, so
+            # failing CLOSED states something true. The advisory diagnostic can
+            # afford to skip; a rule whose job is to catch confabulation cannot.
+            problems.append(
+                f"cites unusable path '{_truncate(cited)}': {e.strerror}"
+            )
     for name in cites["tests"]:
         exists = cited_test_exists(repo_root, name)
         if name in exempt:
@@ -536,12 +566,19 @@ def check_path(
     for bare, leaf in extract_symbol_citations(text):
         if bare in exempt:
             continue
-        rel = _relativize(bare, repo_root)
-        if rel is None:
+        try:
+            rel = _relativize(bare, repo_root)
+            if rel is None:
+                continue
+            if any(rel.startswith(p) for p in prefixes):
+                continue  # reserved illustrative namespace, never expected to resolve
+            target = _resolve_target(rel, repo_root, roots)
+        except OSError:
+            # CCE-171: _resolve_target calls .exists() and sits OUTSIDE the
+            # read_text guard below -- which looks like cover for this loop and
+            # is not. Skipped rather than reported: the paths loop has already
+            # named this token, and a second line for one bad citation is noise.
             continue
-        if any(rel.startswith(p) for p in prefixes):
-            continue  # reserved illustrative namespace, never expected to resolve
-        target = _resolve_target(rel, repo_root, roots)
         if target is None:
             continue  # nonexistent path already reported by the paths loop
         try:

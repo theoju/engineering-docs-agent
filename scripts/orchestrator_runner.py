@@ -1673,6 +1673,10 @@ def _diagnose_citation_paths(
     work exists to fight. Findings are bounded a SECOND time across the whole
     run at `_CITATION_RUN_FINDINGS_CAP` — the per-page cap bounds one page and
     says nothing about their sum, and it is the sum that reaches the PR body.
+    The run-wide count lives in `current_run.citation_findings_emitted`
+    (CCE-173), not in a scan of the digest's own rendered lines: a bound that
+    recovers its state by string-matching the prefix its own writer formats is
+    disabled by renaming that prefix, silently and with nothing failing.
 
     `label` is used in BOTH lines, including the failure line, which used a
     bare `path.name`. `add_partial` dedupes identical strings, so
@@ -1708,11 +1712,23 @@ def _diagnose_citation_paths(
         )
         findings = citation_repair.diagnose(text, repo_root, config, files, run_inputs)
         reportable = [f for f in findings if f[2] != "no_candidate"]
-        already = sum(
-            1
-            for r in state.get("current_run", {}).get("partial_reasons", ())
-            if r.startswith("citation_shortening_suspected: ")
+        # CCE-173: the bound's state is a FIELD, not the digest's own prose.
+        # This used to count `partial_reasons` entries starting with the
+        # literal "citation_shortening_suspected: " -- the same string the
+        # writer formats below -- so the counter and the formatter were coupled
+        # by an untyped literal in two places with nothing linking them.
+        # Renaming the prefix made `already` count 0 forever: `room` stayed at
+        # the cap, the `room == 0` branch became unreachable, and the digest
+        # grew without limit with nothing failing. `add_partial` also dedupes
+        # identical strings, so the old count measured DISTINCT RENDERED
+        # STRINGS rather than findings emitted, and those are not the same
+        # quantity. setdefault before add_partial: add_partial creates a
+        # current_run stub when the key is absent, and a later literal would
+        # discard whatever this wrote into it.
+        current = state.setdefault(
+            "current_run", {"partial": False, "partial_reasons": []}
         )
+        already = current.get("citation_findings_emitted", 0)
         room = max(0, _CITATION_RUN_FINDINGS_CAP - already)
         if reportable and room == 0:
             # Deliberately names no page. Naming them is what grows without
@@ -1727,6 +1743,7 @@ def _diagnose_citation_paths(
             )
             return
         shown = reportable[:_CITATION_FINDINGS_CAP][:room]
+        current["citation_findings_emitted"] = already + len(shown)
         for cited, candidate, confidence in shown:
             add_partial(
                 state,

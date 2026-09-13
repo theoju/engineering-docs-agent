@@ -715,3 +715,85 @@ def test_the_citation_caps_are_bounded_in_absolute_terms():
     assert runner._CITATION_FINDINGS_CAP <= 20
     # ~950 bytes per line against GitHub's 65,536-byte PR-body limit.
     assert runner._CITATION_RUN_FINDINGS_CAP * 1000 < 65_536
+
+
+# ---------- the run cap counts DATA, not its own prose (CCE-173) -------------
+#
+# The cap used to recover its state by counting digest lines that start with
+# the literal "citation_shortening_suspected: " -- the same string the writer
+# formats twenty lines below it. The bound therefore lived inside its own
+# rendered output, coupled to the formatter by an untyped literal in two
+# places with nothing linking them. Rename the prefix and `already` counts 0
+# forever: `room` stays at the cap, the `room == 0` branch is unreachable, and
+# the digest grows without limit with nothing failing.
+#
+# These tests assert on the counter, never on the rendered lines. A test that
+# asserts on `citation_shortening_suspected` output cannot observe this at all
+# -- that is the same blind spot that let a mutation removing the early
+# `return` survive the original cap test.
+
+_EMITTED = "citation_findings_emitted"
+
+
+def test_the_cap_fires_on_the_counter_with_no_matching_prose_present(repo):
+    """THE DISCRIMINATOR. State says the run is full; `partial_reasons` holds
+    not one `citation_shortening_suspected` line. A cap that reads its own
+    prose sees zero, admits the page and emits findings; a cap that reads data
+    stops. Nothing here depends on how the writer spells its prefix."""
+    _commit(repo, ["pkg/f000/x.md"])
+    state = _state()
+    state["current_run"][_EMITTED] = runner._CITATION_RUN_FINDINGS_CAP
+
+    page = repo / "page.md"
+    page.write_text("See `f000/x.md`.\n")
+    runner._diagnose_citation_paths(page, repo, {}, state, source_paths=set())
+
+    assert _suspected(state) == []
+    reasons = state["current_run"]["partial_reasons"]
+    assert any(r.startswith("citation_diagnosis_run_cap: ") for r in reasons), reasons
+
+
+def test_the_counter_tracks_findings_actually_emitted(repo):
+    """The field is the bound's state, so it must equal what was written."""
+    n = 3
+    _commit(repo, [f"pkg/f{i:03d}/x.md" for i in range(n)])
+    state = _state()
+
+    page = repo / "page.md"
+    page.write_text("".join(f"See `f{i:03d}/x.md`.\n" for i in range(n)))
+    runner._diagnose_citation_paths(page, repo, {}, state, source_paths=set())
+
+    assert state["current_run"][_EMITTED] == n
+    assert len(_suspected(state)) == n
+
+
+def test_the_counter_survives_a_renamed_digest_prefix(repo):
+    """The failure mode in one test: emit a full run's worth of findings, then
+    rewrite every rendered line to a different prefix -- exactly what a rename
+    at the writer would produce -- and show the bound still holds."""
+    per_page = runner._CITATION_FINDINGS_CAP
+    pages = (runner._CITATION_RUN_FINDINGS_CAP // per_page) + 1
+    _commit(repo, [f"pkg/f{i:03d}/x.md" for i in range(pages * per_page)])
+    state = _state()
+
+    i = 0
+    for pg in range(pages):
+        page = repo / f"page{pg}.md"
+        page.write_text("".join(f"See `f{i + k:03d}/x.md`.\n" for k in range(per_page)))
+        i += per_page
+        runner._diagnose_citation_paths(page, repo, {}, state, source_paths=set())
+
+    assert state["current_run"][_EMITTED] == runner._CITATION_RUN_FINDINGS_CAP
+
+    state["current_run"]["partial_reasons"] = [
+        r.replace("citation_shortening_suspected: ", "citation_shortening_detected: ")
+        for r in state["current_run"]["partial_reasons"]
+    ]
+    assert _suspected(state) == [], "precondition: the old prefix is gone"
+
+    extra = repo / "extra.md"
+    extra.write_text("See `f000/x.md`.\n")
+    runner._diagnose_citation_paths(extra, repo, {}, state, source_paths=set())
+
+    assert _suspected(state) == []
+    assert state["current_run"][_EMITTED] == runner._CITATION_RUN_FINDINGS_CAP

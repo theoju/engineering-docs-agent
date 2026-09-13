@@ -8,6 +8,17 @@ pages cite tests/files that were never written; this rule blocks them.
 Scope notes:
 - Fenced code blocks are stripped first — fenced examples are legitimately
   hypothetical. Only inline code spans in prose are checked.
+- Bare filenames are OUT OF SCOPE and pass unchecked (CCE-171 finding 2). A
+  citation must carry a directory separator to be verified: `scripts/foo.py`
+  is checked, a lone `README.md` is not. Resolving a bare name against the
+  tracked-file list would be basename matching -- suffix matching under
+  another name -- and suffix matching admits the confabulated paths this rule
+  exists to block; source_roots() drops multi-segment entries for that exact
+  reason, and CCE-141 withdrew a whole capability over the BLOCK-to-PASS class
+  it produces. Bare filenames that still pin a `:line` suffix
+  (`orchestrator_runner.py:128`) ARE reported, advisory, by citation_line_free;
+  a suffix-less bare filename is reported by nothing, and that residue is a
+  known, accepted gap rather than an oversight.
 - Distinct from capability C1 (scripts/verify_citations.py), which verifies
   pinned `path:line` + `<!--pin:TOKEN-->` citations on existing pages. This
   rule needs no pins and checks bare existence on newly authored pages.
@@ -22,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -207,9 +219,9 @@ def _is_gitignored(repo_root: Path, rel: str) -> bool:
     `--no-index` asks the pattern question directly ("would .gitignore exclude
     this?") rather than the index question. Only unresolved paths reach here,
     so they are untracked by definition, but the explicit flag states intent.
-    Exit codes: 0 ignored, 1 not ignored, 128 error (a path outside the repo,
-    e.g. a `../../` relative citation) -- anything but 0 fails CLOSED and the
-    citation still blocks.
+    Exit codes: 0 ignored, 1 not ignored, 128 error -- anything but 0 fails
+    CLOSED and the citation still blocks. (Since CCE-171 an escaping `../../`
+    token no longer reaches here at all: _relativize returns None for it.)
 
     Cached per (repo_root, rel): main() loops over every page in a run and
     .gitignore does not change mid-run.
@@ -243,10 +255,41 @@ def cited_test_exists(repo_root: Path, name: str) -> bool:
 
 
 def _relativize(path_str: str, repo_root: Path) -> str | None:
-    """Repo-relative form of a cited path; None when an absolute path falls
-    outside the repo (an environment reference, not a repo citation)."""
+    """Repo-relative form of a cited path; None when the path falls outside the
+    repo (an environment reference, not a repo citation).
+
+    CCE-171: the two branches used to disagree, and the asymmetry was the bug.
+    The absolute branch normalises AND contains -- `.resolve()` then
+    `.relative_to()`, None on escape. The relative branch did neither: it
+    returned every non-absolute token verbatim. `_REPO_PATH_RE`'s character
+    class admits `..`, and pathlib's `/` operator is string concatenation that
+    never collapses it, so `repo_root / rel` handed an un-collapsed path to
+    stat(2) and the KERNEL walked it out of the repo. A page citing
+    `docs/../../sibling-repo/README.md` resolved, and this BLOCKING rule passed
+    a citation naming nothing a fresh CI checkout or any reader can see -- the
+    same BLOCK-to-PASS class CCE-141 catalogued.
+
+    Normalising here rather than in `_resolves` is deliberate: all three of
+    that function's `.exists()` arms were exposed (`repo_root/rel`,
+    `docs_dir/rel`, `roots/rel`), and so was `resolve_cited_sources`, which
+    feeds the fact-checker's admission gate. One change covers every call site
+    and reuses this function's existing "None means not a repo citation"
+    contract. (The `rel in files` arm was never exposed: `git ls-files` cannot
+    emit a `..` component.)
+
+    `os.path.normpath`, not `Path.resolve`, for the relative branch. The token
+    is a repo-relative string, so resolving it would anchor it to the process
+    CWD and make the verdict depend on where the linter was invoked from.
+    Symlinks are deliberately not followed, for the same reason.
+
+    Containment, not a ban on `..`: `docs/../scripts/x.py` normalises to
+    `scripts/x.py` and resolves as usual. Only a token that ESCAPES is dropped.
+    """
     if not path_str.startswith("/"):
-        return path_str
+        norm = os.path.normpath(path_str)
+        if norm == ".." or norm.startswith("../"):
+            return None
+        return norm
     try:
         return str(Path(path_str).resolve().relative_to(repo_root.resolve()))
     except ValueError:
@@ -487,6 +530,20 @@ def _resolve_target(rel: str, repo_root: Path, roots: tuple[str, ...]) -> Path |
     return None
 
 
+# CCE-171: a cited token is LLM-authored and length-unbounded — _REPO_PATH_RE
+# constrains a token's SHAPE, never its LENGTH. Lint messages reach the docs PR
+# body, which GitHub caps at 65,536 bytes, so an oversized token is elided
+# rather than pasted whole.
+_MAX_REPORTED_TOKEN = 80
+
+
+def _truncate(token: str) -> str:
+    """The token as reported: elided past _MAX_REPORTED_TOKEN characters."""
+    if len(token) <= _MAX_REPORTED_TOKEN:
+        return token
+    return token[:_MAX_REPORTED_TOKEN] + "..."
+
+
 def check_path(
     path: Path, repo_root: Path | None, files: set[str], config: dict
 ) -> tuple[bool, str]:
@@ -509,22 +566,38 @@ def check_path(
     problems: list[str] = []
     notes: list[str] = []
     for cited in cites["paths"]:
-        rel = _relativize(cited, repo_root)
-        if rel is None:
-            continue
-        if cited in exempt:
-            if _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
-                notes.append(f"stale exemption: '{cited}' now resolves")
-            continue
-        if any(rel.startswith(p) for p in prefixes):
-            continue  # reserved illustrative namespace, never expected to resolve
-        if not _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
-            if _is_gitignored(repo_root, rel):
-                # Ignored by design: absent from a fresh checkout, but the host
-                # declared it. Unverifiable, not confabulated (CCE-145).
-                notes.append(f"unverifiable (gitignored): '{cited}'")
+        try:
+            rel = _relativize(cited, repo_root)
+            if rel is None:
                 continue
-            problems.append(f"cites nonexistent path '{cited}'")
+            if cited in exempt:
+                if _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
+                    notes.append(f"stale exemption: '{cited}' now resolves")
+                continue
+            if any(rel.startswith(p) for p in prefixes):
+                continue  # reserved illustrative namespace, never expected to resolve
+            if not _resolves(rel, repo_root, files, docs_dir, build_dir, roots):
+                if _is_gitignored(repo_root, rel):
+                    # Ignored by design: absent from a fresh checkout, but the
+                    # host declared it. Unverifiable, not confabulated (CCE-145).
+                    notes.append(f"unverifiable (gitignored): '{cited}'")
+                    continue
+                problems.append(f"cites nonexistent path '{cited}'")
+        except OSError as e:
+            # CCE-171: one pathological token costs only itself. _resolves
+            # reaches `(repo_root / rel).exists()`, and pathlib RE-RAISES
+            # OSError for errno values outside its ignored set -- ENAMETOOLONG
+            # among them -- so a single over-long token propagated out of
+            # check_path and discarded every finding made EARLIER on this page.
+            # Same guard as scripts/citation_repair.py (CCE-141 round 6).
+            #
+            # Reported, not skipped, because this is the BLOCKING rule: a token
+            # the filesystem cannot even name does not name a real file, so
+            # failing CLOSED states something true. The advisory diagnostic can
+            # afford to skip; a rule whose job is to catch confabulation cannot.
+            problems.append(
+                f"cites unusable path '{_truncate(cited)}': {e.strerror}"
+            )
     for name in cites["tests"]:
         exists = cited_test_exists(repo_root, name)
         if name in exempt:
@@ -536,12 +609,19 @@ def check_path(
     for bare, leaf in extract_symbol_citations(text):
         if bare in exempt:
             continue
-        rel = _relativize(bare, repo_root)
-        if rel is None:
+        try:
+            rel = _relativize(bare, repo_root)
+            if rel is None:
+                continue
+            if any(rel.startswith(p) for p in prefixes):
+                continue  # reserved illustrative namespace, never expected to resolve
+            target = _resolve_target(rel, repo_root, roots)
+        except OSError:
+            # CCE-171: _resolve_target calls .exists() and sits OUTSIDE the
+            # read_text guard below -- which looks like cover for this loop and
+            # is not. Skipped rather than reported: the paths loop has already
+            # named this token, and a second line for one bad citation is noise.
             continue
-        if any(rel.startswith(p) for p in prefixes):
-            continue  # reserved illustrative namespace, never expected to resolve
-        target = _resolve_target(rel, repo_root, roots)
         if target is None:
             continue  # nonexistent path already reported by the paths loop
         try:

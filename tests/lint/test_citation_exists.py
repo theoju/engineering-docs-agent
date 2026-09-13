@@ -1089,3 +1089,172 @@ def test_untracked_path_that_is_not_gitignored_still_blocks(tmp_path):
     assert "cites nonexistent path 'scripts/never_written.py'" in (
         out["results"][0]["message"]
     )
+
+
+# ---------- pathological tokens must cost only themselves (CCE-171 finding 1) --
+#
+# `_REPO_PATH_RE` constrains a token's SHAPE but not its LENGTH, so a citation
+# whose component exceeds NAME_MAX reaches `(repo_root / rel).exists()`.
+# pathlib re-raises OSError for errno values outside its ignored set —
+# ENAMETOOLONG among them — so one such token propagated out of `check_path`
+# and discarded every finding the page had already produced. The identical
+# defect was fixed one module away in `scripts/citation_repair.py` (CCE-141
+# round 6); this is the BLOCKING rule, where it matters more.
+
+_OVERLONG = "a" * 300  # one path component past NAME_MAX (255) on macOS/Linux
+
+
+def test_overlong_token_does_not_abort_the_paths_loop(tmp_path):
+    """A pathological token must not discard the page's other findings."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text(f"See `{_OVERLONG}/x.py` and `scripts/invented.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "scripts/invented.py" in msg
+
+
+def test_overlong_token_does_not_abort_the_symbol_loop(tmp_path):
+    """The symbol loop calls _resolve_target OUTSIDE its try: the `:549`
+    handler wraps only target.read_text(), so it looks like cover and is not."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "real.py").write_text("def present():\n    pass\n")
+    page = repo / "page.md"
+    page.write_text(
+        f"See `{_OVERLONG}/x.py:sym` and `scripts/real.py:missing_symbol`.\n"
+    )
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "missing_symbol" in msg
+
+
+def test_overlong_token_is_reported_and_truncated(tmp_path):
+    """Fail CLOSED — a token that cannot name a real file is not a pass — and
+    do not paste 300 characters into a message that reaches the PR body."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text(f"See `{_OVERLONG}/x.py`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False
+    assert "unusable path" in msg
+    assert len(msg) < 300
+
+
+# ---------- relative tokens must be normalised too (CCE-171 finding 3) --------
+#
+# The absolute branch of _relativize normalises AND contains (.resolve() then
+# .relative_to(), None on escape). The relative branch did neither: it returned
+# every non-absolute token verbatim. _REPO_PATH_RE admits `..`, and pathlib's
+# `/` is string concatenation that never collapses it, so `repo_root / rel`
+# handed an un-collapsed path to stat(2) and the KERNEL walked it out of the
+# repo. A page citing a sibling checkout passed the BLOCKING rule while naming
+# nothing a fresh CI checkout or any reader can see.
+#
+# These assert on _relativize, not on check_path, deliberately. check_path
+# returns (True, "ok") for an escaping citation BOTH before the fix (it
+# "resolves") and after (it is skipped as not-a-repo-citation), so a test at
+# that level cannot observe the change it claims to test.
+
+
+def test_relativize_rejects_a_relative_token_that_escapes_the_repo(tmp_path):
+    repo = tmp_path / "host"
+    repo.mkdir()
+    assert citation_exists._relativize("docs/../../sibling/file.md", repo) is None
+
+
+def test_relativize_normalises_an_interior_traversal(tmp_path):
+    """Containment, not a ban on `..`: a token that stays inside still resolves."""
+    repo = tmp_path / "host"
+    repo.mkdir()
+    got = citation_exists._relativize("docs/../scripts/x.py", repo)
+    assert got == "scripts/x.py"
+
+
+def test_escaping_citation_is_not_offered_to_the_fact_checker(tmp_path):
+    """resolve_cited_sources is _relativize's second call site and feeds the
+    fact-checker's admission gate — it must not hand over a sibling repo."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "docs").mkdir()
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    (sibling / "README.md").write_text("# elsewhere\n")
+    text = "See `docs/../../sibling/README.md` for context.\n"
+    assert citation_exists.resolve_cited_sources(text, repo) == []
+
+
+def test_escaping_citation_does_not_block(tmp_path):
+    """Pin against overcorrection: outside the repo means NOT A CITATION, the
+    same verdict the absolute branch already gives — not a confabulation."""
+    repo = _tmp_git_repo(tmp_path)
+    (repo / "docs").mkdir()
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    (sibling / "README.md").write_text("# elsewhere\n")
+    page = repo / "docs" / "page.md"
+    page.write_text("See `docs/../../sibling/README.md`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg
+
+
+# ---------- bare filenames are OUT OF SCOPE, on purpose (CCE-171 finding 2) ---
+#
+# _REPO_PATH_RE requires a directory separator, so `README.md` never enters
+# cites["paths"]. Option (c) of the ticket: say so where users read the rule,
+# rather than leaving it in a code comment.
+#
+# Why not option (a) — resolve bare filenames against tracked files? That is
+# basename matching, which is suffix matching under another name, and this
+# codebase has rejected suffix matching twice: source_roots() drops
+# multi-segment entries because "suffix-matching admits confabulated paths",
+# and CCE-141 withdrew an entire capability over the BLOCK-to-PASS class it
+# produces. A new block class also risks wedging a run (CCE-109/140/151).
+#
+# Why not option (b) — route them to an advisory surface? Half of that is
+# already true, measured: `orchestrator_runner.py:128` IS caught by
+# line_pinned_citations and reported by citation_line_free (Tier-1, warn). The
+# residue is the suffix-LESS bare filename, and covering it means either
+# widening citation_line_free past the `:line` grammar its docstring calls
+# itself the single source of, or adding a rule. That is its own ticket.
+
+
+def test_bare_filename_is_not_extracted_as_a_path():
+    """Pin the scope decision at the extraction layer."""
+    cites = citation_exists.extract_citations("See `README.md` and `notes.md`.")
+    assert cites["paths"] == []
+
+
+def test_nonexistent_bare_filename_does_not_block(tmp_path):
+    """Out of scope means it passes, not that it is checked and found present."""
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text("See `never_written_at_all.md`.\n")
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg
+
+
+def test_bare_filename_with_a_line_pin_is_still_advisory_visible():
+    """The measured half of option (b): this population already has a surface."""
+    pins = citation_exists.line_pinned_citations("See `orchestrator_runner.py:128`.")
+    assert pins == ["orchestrator_runner.py:128"]
+
+
+def test_help_output_states_the_bare_filename_scope():
+    """The choice must be explicit where users read the rule -- argparse prints
+    this module's docstring as --help -- not only in a code comment."""
+    r = subprocess.run(
+        [sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True
+    )
+    help_text = " ".join(r.stdout.split()).lower()
+    assert "bare filenames" in help_text
+    assert "citation_line_free" in help_text

@@ -11,6 +11,7 @@ from __future__ import annotations
 import fnmatch
 import inspect
 import json
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -287,6 +288,83 @@ def render_mkdocs_yaml(
     return body + "\n" + _render_nav(site)
 
 
+# CCE-170: the sibling `state_io.save_current_run` writes next to state.json.
+# It is per-run scratch, rewritten on every dispatch, and it is NOT part of the
+# merge-as-promotion path -- only state.json is meant to be committed. The
+# agent repo has gitignored it since forever (.gitignore), which is exactly why
+# nobody noticed that hosts do not inherit that file: `_stage_docs_run_changes`
+# stages with `git add -A .`, so on a host every run committed ephemeral state
+# into the docs PR. Measured on host claude-code-self-assessment: not ignored,
+# tracked, 26 commits deep.
+_RUN_STATE_IGNORE = ".engineering-docs-agent/current_run.json"
+
+
+def _git_rc(repo_root: Path, *args: str) -> int:
+    """git's exit code, or 128 when git cannot be run at all.
+
+    128 is git's own "not a repository" code, so a host that is not a git repo
+    and a machine with no git on PATH degrade down the same branch.
+    """
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo_root), *args], capture_output=True, text=True
+        ).returncode
+    except OSError:
+        return 128
+
+
+def ensure_run_state_gitignored(
+    repo_root: Path, entry: str = _RUN_STATE_IGNORE
+) -> str:
+    """Make the host ignore the per-run state sibling. Idempotent; never raises.
+
+    Returns one of: ``already-ignored``, ``added``, ``created``,
+    ``added-but-inert-path-is-tracked``, ``unwritable``.
+
+    ASK GIT, not a string compare. A host that already ignores the whole
+    `.engineering-docs-agent/` directory needs no second line, and writing one
+    would assert the entry was missing when it was not. `--no-index` asks the
+    pattern question ("would .gitignore exclude this?") rather than the index
+    question, which is the one that matters before the file exists.
+
+    THE TRACKED CASE IS NOT SUCCESS. .gitignore has no effect on a path git
+    already tracks, so on a host that has been running the agent -- where the
+    sibling is committed and `git add -A .` keeps staging it -- this entry is
+    inert until someone runs `git rm --cached <entry>` once. The ticket's
+    option 2 claims it "removes both the churn and the latent failure"; it does
+    that for hosts onboarded AFTER this change, and the distinct status here is
+    what tells an already-onboarded operator that a manual step remains.
+    Reporting a plain "added" there would be a quiet lie.
+
+    Appends, never rewrites: the host's .gitignore is the host's file. The
+    comment names the agent so a human reading it later knows who wrote it and
+    why.
+    """
+    repo_root = Path(repo_root)
+    if _git_rc(repo_root, "check-ignore", "-q", "--no-index", "--", entry) == 0:
+        return "already-ignored"
+    tracked = _git_rc(repo_root, "ls-files", "--error-unmatch", "--", entry) == 0
+
+    block = (
+        "# engineering-docs-agent: ephemeral per-run state, rewritten on every\n"
+        "# dispatch and never part of the merge-as-promotion path (CCE-170).\n"
+        f"{entry}\n"
+    )
+    gitignore = repo_root / ".gitignore"
+    try:
+        if gitignore.exists():
+            existing = gitignore.read_text(encoding="utf-8")
+            separator = "" if existing.endswith("\n") or not existing else "\n"
+            gitignore.write_text(existing + separator + "\n" + block, encoding="utf-8")
+            status = "added"
+        else:
+            gitignore.write_text(block, encoding="utf-8")
+            status = "created"
+    except OSError:
+        return "unwritable"
+    return "added-but-inert-path-is-tracked" if tracked else status
+
+
 def apply_scaffold(
     repo_root: Path,
     site: dict,
@@ -381,4 +459,8 @@ def apply_scaffold(
         target.write_text(f.content, encoding="utf-8")
         created.append(f.path)
 
-    return {"created": created, "skipped": skipped}
+    return {
+        "created": created,
+        "skipped": skipped,
+        "run_state_gitignore": ensure_run_state_gitignored(repo_root),
+    }

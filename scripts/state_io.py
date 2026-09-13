@@ -216,10 +216,31 @@ def save_persistent_state(path: Path, state: dict[str, Any]) -> None:
 def save_current_run(path: Path, state: dict[str, Any]) -> None:
     """Sync the ephemeral current_run to <path's parent>/current_run.json.
 
-    The sibling file is gitignored (see .gitignore) and not part of the
-    merge-as-promotion path — only state.json is committed. When `state`
-    carries a `current_run`, write the sibling. When it doesn't, remove
-    any stale sibling so on-disk state matches in-memory state.
+    The sibling is per-run scratch and is not MEANT to be part of the
+    merge-as-promotion path — only state.json is. When `state` carries a
+    `current_run`, write the sibling. When it doesn't, remove any stale
+    sibling so on-disk state matches in-memory state.
+
+    CCE-170: this used to assert flatly that the sibling "is gitignored (see
+    .gitignore)". That holds in the AGENT repo, whose own .gitignore lists it,
+    and is false on a HOST, which does not inherit that file.
+    `orchestrator_runner._stage_docs_run_changes` stages with `git add -A .`,
+    so on a host where the sibling is not ignored, every run commits ephemeral
+    per-run state into the docs PR. Measured on host
+    claude-code-self-assessment: `git check-ignore` exits 1, the path is
+    tracked, and 26 commits have touched it.
+
+    `site_structure.ensure_run_state_gitignored` now writes the entry at
+    onboarding, which closes this for hosts scaffolded from here on. It does
+    NOT retroactively fix a host where the path is ALREADY TRACKED — .gitignore
+    has no effect on tracked paths — and such a host needs
+    `git rm --cached .engineering-docs-agent/current_run.json` once. The
+    scaffolder returns `added-but-inert-path-is-tracked` rather than a plain
+    `added` precisely so that remaining manual step is visible.
+
+    The same host-vs-agent split is already reasoned about carefully in
+    `_stage_docs_run_changes`'s own docstring, for `.docs-agent-plugin/`
+    (CCE-70, CCE-75). It was simply never applied to this file.
     """
     target = path.parent / "current_run.json"
     cr = state.get("current_run")

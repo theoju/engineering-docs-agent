@@ -2,10 +2,24 @@
   "version": "1",
   "last_successful_run": {
     "head_sha": "12c3125c1ede54cfa3678f19c02281c4137889cd",
-    "completed_at": "2026-08-22T07:37:35.475381+00:00"
+    "completed_at": "2026-09-16T12:32:16.058768+00:00"
   },
   "deferral_counts": {
-    "theoju/engineering-docs-agent#221": 1
+    "theoju/engineering-docs-agent#221": 2,
+    "theoju/engineering-docs-agent#224": 1,
+    "theoju/engineering-docs-agent#227": 1,
+    "theoju/engineering-docs-agent#228": 1,
+    "theoju/engineering-docs-agent#231": 1,
+    "theoju/engineering-docs-agent#232": 1,
+    "theoju/engineering-docs-agent#263": 1,
+    "theoju/engineering-docs-agent#264": 1,
+    "theoju/engineering-docs-agent#265": 1,
+    "theoju/engineering-docs-agent#237": 1,
+    "theoju/engineering-docs-agent#238": 1,
+    "theoju/engineering-docs-agent#239": 1,
+    "theoju/engineering-docs-agent#241": 1,
+    "theoju/engineering-docs-agent#222": 1,
+    "theoju/engineering-docs-agent#223": 1
   },
   "pr_summaries": {
     "theoju/engineering-docs-agent#219": {
@@ -47,7 +61,7 @@
     "theoju/engineering-docs-agent#221": {
       "merge_sha": "37f288581f2cf1987e5a531b1477bdb48385a9b9",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
       "summary": {
         "pr_number": 221,
         "what_changed": "Ran a controlled A/B extraction experiment through graphify's shared library path (same parser, chunker, and out-of-scope filter), varying only the extraction system prompt. The result confirms that the prompt itself was the doc-layer ceiling: swapping the stock prompt for the CCE-125-tuned one raised nodes produced per document from roughly 1 to 6-8, while a separate check found that `_FILE_CHAR_CAP` slices file content mid-token rather than truncating cleanly at a boundary. Findings were written into the existing `docs/runbooks/graphify-extraction-findings.md` runbook and surfaced in the site's what's-new page.",
@@ -77,7 +91,7 @@
     "theoju/engineering-docs-agent#222": {
       "merge_sha": "52881a6aaaf516e7b11248f5920a0e374c1f6da6",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
       "summary": {
         "pr_number": 222,
         "what_changed": "Updated docs/runbooks/graphify-extraction-findings.md to record that the graphify semantic-extraction pipeline now uses a Haiku backend instead of Gemini, and corrected three claims in the runbook that had gone false since the backend switch (including the 'untested at scale' claim, now discharged by a real /graphify . --update run over 81 changed documents).",
@@ -99,7 +113,7 @@
     "theoju/engineering-docs-agent#223": {
       "merge_sha": "537c97ab2b109ee4d409528cf96347fe623ee7cb",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
       "summary": {
         "pr_number": 223,
         "what_changed": "PR #223 archived the CCE-144 blind-run-detection design as an abandoned effort (closing ticket CCE-150), moving its plan and spec into the archived state. Nine minutes later PR #224 merged that same implementation to main, reversing the abandon decision. PR #223's content (the plan/spec files changed) therefore describes a decision that no longer holds; the PR itself is now only a historical record of a reversed call, not a description of current system behavior.",
@@ -120,7 +134,7 @@
     "theoju/engineering-docs-agent#224": {
       "merge_sha": "087bfbc42badc9decb8442760e990e68395ab007",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
       "summary": {
         "pr_number": 224,
         "what_changed": "Splits the previously overloaded `partial` state-tracking flag into two distinct signals: `blind` (a blocking agent was prevented from judging its input at all \u2014 e.g. source-collector, pr-summarizer, or notifier dispatch failed to produce usable output) and `degraded` (the pipeline judged its input and deliberately withheld or rejected specific content, e.g. a lint block or time-budget truncation). A run classified as blind now exits with a non-zero status code, cannot advance the watermark cursor, and is excluded from the CCE-101 auto-merge gate. Classification happens by call site rather than by matching on reason strings, and every blocking dispatch reason must now be classified \u2014 an unclassified failure defaults to blind so it fails loud instead of silently passing as green.",
@@ -150,7 +164,7 @@
     "theoju/engineering-docs-agent#228": {
       "merge_sha": "b87d77d2d871efe62a1c05fe264375eea2db80bd",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
       "summary": {
         "pr_number": 228,
         "what_changed": "Adds two net-new documentation files to the repo: CONTEXT.md, a project-wide glossary defining the orchestrator's domain vocabulary (window, baseline, cursor, window head, promotion, ephemeral advance, admission gate, deferral, owed page, forgiveness, held back, partial run, truncation, batch, block, drift), and docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md, an ADR recording the decision behind how the baseline advance is persisted for partial runs. No code changes; the full test suite (1339 passed, 5 skipped) is unaffected.",
@@ -177,7 +191,7 @@
     "theoju/engineering-docs-agent#227": {
       "merge_sha": "fc65ab816d0b0eece8fe5ffcaaa053568ced7318",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
       "summary": {
         "pr_number": 227,
         "what_changed": "Fixes the docs-agent's page-authoring loop so a nightly run cuts its work at a PR boundary instead of an arbitrary page-batch index. Previously the CCE-109 time-budget check fired at any batch index, and the at-least-one-progress escape hatch (`i > 0`) operated per page-batch rather than per PR. When the oldest PR in a run's window fanned out to more page batches than the time budget could author, the run split that PR's batch group on every single run and never finished authoring it \u2014 so the baseline cursor could never advance past it (observed on the ADIS host as a 20.6-day stall, always reporting `time_budget_no_advance_no_cursor`). The fix reworks the authoring loop's cut logic to operate at PR granularity: a run either fully authors a PR's page batches or defers the whole PR, guaranteeing forward progress every run.",
@@ -204,7 +218,7 @@
     "theoju/engineering-docs-agent#231": {
       "merge_sha": "b979e7366200e37ba516ef529a6c7cac1bf3f3ca",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
       "summary": {
         "pr_number": 231,
         "what_changed": "The orchestrator now caches a merged PR's summary from pr-summarizer and reuses it on subsequent nightly runs instead of re-dispatching the agent against the same immutable merge commit. Previously, PRs left in the deferred/lookback window were re-summarized from scratch every night until the cursor advanced past them; measurements showed roughly 90% of a night's summarization work was repeat work on unchanged PRs.",
@@ -234,7 +248,7 @@
     "theoju/engineering-docs-agent#232": {
       "merge_sha": "ab2a1e827975685fd23501d29e828e76d2009fee",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
       "summary": {
         "pr_number": 232,
         "what_changed": "Pinned node:test's TAP reporter explicitly (instead of relying on its default reporter selection) so that tests/templates/test_sdd_fidelity_gate_node.py reliably parses the pass/fail summary counts out of `node --test` output. Previously the parser used line-anchored regexes (`^\\s*[\u2139#]\\s*pass (\\d+)\\b`) that assumed node's plain 'spec' summary lines; when FORCE_COLOR is set (as it commonly is in agent/CI sessions), node injects ANSI escape codes before the summary tokens, which defeated the anchored match and caused the fidelity-gate JS suite check to report a parse failure even though the underlying suite passed cleanly (`pass 53`, `fail 0`, `returncode == 0`).",
@@ -257,7 +271,7 @@
     "theoju/engineering-docs-agent#237": {
       "merge_sha": "ff470c0ad02219361b77600165ad542c53ad0f05",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
       "summary": {
         "pr_number": 237,
         "what_changed": "Fixes the citation_exists Tier-1 lint check so it resolves Python symbol citations (`path:symbol`) against any definition site \u2014 methods, nested functions, class attributes \u2014 not just top-level module definitions. Previously the linter only recognized symbols defined at the top level of a Python file, so citations to real, correctly-defined symbols nested inside a class or function were incorrectly reported as nonexistent, causing the authored page to be dropped by content-validator. Because a dropped page is not retried and the collection window still advances, this silently and permanently stranded documentation for legitimately-cited code.",
@@ -286,7 +300,7 @@
     "theoju/engineering-docs-agent#238": {
       "merge_sha": "c19b9cacae59f73a8ae33ccd199c6ea136d35c79",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
       "summary": {
         "pr_number": 238,
         "what_changed": "The nightly orchestrator's watermark-advance logic is now cursor-backed on every code path, not just the time-truncated one. `deferred_pages_by_pr` and the `held_back` set are now computed unconditionally, and the cursor walk that limits the advance to the last fully-documented PR is entered whenever `time_truncated OR held_back` is true (previously it was nested only inside the `if time_truncated:` branch). A clean run's behavior is unchanged (full window-HEAD advance when nothing is held back); a run that is partial for a non-time reason (lint block, `page_author_invalid`, etc.) now advances only as far as the last PR whose pages all landed, instead of jumping to full window HEAD and silently discarding the undocumented window. Reason strings are now cause-dependent (`time_budget_*` vs `held_back_*`) to preserve existing operator-facing grep patterns and test assertions for the time-truncated family.",
@@ -314,7 +328,7 @@
     "theoju/engineering-docs-agent#239": {
       "merge_sha": "1718883fa52e7d291a5e78266e26304a8634a0ec",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
       "summary": {
         "pr_number": 239,
         "what_changed": "Fixed the internal_links Tier-1 lint rule so it no longer treats markdown links that are being documented as examples (verbatim link text quoted inside prose explaining a link-parsing function) as if they were real navigation links. The rule was blocking pages that legitimately quoted link syntax as illustrative content, most visibly a page documenting extractDocRefs \u2014 a function whose entire purpose is parsing markdown links out of CLAUDE.md \u2014 which was blocked twice for containing the exact example links it was explaining.",
@@ -332,6 +346,96 @@
         "notes": "Could not confirm whether an existing architecture page enumerates internal_links' exemption rules in detail; if scripts/lint/lint_runner.py or a Tier-1 rules reference page already exists under core/architecture, prefer editing it instead of creating a new archive page.",
         "error": null,
         "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#241": {
+      "merge_sha": "c5dbe98162a575e360507e752a6eec5beae16563",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
+      "summary": {
+        "pr_number": 241,
+        "what_changed": "Adds citation-shortening detection for the docs-agent pipeline. When page-author rewrites a citation and shortens an already-resolvable path (e.g. dropping leading directories so `citation_exists` blocks it), the orchestrator now runs a diagnosis pass (`scripts/citation_repair.py`) after the authoring loop and before the lint-block revert, reporting the most likely original file the citation was shortened from. It does not rewrite or repair the citation \u2014 diagnosis only, surfaced as an info-only note in the PR digest so a human can fix it. The page still blocks and the PR is abandoned via the existing deferral-skip path; this only makes the failure diagnosable instead of silent.",
+        "why": "CCE-141: page-author sometimes shortens an already-correct citation to a bare relative path, which citation_exists correctly rejects, causing the page to be blocked every run and silently never written. An automatic repair mechanism was built and reviewed across four rounds, but each round produced a new Critical of the same class \u2014 a rewrite moving a citation into a region citation_exists does not verify, turning a correct BLOCK into a silent PASS. Production data showed zero real firings for a repair path (0 of 15 archived blocked citations had a unique suffix match) and disabling it left the test suite unchanged, so the team deleted the repair capability entirely and shipped detection-only diagnostics instead.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "2026-08-21-cce141-citation-shortening-detection.md",
+            "doc_kind": "decision",
+            "notes": "Documents the CCE-141 decision to ship detection-only diagnostics for shortened citations and the four-round repair-and-withdraw history; mirrors the design spec at docs/superpowers/specs/2026-08-21-cce141-citation-path-repair-design.md."
+          },
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "notes": "If this page documents the authoring/lint pipeline sequencing, add the _diagnose_citation_paths step (runs after authoring, before lint-block revert) and note it is info_only and never repairs citations."
+          }
+        ],
+        "notes": "PR body was truncated in the input; summary and rationale are reconstructed primarily from the CLAUDE.md CCE-141 changelog entry and the CCE-141/140/124 Jira context. No architecture page name was confirmed to exist for the orchestrator's citation/lint pipeline, so the edit target is a best-guess hint pending verification against available_sections['core']['architecture'] contents."
+      }
+    },
+    "theoju/engineering-docs-agent#263": {
+      "merge_sha": "5f6ecc426dc246b0255ac58d082b53f612b7de36",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
+      "summary": {
+        "pr_number": 263,
+        "what_changed": "Fixes three defects in the citation extraction/relativization layer of the Tier-1 block rule `citation_exists` (scripts/lint/citation_exists.py): (1) an unguarded OSError when a cited token's path component exceeds NAME_MAX reaches `.exists()` in the blocking loop (only the diagnostic loop in citation_repair had this guard); (2) bare filenames were never checked against the tracked-file set, letting some citations skip validation entirely; (3) relative paths were not normalized before comparison/resolution, so equivalent paths could be treated as distinct. One commit per finding, each with accompanying tests in tests/lint/test_citation_exists.py.",
+        "why": "CCE-171 was filed after a source read of citation_exists.py surfaced three concrete gaps in the extraction/relativization layer: the blocking loop lacked the same OSError guard CCE-141 round 6 had already added to the diagnostic-only citation_repair.diagnose, meaning an over-long path component could crash the lint rule instead of being safely treated as non-resolving; bare filenames and unnormalized relative paths were separate blind spots in the same layer. Left unfixed, these bugs risk either false negatives (citations that should block don't) or an unhandled crash in a Tier-1 block rule, which is exactly the kind of citation-integrity gap CCE-141 already established must be closed at detection time, not patched via repair.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "2026-09-16-cce171-citation-exists-hardening.md",
+            "doc_kind": "decision",
+            "notes": "Short decision/record note capturing the three CCE-171 findings (OSError guard parity, bare-filename scope, relative-path normalization) in the citation_exists Tier-1 block rule, cross-referencing CCE-141's detection-only precedent."
+          }
+        ],
+        "notes": "No existing architecture page specifically documents citation_exists internals in this lens's available_sections, so this is recorded as a flat decision entry rather than an edit to an architecture doc. If a dedicated citation-lint architecture page exists elsewhere (e.g., under archive or architecture) it was not visible in available_sections and should be reconciled by a human reviewer."
+      }
+    },
+    "theoju/engineering-docs-agent#264": {
+      "merge_sha": "64d56b1b319eb238aa3d348e532b8d2351db12f2",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
+      "summary": {
+        "pr_number": 264,
+        "what_changed": "Fixed a fragile-coupling bug in the citation-diagnosis run-cap logic (`_diagnose_citation_paths` in `scripts/orchestrator_runner.py`). The function recovered how many citation-shortening findings a run had already emitted by string-matching `partial_reasons` entries against the literal prefix `\"citation_shortening_suspected: \"` \u2014 the exact string its own writer formats a few lines later. The cap now counts finding data directly instead of re-parsing its own prior digest output, so renaming or reformatting the digest line can no longer silently disable the per-run findings bound.",
+        "why": "CCE-173 identified that the run-cap recovery mechanism added by the CCE-141 citation-shortening diagnosis feature (PR #241) derived its state by string-matching its own previously written prose rather than tracking a count as data. That coupling meant a routine rename of the digest prefix would silently disable the `_CITATION_RUN_FINDINGS_CAP` bound with no test signal. Filed the same day as the related CCE-171 findings (unguarded OSError, bare-filename, and unnormalized relative-path gaps in `citation_exists`) against the same citation-lint subsystem.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-09-13-cce173-citation-run-cap-fix.md",
+            "doc_kind": "decision",
+            "notes": "Documents why the CCE-141 citation run-cap counter (_diagnose_citation_paths) was rewritten to count finding data instead of string-matching its own digest-line prefix, and its relationship to the same-day CCE-171 citation_exists hardening."
+          }
+        ],
+        "notes": "Small internal bug fix confined to scripts/orchestrator_runner.py and its test; no user-facing behavior change beyond making the existing per-run citation-findings cap actually reliable. No architecture page for the citation-diagnosis mechanism was confirmed to exist in this lens, so a new archive/decision page was proposed rather than an edit target."
+      }
+    },
+    "theoju/engineering-docs-agent#265": {
+      "merge_sha": "f1232562be8ec03314f12e035fd89b60d28ae6d8",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-09-16T13:05:53.931773+00:00",
+      "summary": {
+        "pr_number": 265,
+        "what_changed": "Fixes a docstring/behavior gap in `state_io.save_current_run`: the per-run `current_run.json` sibling file was documented as gitignored and excluded from the merge-as-promotion path, but that was only true in the plugin's own repo (which lists it in its own `.gitignore`). Host repos scaffolded by setup do not inherit that entry, so the sibling file could leak into host commits. The fix corrects the docstring to be accurate about scope, and makes the invariant actually true on hosts by having the setup/site-structure scaffolding add the ignore entry at onboarding time.",
+        "why": "CCE-170 identified that the documented gitignore invariant only held in engineering-docs-agent itself and was false on host repos, a latent-failure risk uncovered while auditing prior host-contamination issues (CCE-70, CCE-75) where unignored paths leaked into host git state via the orchestrator's staging step.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "host-onboarding/setup.md",
+            "doc_kind": "architecture",
+            "notes": "Document that setup now scaffolds a .gitignore entry for the per-run current_run.json sibling on host repos, so the invariant holds outside the plugin's own repo."
+          }
+        ],
+        "notes": "No architecture page specifically covering state_io's run-state persistence contract was identified in available_sections; targeted host-onboarding setup docs since the fix is about host scaffolding behavior. If a dedicated state-persistence architecture page exists under core/architecture, this should be an edit there instead."
       }
     }
   }

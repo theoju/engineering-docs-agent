@@ -160,7 +160,7 @@ def test_a_stalled_baseline_forgives_a_pr_the_counter_never_could():
         counts={orun.deferral_key(REPO, 1): 1},
         repo=REPO,
         threshold=3,
-        stalled=True,
+        forgive={1},
     )
     assert [p["number"] for p in skipped] == [1]
     assert still == []
@@ -173,7 +173,7 @@ def test_a_fresh_baseline_does_not_forgive_early():
         counts={orun.deferral_key(REPO, 1): 1},
         repo=REPO,
         threshold=3,
-        stalled=False,
+        forgive=frozenset(),
     )
     assert skipped == []
     assert [p["number"] for p in still] == [1]
@@ -186,7 +186,7 @@ def test_stalled_is_inert_when_skipping_is_disabled():
         counts={},
         repo=REPO,
         threshold=0,
-        stalled=True,
+        forgive={1},
     )
     assert skipped == []
     assert [p["number"] for p in still] == [1]
@@ -223,7 +223,7 @@ def test_the_deadlock_breaks_once_the_clock_is_consulted():
             counts=dict(committed),
             repo=REPO,
             threshold=threshold,
-            stalled=age is not None and age >= stall_days,
+            forgive={1} if (age is not None and age >= stall_days) else frozenset(),
         )
         if skipped:
             forgiven_on = night

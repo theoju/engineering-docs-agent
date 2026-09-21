@@ -737,7 +737,7 @@ def partition_deferrals(
     counts: dict,
     repo: dict,
     threshold: int,
-    stalled: bool = False,
+    forgive: set | frozenset = frozenset(),
 ) -> tuple[list[dict], list[dict]]:
     """Split this run's deferred PRs into ``(skipped_now, still_deferred)``.
 
@@ -753,8 +753,31 @@ def partition_deferrals(
     Order-independent: the prefix-boundary invariant is enforced structurally
     by ``advance_cursor_list``, not here.
 
-    CCE-175: ``stalled`` forgives every deferred PR regardless of its count,
-    because the counter alone can never reach ``threshold``.
+    CCE-175: ``stalled`` forgives a deferred PR without waiting for its count
+    to reach ``threshold``, because the counter alone can never get there.
+
+    CCE-178 replaced that bool with ``forgive``, an explicit set of PR numbers
+    the caller has decided to abandon regardless of count.
+
+    As shipped, the stall escape forgave EVERY deferred PR, and production
+    abandoned #246 and #249 on their FIRST deferral — blocked by an unrelated
+    page, while a different PR was what had stalled the baseline. The threshold
+    promises three chances and the clock was taking them away.
+
+    The obvious narrowing — forgive only PRs with count >= 1 — re-creates the
+    deadlock it is meant to break. A PR deferred for the first time at the
+    OLDEST position blocks the cursor prefix at index 0, so no cursor exists,
+    so nothing merges, so its count never reaches 1 and it is never forgiven.
+    The counter cannot be a precondition for the escape from the counter.
+
+    So the caller forgives the PREFIX BLOCKER instead: the single oldest
+    deferred PR, which is the one actually holding the cursor. One PR per
+    stalled run, the minimum that can restore progress. Everything behind it
+    keeps its full three chances, and once the baseline moves the clock resets
+    and the ordinary counter governs again.
+
+    ``forgive`` keeps this function order-independent — the caller resolves
+    window order, exactly as ``advance_cursor_list`` owns the prefix boundary.
 
     ``counts`` is read from the ``state.json`` committed on the default branch,
     and that file is promoted only when the docs-agent PR merges. The PR does
@@ -783,7 +806,7 @@ def partition_deferrals(
     still: list[dict] = []
     for pr in deferred:
         count = int(counts.get(deferral_key(repo, pr.get("number")), 0))
-        if stalled or count >= threshold:
+        if count >= threshold or pr.get("number") in forgive:
             skipped.append(pr)
         else:
             still.append(pr)
@@ -3104,12 +3127,27 @@ def run(
             and _baseline_age is not None
             and _baseline_age >= _stall_days
         )
+        # CCE-178: forgive the PREFIX BLOCKER only — the single oldest deferred
+        # PR in window order, which is the one actually holding the cursor.
+        # CCE-175 forgave everything deferred, and production abandoned #246
+        # and #249 on their first deferral because an unrelated PR had stalled
+        # the baseline. One PR per stalled run is the minimum that restores
+        # progress; everything behind it keeps its three chances, and once the
+        # baseline moves the clock resets and the counter governs again.
+        _deferred_numbers = {
+            p.get("number") for p in _deferred_all if p.get("number") is not None
+        }
+        _blocker = next(
+            (p.get("number") for p in prs if p.get("number") in _deferred_numbers),
+            None,
+        )
+        _forgive = {_blocker} if (_stalled and _blocker is not None) else frozenset()
         _skipped_prs, _still_deferred = partition_deferrals(
             _deferred_all,
             counts=_deferral_counts,
             repo=repo,
             threshold=_threshold,
-            stalled=_stalled,
+            forgive=_forgive,
         )
         skipped_numbers = {p.get("number") for p in _skipped_prs}
         # CCE-140: hold every PR this run did not finish out of the cursor
@@ -3119,7 +3157,7 @@ def run(
             set(deferred_pages_by_pr) | {p.get("number") for p in admission_deferred}
         ) - skipped_numbers
         still_deferred = _still_deferred
-        if _stalled and _skipped_prs:
+        if _forgive:
             # Guarded on `_skipped_prs`, NOT on `_stalled` alone. A stalled
             # baseline with nothing deferred is a CLEAN run — and it is the
             # most important run in the cycle, because holding nothing back
@@ -3136,8 +3174,8 @@ def run(
             add_partial(
                 state,
                 f"deferral_stall_escape: baseline has not advanced in "
-                f"{_baseline_age:.1f}d (window {_stall_days}d); forgiving "
-                f"{len(_skipped_prs)} deferred PR(s) so state can reach main",
+                f"{_baseline_age:.1f}d (window {_stall_days}d); forgiving the "
+                f"oldest deferred PR #{_blocker} so state can reach main",
                 info_only=True,
             )
         # CCE-175 observability: the 457-line nightly log never named which PRs
@@ -3248,7 +3286,25 @@ def run(
             # baseline on the last PR's merge_sha even on a clean run, leaving
             # direct-push commits after it permanently outside every window.
             # Gating on emptiness buys the fix without paying that.
-            advance_cursor_backed = False
+            #
+            # CCE-178: `skipped_numbers` is the exception. `held_back` can be
+            # empty for two very different reasons — nothing failed, or
+            # everything that failed was deliberately FORGIVEN — and only the
+            # first is a clean run. A forgiven advance is an explicit decision
+            # recorded durably in `skipped_prs`, not a blind one, so reporting
+            # it as not-cursor-backed is a false statement about how the
+            # baseline moved. It was also the whole reason CCE-175 did not
+            # work: emptying `held_back` routed the run here, the flag went
+            # False, and CCE-140's `partial and not advance_cursor_backed`
+            # gate skipped the merge with `auto_merge_skipped: partial_run`.
+            # The escape freed the cursor and left the merge blocked, so state
+            # still never reached main. Observed on run 35609168489.
+            #
+            # This stays on the window-HEAD advance rather than routing
+            # forgiven runs through the walk: the walk would land the baseline
+            # on the last PR's merge_sha and strand the direct-push commits
+            # after it, which is exactly the loss the paragraph above refuses.
+            advance_cursor_backed = bool(skipped_numbers)
             # Nothing was held back, so the walk would have covered the whole
             # window. The deferral-skip recorder below intersects against this
             # to decide which forgiven PRs the cursor actually crossed.

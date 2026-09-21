@@ -1,53 +1,14 @@
 {
   "version": "1",
   "last_successful_run": {
-    "head_sha": "12c3125c1ede54cfa3678f19c02281c4137889cd",
-    "completed_at": "2026-08-22T07:37:35.475381+00:00"
-  },
-  "deferral_counts": {
-    "theoju/engineering-docs-agent#221": 1
+    "head_sha": "c5dc23b2d9deb337f25c28924c1ee4144876ef88",
+    "completed_at": "2026-09-21T13:51:44.185755+00:00"
   },
   "pr_summaries": {
-    "theoju/engineering-docs-agent#219": {
-      "merge_sha": "aea9fe0799b53c41bbdb4bb7ae89f4dcd639ff28",
-      "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
-      "summary": {
-        "pr_number": 219,
-        "what_changed": "Records the outcome of an experiment that tried dispatching each spec to the extraction agent together with the code files it references (\"reference-aware batching\"), instead of flat batching. The mechanism works \u2014 out-of-scope node loss dropped from 64% to 16% and 84 previously-discarded code-concept nodes survived \u2014 but overall doc depth regressed (target-nodes/doc fell from 1.02 to 0.55 across 20 documents), so the approach is rejected as a fix. The PR also adds a `.graphifyignore` file so minified fixtures are excluded from extraction runs going forward.",
-        "why": "CCE-146 needed to close out the reference-aware extraction experiment proposed by an earlier runbook, and prevent minified test fixtures from polluting extraction results. The reference-aware approach rescued nodes that flat batching discarded, but its net effect on documentation depth was negative, so the finding needed to be recorded to stop the approach from being re-attempted without this context; the `.graphifyignore` fix is durable and unrelated to the rejected mechanism.",
-        "breaking": false,
-        "doc_targets": [
-          {
-            "lens": "core",
-            "action": "create",
-            "page_hint": "archive/2026-08-13-reference-aware-batching-rejected.md",
-            "doc_kind": "decision",
-            "notes": "Records the CCE-146 experiment result (reference-aware batching improves out-of-scope loss but regresses doc depth) as a rejected-approach decision record, so it isn't re-attempted without this context."
-          }
-        ],
-        "notes": "The PR itself already added docs/runbooks/graphify-extraction-findings.md directly to the source tree, outside the lens-managed sections listed in available_sections; the doc_target above proposes a corresponding archive entry within the core lens's managed doc site. The .graphifyignore addition is a tooling fix with no independent doc-page need.",
-        "error": null,
-        "partial": false
-      }
-    },
-    "theoju/engineering-docs-agent#220": {
-      "merge_sha": "12c3125c1ede54cfa3678f19c02281c4137889cd",
-      "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
-      "summary": {
-        "pr_number": 220,
-        "what_changed": "Added .gitignore entries for graphify-out/ and uv.lock so that 38 MB of regenerable knowledge-graph build output (graph.json, graph.html, extraction JSONLs, caches, backups) and the local uv lockfile are no longer untracked and can't be accidentally swept into commits via git add -A.",
-        "why": "graphify-out/ contained regenerable build artifacts that were showing as untracked; the findings worth keeping already live in docs/runbooks/graphify-extraction-findings.md, so the raw build output has no reason to be tracked. uv.lock was similarly untracked and unused by any workflow (no reference to uv, uv sync, or astral-sh/setup-uv under .github/workflows/ or templates/), making it a local-only artifact.",
-        "breaking": false,
-        "doc_targets": [],
-        "notes": "Pure repo-hygiene change (.gitignore only) with no user-visible behavior or documentation impact; no doc_targets emitted per forbidden-outputs \u00a74 exception for internal changes with no user-visible behavior."
-      }
-    },
     "theoju/engineering-docs-agent#221": {
       "merge_sha": "37f288581f2cf1987e5a531b1477bdb48385a9b9",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
       "summary": {
         "pr_number": 221,
         "what_changed": "Ran a controlled A/B extraction experiment through graphify's shared library path (same parser, chunker, and out-of-scope filter), varying only the extraction system prompt. The result confirms that the prompt itself was the doc-layer ceiling: swapping the stock prompt for the CCE-125-tuned one raised nodes produced per document from roughly 1 to 6-8, while a separate check found that `_FILE_CHAR_CAP` slices file content mid-token rather than truncating cleanly at a boundary. Findings were written into the existing `docs/runbooks/graphify-extraction-findings.md` runbook and surfaced in the site's what's-new page.",
@@ -77,7 +38,7 @@
     "theoju/engineering-docs-agent#222": {
       "merge_sha": "52881a6aaaf516e7b11248f5920a0e374c1f6da6",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
       "summary": {
         "pr_number": 222,
         "what_changed": "Updated docs/runbooks/graphify-extraction-findings.md to record that the graphify semantic-extraction pipeline now uses a Haiku backend instead of Gemini, and corrected three claims in the runbook that had gone false since the backend switch (including the 'untested at scale' claim, now discharged by a real /graphify . --update run over 81 changed documents).",
@@ -99,7 +60,7 @@
     "theoju/engineering-docs-agent#223": {
       "merge_sha": "537c97ab2b109ee4d409528cf96347fe623ee7cb",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
       "summary": {
         "pr_number": 223,
         "what_changed": "PR #223 archived the CCE-144 blind-run-detection design as an abandoned effort (closing ticket CCE-150), moving its plan and spec into the archived state. Nine minutes later PR #224 merged that same implementation to main, reversing the abandon decision. PR #223's content (the plan/spec files changed) therefore describes a decision that no longer holds; the PR itself is now only a historical record of a reversed call, not a description of current system behavior.",
@@ -120,7 +81,7 @@
     "theoju/engineering-docs-agent#224": {
       "merge_sha": "087bfbc42badc9decb8442760e990e68395ab007",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
       "summary": {
         "pr_number": 224,
         "what_changed": "Splits the previously overloaded `partial` state-tracking flag into two distinct signals: `blind` (a blocking agent was prevented from judging its input at all \u2014 e.g. source-collector, pr-summarizer, or notifier dispatch failed to produce usable output) and `degraded` (the pipeline judged its input and deliberately withheld or rejected specific content, e.g. a lint block or time-budget truncation). A run classified as blind now exits with a non-zero status code, cannot advance the watermark cursor, and is excluded from the CCE-101 auto-merge gate. Classification happens by call site rather than by matching on reason strings, and every blocking dispatch reason must now be classified \u2014 an unclassified failure defaults to blind so it fails loud instead of silently passing as green.",
@@ -150,7 +111,7 @@
     "theoju/engineering-docs-agent#228": {
       "merge_sha": "b87d77d2d871efe62a1c05fe264375eea2db80bd",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
       "summary": {
         "pr_number": 228,
         "what_changed": "Adds two net-new documentation files to the repo: CONTEXT.md, a project-wide glossary defining the orchestrator's domain vocabulary (window, baseline, cursor, window head, promotion, ephemeral advance, admission gate, deferral, owed page, forgiveness, held back, partial run, truncation, batch, block, drift), and docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md, an ADR recording the decision behind how the baseline advance is persisted for partial runs. No code changes; the full test suite (1339 passed, 5 skipped) is unaffected.",
@@ -177,7 +138,7 @@
     "theoju/engineering-docs-agent#227": {
       "merge_sha": "fc65ab816d0b0eece8fe5ffcaaa053568ced7318",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
       "summary": {
         "pr_number": 227,
         "what_changed": "Fixes the docs-agent's page-authoring loop so a nightly run cuts its work at a PR boundary instead of an arbitrary page-batch index. Previously the CCE-109 time-budget check fired at any batch index, and the at-least-one-progress escape hatch (`i > 0`) operated per page-batch rather than per PR. When the oldest PR in a run's window fanned out to more page batches than the time budget could author, the run split that PR's batch group on every single run and never finished authoring it \u2014 so the baseline cursor could never advance past it (observed on the ADIS host as a 20.6-day stall, always reporting `time_budget_no_advance_no_cursor`). The fix reworks the authoring loop's cut logic to operate at PR granularity: a run either fully authors a PR's page batches or defers the whole PR, guaranteeing forward progress every run.",
@@ -204,7 +165,7 @@
     "theoju/engineering-docs-agent#231": {
       "merge_sha": "b979e7366200e37ba516ef529a6c7cac1bf3f3ca",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
       "summary": {
         "pr_number": 231,
         "what_changed": "The orchestrator now caches a merged PR's summary from pr-summarizer and reuses it on subsequent nightly runs instead of re-dispatching the agent against the same immutable merge commit. Previously, PRs left in the deferred/lookback window were re-summarized from scratch every night until the cursor advanced past them; measurements showed roughly 90% of a night's summarization work was repeat work on unchanged PRs.",
@@ -234,7 +195,7 @@
     "theoju/engineering-docs-agent#232": {
       "merge_sha": "ab2a1e827975685fd23501d29e828e76d2009fee",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
       "summary": {
         "pr_number": 232,
         "what_changed": "Pinned node:test's TAP reporter explicitly (instead of relying on its default reporter selection) so that tests/templates/test_sdd_fidelity_gate_node.py reliably parses the pass/fail summary counts out of `node --test` output. Previously the parser used line-anchored regexes (`^\\s*[\u2139#]\\s*pass (\\d+)\\b`) that assumed node's plain 'spec' summary lines; when FORCE_COLOR is set (as it commonly is in agent/CI sessions), node injects ANSI escape codes before the summary tokens, which defeated the anchored match and caused the fidelity-gate JS suite check to report a parse failure even though the underlying suite passed cleanly (`pass 53`, `fail 0`, `returncode == 0`).",
@@ -257,7 +218,7 @@
     "theoju/engineering-docs-agent#237": {
       "merge_sha": "ff470c0ad02219361b77600165ad542c53ad0f05",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
       "summary": {
         "pr_number": 237,
         "what_changed": "Fixes the citation_exists Tier-1 lint check so it resolves Python symbol citations (`path:symbol`) against any definition site \u2014 methods, nested functions, class attributes \u2014 not just top-level module definitions. Previously the linter only recognized symbols defined at the top level of a Python file, so citations to real, correctly-defined symbols nested inside a class or function were incorrectly reported as nonexistent, causing the authored page to be dropped by content-validator. Because a dropped page is not retried and the collection window still advances, this silently and permanently stranded documentation for legitimately-cited code.",
@@ -286,7 +247,7 @@
     "theoju/engineering-docs-agent#238": {
       "merge_sha": "c19b9cacae59f73a8ae33ccd199c6ea136d35c79",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
       "summary": {
         "pr_number": 238,
         "what_changed": "The nightly orchestrator's watermark-advance logic is now cursor-backed on every code path, not just the time-truncated one. `deferred_pages_by_pr` and the `held_back` set are now computed unconditionally, and the cursor walk that limits the advance to the last fully-documented PR is entered whenever `time_truncated OR held_back` is true (previously it was nested only inside the `if time_truncated:` branch). A clean run's behavior is unchanged (full window-HEAD advance when nothing is held back); a run that is partial for a non-time reason (lint block, `page_author_invalid`, etc.) now advances only as far as the last PR whose pages all landed, instead of jumping to full window HEAD and silently discarding the undocumented window. Reason strings are now cause-dependent (`time_budget_*` vs `held_back_*`) to preserve existing operator-facing grep patterns and test assertions for the time-truncated family.",
@@ -314,7 +275,7 @@
     "theoju/engineering-docs-agent#239": {
       "merge_sha": "1718883fa52e7d291a5e78266e26304a8634a0ec",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-08-22T08:13:00.180666+00:00",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
       "summary": {
         "pr_number": 239,
         "what_changed": "Fixed the internal_links Tier-1 lint rule so it no longer treats markdown links that are being documented as examples (verbatim link text quoted inside prose explaining a link-parsing function) as if they were real navigation links. The rule was blocking pages that legitimately quoted link syntax as illustrative content, most visibly a page documenting extractDocRefs \u2014 a function whose entire purpose is parsing markdown links out of CLAUDE.md \u2014 which was blocked twice for containing the exact example links it was explaining.",
@@ -333,6 +294,247 @@
         "error": null,
         "partial": false
       }
+    },
+    "theoju/engineering-docs-agent#241": {
+      "merge_sha": "c5dbe98162a575e360507e752a6eec5beae16563",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
+      "summary": {
+        "pr_number": 241,
+        "what_changed": "The orchestrator now detects when page-author shortens an already-resolvable citation path (e.g. dropping a leading directory segment) instead of silently letting the page get blocked by citation_exists and abandoned by the CCE-140 deferral skip. A new module, scripts/citation_repair.py, diagnoses each blocked citation and reports the most likely tracked-file candidate it was shortened from, labeling the confidence as candidate_in_run_inputs, suffix_match_only, ambiguous, or no_candidate. This diagnosis is wired into the orchestrator after the authoring loop and before the lint-block revert, and surfaces as an info-only line per blocked citation in the partial-run digest (capped per-page and per-run to avoid exceeding PR body size limits). Critically, no automatic repair or rewrite of the page is performed \u2014 after four adversarial review rounds each found a new way that mutating the page could move a citation into a region citation_exists does not verify, turning a correct BLOCK into a silent PASS even after the cited file was deleted. The capability that would have caused that class of defect was deleted rather than patched again.",
+        "why": "CCE-141: page-author occasionally emits a shortened, non-resolving citation for a path that was originally valid (the ADIS page's `.claude/skills/connector-builder/references/checklist.md` became bare `references/checklist.md`). citation_exists correctly blocks it, but post-CCE-140 that block causes the deferral skip to abandon the PR, so the page is never written and the problem is invisible. An automatic repair-and-rewrite mechanism was built and reviewed four times to fix this, but every round found the same underlying flaw in a new disguise \u2014 repair could relocate a citation into a lint blind spot, converting a correct block into an unverified false pass. Production evidence showed zero real-world firings for a valid repair candidate and the full test suite stayed green with the repair path disabled, so the decision was to ship detection-only: report the likely intended file and let a human resolve it, rather than risk silent corruption for an unmeasured benefit.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-08-22-cce141-citation-repair-detection-only.md",
+            "doc_kind": "decision",
+            "notes": "Documents the CCE-141 decision: shortened-citation detection ships as diagnosis-only (scripts/citation_repair.py), with automatic repair explicitly rejected after four adversarial review rounds each surfacing a new BLOCK-to-silent-PASS corruption path. Captures the citation_repair.py labels, its wiring point in orchestrator_runner.py, and the CCE-124 archive-lens interaction (citation_exists as warn there means the diagnosis line is the only signal)."
+          },
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "notes": "Note the new _diagnose_citation_paths step: runs after the authoring loop and before the lint-block revert, producing info-only digest lines for blocked citations without mutating page content."
+          }
+        ]
+      }
+    },
+    "theoju/engineering-docs-agent#263": {
+      "merge_sha": "5f6ecc426dc246b0255ac58d082b53f612b7de36",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
+      "summary": {
+        "pr_number": 263,
+        "what_changed": "Fixes three defects in the citation extraction/relativization layer of the Tier-1 `citation_exists` block rule (`scripts/lint/citation_exists.py`): an unguarded `OSError` (e.g. `ENAMETOOLONG`) in the blocking loop that could discard every finding already collected for a page, bare filenames that were never actually checked for existence, and relative paths that were left unnormalized before resolution against the repo root. Each defect is fixed as its own commit with corresponding test coverage added in `tests/lint/test_citation_exists.py`.",
+        "why": "CCE-171 was filed after a source read of `citation_exists.py` found these three gaps, following on from CCE-141 (where the same class of unguarded-OSError bug had already been fixed in the diagnostic-only `citation_repair.diagnose` path but not in the actual blocking lint loop) and CCE-109 (the doom-loop history that makes lint correctness on this path especially load-bearing, since a single malformed citation must not silently swallow an entire page's findings).",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/citation-lint.md",
+            "doc_kind": "architecture",
+            "notes": "Update citation_exists coverage: OSError guard now applies to both the blocking and diagnostic loops, bare filenames are in scope, and relative paths are normalized before existence checks."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-09-21-cce171-citation-lint-guards.md",
+            "doc_kind": "decision",
+            "notes": "Postmortem-style record of the three citation_exists defects (unguarded OSError, unchecked bare filenames, unnormalized relative paths) and why the fix is guard-and-check rather than a repair mechanism, consistent with the CCE-141 decision to keep citation handling detection-only."
+          }
+        ],
+        "notes": "PR body was truncated in the provided input; what_changed/why are based on the available Finding 1 detail plus Jira CCE-171/CCE-141/CCE-109 context. Assumed an existing architecture page documents the citation lint system given its extensive history across CCE-122/139/141/171; if no such page exists, this target should be treated as create instead of edit.",
+        "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#264": {
+      "merge_sha": "64d56b1b319eb238aa3d348e532b8d2351db12f2",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
+      "summary": {
+        "pr_number": 264,
+        "what_changed": "Fixes the citation-shortening diagnostic run cap in the orchestrator so it recovers state from a typed counter instead of parsing its own rendered digest text. Previously `_diagnose_citation_paths` recomputed how many findings it had already emitted by counting `partial_reasons` entries that started with the literal string `\"citation_shortening_suspected: \"` \u2014 the exact prefix its own formatter writes twenty lines later in the same function. Any rename of that prefix would silently disable the `_CITATION_RUN_FINDINGS_CAP` bound with no test failure to catch it. The fix decouples the cap's state from the formatter's output string.",
+        "why": "CCE-173 identified that the run cap's bound lived inside its own rendered output, coupled to the digest formatter by an untyped string literal duplicated in two places \u2014 a classic stringly-typed self-reference bug. This is a direct follow-up in the CCE-141 citation-diagnosis lineage (CCE-141 built the info-only diagnostic, CCE-171 hardened the underlying citation_exists extraction layer, CCE-173 hardens the diagnostic's own run-cap bookkeeping) to remove a fragile coupling that could regress silently on a future rename.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-09-13-cce173-citation-run-cap-self-reference-fix.md",
+            "doc_kind": "decision",
+            "notes": "Documents the CCE-173 fix as a follow-up postmortem/decision entry in the CCE-141 citation-diagnosis lineage (info-only detection, never repair). If an existing page already covers the CCE-141/171 citation-diagnostic mechanism in architecture/, prefer editing that page instead and treat this as supplementary."
+          }
+        ],
+        "notes": "Internal bugfix confined to orchestrator_runner.py bookkeeping and its test coverage; no user-facing or API-facing behavior change beyond making the existing run cap actually enforce its documented bound reliably.",
+        "error": null,
+        "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#265": {
+      "merge_sha": "f1232562be8ec03314f12e035fd89b60d28ae6d8",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-09-21T14:21:42.973500+00:00",
+      "summary": {
+        "pr_number": 265,
+        "what_changed": "Fixes a docstring/behavior mismatch in state_io.save_current_run: the per-run current_run.json sibling was documented as gitignored and excluded from the merge-as-promotion path, which is only true in the plugin's own repo (its .gitignore lists the file). On a host repo, which does not inherit that .gitignore entry, the orchestrator's git add -A staging would commit this ephemeral per-run state file into every docs PR. The fix corrects the docstring and makes the invariant true at onboarding by having setup gitignore the current_run.json sibling on host repos, not just in this repo.",
+        "why": "CCE-170 found that the documented invariant (\"gitignored, not part of merge-as-promotion\") only held in engineering-docs-agent itself, not on hosts, because host repos don't inherit this repo's .gitignore. Since _stage_docs_run_changes uses git add -A, this silently committed ephemeral run state into host docs PRs. Related history in CCE-70 and CCE-75 shows this is a recurring class of bug (unguarded broad git add picking up paths hosts don't already exclude), so this PR closes the gap by making onboarding/setup gitignore the sibling on hosts as well as correcting the docstring.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "host-onboarding/setup.md",
+            "doc_kind": "architecture",
+            "notes": "Document that setup now gitignores the per-run current_run.json sibling on host repos, matching the plugin repo's own convention, so host nightly PRs don't accidentally commit ephemeral run state."
+          }
+        ]
+      }
     }
-  }
+  },
+  "skipped_prs": [
+    {
+      "pr": "theoju/engineering-docs-agent#221",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/221",
+      "pages": [
+        "core/whats-new.md"
+      ],
+      "deferrals": 1,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#222",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/222",
+      "pages": [
+        "core/operations/graphify-extraction-findings.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#223",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/223",
+      "pages": [
+        "core/archive/2026-08-14-cce150-blind-run-design-abandon-reversed.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#224",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/224",
+      "pages": [
+        "core/architecture/orchestrator.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#227",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/227",
+      "pages": [
+        "core/architecture/orchestrator.md",
+        "core/archive/2026-08-17-cce152-pr-boundary-authoring-cut.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#228",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/228",
+      "pages": [
+        "core/archive/0001-baseline-advances-on-disk-for-partial-runs.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#231",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/231",
+      "pages": [
+        "core/architecture/orchestrator.md",
+        "core/archive/2026-08-18-cce159-pr-summary-reuse.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#232",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/232",
+      "pages": [
+        "core/archive/2026-08-18-cce160-node-test-tap-reporter-pin.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#237",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/237",
+      "pages": [
+        "core/architecture/linting.md",
+        "core/archive/2026-08-21-cce145-citation-symbol-definition-forms-fix.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#238",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/238",
+      "pages": [
+        "core/architecture/orchestrator.md",
+        "core/archive/2026-08-21-cce151-watermark-cursor-back-on-every-path.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#239",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/239",
+      "pages": [
+        "core/archive/2026-08-21-internal-links-example-link-exemption.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#241",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/241",
+      "pages": [
+        "core/architecture/orchestrator.md",
+        "core/archive/2026-08-22-cce141-citation-repair-detection-only.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#263",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/263",
+      "pages": [
+        "core/architecture/citation-lint.md",
+        "core/archive/2026-09-21-cce171-citation-lint-guards.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#264",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/264",
+      "pages": [
+        "core/archive/2026-09-13-cce173-citation-run-cap-self-reference-fix.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    },
+    {
+      "pr": "theoju/engineering-docs-agent#265",
+      "url": "https://github.com/theoju/engineering-docs-agent/pull/265",
+      "pages": [
+        "core/host-onboarding/setup.md"
+      ],
+      "deferrals": 0,
+      "skipped_at": "2026-09-21T13:51:44.185755+00:00"
+    }
+  ]
 }

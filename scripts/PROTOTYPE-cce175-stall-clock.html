@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PROTOTYPE — CCE-175 stall clock</title>
+    <style>
+      :root {
+        --bg: #fbfaf9;
+        --fg: #1c1b19;
+        --mut: #6b675f;
+        --line: #e2ddd6;
+        --card: #fff;
+        --ok: #1a7f4b;
+        --bad: #b3261e;
+        --warn: #8a5a00;
+        --acc: #3b5bdb;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          14px/1.5 ui-sans-serif,
+          -apple-system,
+          system-ui,
+          sans-serif;
+      }
+      .wrap {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 24px 16px 64px;
+      }
+      h1 {
+        font-size: 19px;
+        margin: 0 0 4px;
+      }
+      .sub {
+        color: var(--mut);
+        margin: 0 0 20px;
+      }
+      .banner {
+        background: #fff4d6;
+        border: 1px solid #e8cf8a;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 20px;
+        font-size: 13px;
+      }
+      .cols {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .col {
+        flex: 1 1 320px;
+        min-width: 0;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+      .card h2 {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--mut);
+        margin: 0 0 10px;
+      }
+      button {
+        font: inherit;
+        padding: 7px 11px;
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 7px;
+        cursor: pointer;
+        margin: 0 6px 6px 0;
+      }
+      button:hover {
+        border-color: var(--acc);
+        color: var(--acc);
+      }
+      button.primary {
+        background: var(--acc);
+        color: #fff;
+        border-color: var(--acc);
+      }
+      button.primary:hover {
+        opacity: 0.9;
+        color: #fff;
+      }
+      .tabs {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .tabs button.on {
+        background: var(--fg);
+        color: #fff;
+        border-color: var(--fg);
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+      }
+      td,
+      th {
+        text-align: left;
+        padding: 4px 8px 4px 0;
+        vertical-align: top;
+      }
+      th {
+        color: var(--mut);
+        font-weight: 600;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12.5px;
+      }
+      .log {
+        max-height: 420px;
+        overflow-y: auto;
+      }
+      .ev {
+        border-left: 3px solid var(--line);
+        padding: 4px 0 4px 10px;
+        margin-bottom: 8px;
+      }
+      .ev.ok {
+        border-color: var(--ok);
+      }
+      .ev.bad {
+        border-color: var(--bad);
+      }
+      .ev.warn {
+        border-color: var(--warn);
+      }
+      .ev.night {
+        border-color: var(--acc);
+      }
+      .ev b {
+        display: block;
+      }
+      .ev span {
+        color: var(--mut);
+        font-size: 12.5px;
+      }
+      .pill {
+        display: inline-block;
+        padding: 1px 7px;
+        border-radius: 99px;
+        font-size: 11.5px;
+        border: 1px solid var(--line);
+        margin-right: 4px;
+      }
+      .pill.ok {
+        background: #e7f6ee;
+        border-color: #a9dcc2;
+        color: var(--ok);
+      }
+      .pill.bad {
+        background: #fdecea;
+        border-color: #f2b8b2;
+        color: var(--bad);
+      }
+      .pill.warn {
+        background: #fdf3e0;
+        border-color: #e8cf8a;
+        color: var(--warn);
+      }
+      label.tog {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        cursor: pointer;
+        padding: 6px 0;
+        font-size: 13px;
+      }
+      .verdict {
+        font-size: 13px;
+        background: #f4f2ef;
+        border-radius: 7px;
+        padding: 10px;
+        border: 1px solid var(--line);
+      }
+      .muted {
+        color: var(--mut);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>PROTOTYPE — CCE-175 stall clock</h1>
+      <p class="sub">
+        Throwaway. Answers one question:
+        <b
+          >does keying the deferral-skip hatch off
+          <code>last_successful_run.completed_at</code> break the deadlock
+          without reinstating the CCE-109 doom loop?</b
+        >
+      </p>
+
+      <div class="banner">
+        <b>Not production code.</b> A faithful re-implementation of the decision
+        path in <code>orchestrator_runner.py</code> (<code
+          >partition_deferrals</code
+        >
+        → <code>advance_cursor_list</code> → watermark guard →
+        <code>_maybe_auto_merge</code>), small enough to step through by hand.
+        Delete after the decision lands.
+      </div>
+
+      <div class="cols">
+        <div class="col">
+          <div class="card">
+            <h2>Guided walkthroughs</h2>
+            <div class="tabs" id="tabs"></div>
+            <div id="tabdesc" class="verdict"></div>
+          </div>
+
+          <div class="card">
+            <h2>Free play</h2>
+            <button class="primary" onclick="night()">Run one nightly</button>
+            <button onclick="night(5)">Run 5 nightlies</button>
+            <button onclick="handMerge()">Operator merges the open PR</button>
+            <button onclick="fixLint()">Fix the blocked page</button>
+            <button onclick="reset()">Reset</button>
+            <label class="tog">
+              <input type="checkbox" id="clockOn" onchange="render()" /> CCE-175
+              stall clock enabled
+            </label>
+            <label class="tog">
+              <input type="checkbox" id="intermittent" onchange="render()" />
+              Blocked page is <i>intermittent</i> (succeeds 1 night in 3)
+            </label>
+            <div class="muted" style="margin-top: 6px">
+              threshold = 3 &nbsp;·&nbsp; stall window = threshold + 1 = 4 days
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>State</h2>
+            <div id="state"></div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="card">
+            <h2>Event log</h2>
+            <div class="log" id="log"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ---------------------------------------------------------------------------
+      // Model. Mirrors orchestrator_runner.py; synthetic data only.
+      // ---------------------------------------------------------------------------
+      const THRESHOLD = 3;
+      const STALL_DAYS = THRESHOLD + 1;
+      const REPO = { owner: "o", name: "r" };
+
+      // Window PRs, oldest first. 235 is the one carrying the permanently blocked page.
+      const WINDOW = [
+        { number: 235, merge_sha: "aaa1111", blocked: true },
+        { number: 236, merge_sha: "bbb2222", blocked: true },
+        { number: 240, merge_sha: "ccc3333", blocked: false },
+        { number: 243, merge_sha: "ddd4444", blocked: false },
+      ];
+      const HEAD_SHA = "eee5555";
+
+      const key = (n) => `${REPO.owner}/${REPO.name}#${n}`;
+
+      let S, events, night_no;
+
+      function reset() {
+        S = {
+          main: {
+            // what origin/main holds
+            last_successful_run: { head_sha: "175162e", completed_at: 0 },
+            deferral_counts: {},
+          },
+          openPR: null, // unmerged docs PR, or null
+          lintFixed: false,
+          t: 0, // days since baseline
+        };
+        events = [];
+        night_no = 0;
+        log("night", "Reset", "baseline 175162e, no counts, no open PR.");
+        render();
+      }
+
+      function log(cls, title, detail) {
+        events.unshift({ cls, title, detail });
+      }
+
+      // partition_deferrals(deferred, counts, threshold, stalled)  — CCE-140 + CCE-175
+      function partition(deferred, counts, threshold, stalled) {
+        if (threshold <= 0) return [[], deferred.slice()]; // hatch disabled; clock inert
+        const skipped = [],
+          still = [];
+        for (const pr of deferred) {
+          const c = counts[key(pr.number)] || 0;
+          if (c >= threshold || stalled) skipped.push(pr);
+          else still.push(pr);
+        }
+        return [skipped, still];
+      }
+
+      // advance_cursor_list — stops at the OLDEST held-back PR
+      function cursorList(prs, heldBack) {
+        const out = [];
+        for (const pr of prs) {
+          if (heldBack.has(pr.number)) break;
+          out.push(pr);
+        }
+        return out;
+      }
+
+      // next_deferral_counts
+      function nextCounts(counts, windowNums, stillNums) {
+        const out = { ...counts };
+        for (const n of windowNums) {
+          if (stillNums.has(n)) out[key(n)] = (out[key(n)] || 0) + 1;
+          else delete out[key(n)];
+        }
+        return out;
+      }
+
+      // baseline_stall_days
+      function stallDays() {
+        return S.t - S.main.last_successful_run.completed_at;
+      }
+
+      // ---------------------------------------------------------------------------
+      // One nightly run
+      // ---------------------------------------------------------------------------
+      function night(times) {
+        if (times > 1) {
+          for (let i = 0; i < times; i++) night();
+          return;
+        }
+        S.t += 1;
+        night_no += 1;
+
+        const clockOn = document.getElementById("clockOn").checked;
+        const intermittent = document.getElementById("intermittent").checked;
+
+        // Which pages fail lint tonight?
+        const lucky = intermittent && night_no % 3 === 0;
+        const deferred =
+          S.lintFixed || lucky ? [] : WINDOW.filter((p) => p.blocked);
+
+        // The run always READS main — never its own unmerged last write. This is the
+        // whole bug.
+        const counts = { ...S.main.deferral_counts };
+        const age = stallDays();
+        const stalled = clockOn && age >= STALL_DAYS;
+
+        const [skipped, still] = partition(
+          deferred,
+          counts,
+          THRESHOLD,
+          stalled,
+        );
+        const skippedNums = new Set(skipped.map((p) => p.number));
+        const heldBack = new Set(
+          deferred.map((p) => p.number).filter((n) => !skippedNums.has(n)),
+        );
+
+        let advanceSha, cursorBacked, reason;
+        if (heldBack.size) {
+          const cprs = cursorList(WINDOW, heldBack);
+          if (!cprs.length) {
+            advanceSha = S.main.last_successful_run.head_sha;
+            cursorBacked = false;
+            reason = "held_back_no_advance_no_cursor";
+          } else {
+            advanceSha = cprs[cprs.length - 1].merge_sha;
+            cursorBacked = true;
+            reason = "held_back_partial_advance";
+          }
+        } else {
+          // Forgiven or clean: the walk reaches the end of the window.
+          const cprs = cursorList(WINDOW, heldBack);
+          advanceSha = cprs.length
+            ? HEAD_SHA
+            : S.main.last_successful_run.head_sha;
+          cursorBacked = true;
+          reason = skipped.length ? "deferral_skip" : "clean";
+        }
+
+        const partial = deferred.length > 0 || skipped.length > 0;
+        const stillNums = new Set(still.map((p) => p.number));
+        const written = nextCounts(
+          counts,
+          new Set(WINDOW.map((p) => p.number)),
+          stillNums,
+        );
+
+        // The PR the run opens, carrying the proposed state.
+        S.openPR = {
+          night: night_no,
+          state: {
+            last_successful_run: { head_sha: advanceSha, completed_at: S.t },
+            deferral_counts: written,
+          },
+          partial,
+          cursorBacked,
+          reason,
+          skipped: [...skippedNums],
+          heldBack: [...heldBack],
+        };
+
+        // _maybe_auto_merge: CCE-140's carve-out — partial is fine IF cursor-backed.
+        const canMerge = !(partial && !cursorBacked);
+
+        const bits = [
+          `deferred=[${deferred.map((p) => p.number).join(", ") || "none"}]`,
+          `held_back=[${[...heldBack].join(", ") || "none"}]`,
+          `skipped=[${[...skippedNums].join(", ") || "none"}]`,
+          `baseline age=${age}d`,
+          stalled
+            ? "STALL CLOCK FIRED"
+            : clockOn
+              ? "clock armed, not fired"
+              : "clock off",
+        ].join(" · ");
+
+        if (canMerge) {
+          S.main = JSON.parse(JSON.stringify(S.openPR.state));
+          S.openPR = null;
+          log(
+            "ok",
+            `Night ${night_no} — PR auto-merged (${reason})`,
+            `${bits}<br>baseline → ${advanceSha}, counts promoted to main.`,
+          );
+        } else {
+          log(
+            "bad",
+            `Night ${night_no} — PR left OPEN (${reason})`,
+            `${bits}<br>wrote counts ${JSON.stringify(written)} into the branch; main unchanged.`,
+          );
+        }
+        render();
+      }
+
+      function handMerge() {
+        if (!S.openPR) {
+          log("warn", "No open PR", "Nothing to merge.");
+          return render();
+        }
+        S.main = JSON.parse(JSON.stringify(S.openPR.state));
+        const n = S.openPR.night;
+        S.openPR = null;
+        log(
+          "warn",
+          `Operator merged night ${n}'s PR by hand`,
+          "This is the only thing that promotes state today — and it needs a human.",
+        );
+        render();
+      }
+
+      function fixLint() {
+        S.lintFixed = true;
+        log("ok", "Blocked page fixed", "Next run defers nothing.");
+        render();
+      }
+
+      // ---------------------------------------------------------------------------
+      // Render
+      // ---------------------------------------------------------------------------
+      function render() {
+        const age = stallDays();
+        const pr = S.openPR;
+        document.getElementById("state").innerHTML = `
+  <table>
+    <tr><th>day</th><td>t+${S.t}</td></tr>
+    <tr><th>main baseline</th><td><code>${S.main.last_successful_run.head_sha}</code>
+        <span class="muted">(set t+${S.main.last_successful_run.completed_at})</span></td></tr>
+    <tr><th>baseline age</th><td>${age} d
+        ${age >= STALL_DAYS ? '<span class="pill warn">past stall window</span>' : ""}</td></tr>
+    <tr><th>main counts</th><td><code>${JSON.stringify(S.main.deferral_counts)}</code></td></tr>
+    <tr><th>open PR</th><td>${
+      pr
+        ? `night ${pr.night} — <span class="pill bad">unmerged</span>
+         <code>${JSON.stringify(pr.state.deferral_counts)}</code>`
+        : '<span class="pill ok">none</span>'
+    }</td></tr>
+    <tr><th>blocked page</th><td>${
+      S.lintFixed
+        ? '<span class="pill ok">fixed</span>'
+        : '<span class="pill bad">still failing lint</span>'
+    }</td></tr>
+  </table>`;
+
+        document.getElementById("log").innerHTML = events
+          .map(
+            (e) =>
+              `<div class="ev ${e.cls}"><b>${e.title}</b><span>${e.detail}</span></div>`,
+          )
+          .join("");
+      }
+
+      // ---------------------------------------------------------------------------
+      // Guided walkthroughs
+      // ---------------------------------------------------------------------------
+      const TABS = [
+        {
+          name: "1 · The deadlock",
+          run() {
+            reset();
+            document.getElementById("clockOn").checked = false;
+            document.getElementById("intermittent").checked = false;
+            night(8);
+            return `<b>Today's production behaviour.</b> Eight nights, clock off. The PR is
+     never merged, so main's counts stay <code>{}</code> and every run recomputes 1
+     from 0. <code>held_back_no_advance_no_cursor</code> every time, because PR 235 —
+     the oldest — is held back, so <code>advance_cursor_list</code> breaks at index 0
+     and there is no cursor to anchor on. The threshold of 3 is unreachable.`;
+          },
+        },
+        {
+          name: "2 · The fix",
+          run() {
+            reset();
+            document.getElementById("clockOn").checked = true;
+            document.getElementById("intermittent").checked = false;
+            night(6);
+            return `<b>Same run, clock on.</b> Nights 1–3 behave identically — the clock is
+     armed but the baseline is younger than the 4-day window, so nothing changes and
+     the counter still governs. On night 4 the baseline crosses the window, both
+     blocked PRs are forgiven, <code>held_back</code> empties, the cursor walks to
+     HEAD, <code>cursorBacked=true</code>, and CCE-140's carve-out
+     (<code>partial and not cursor_backed</code>) lets the PR auto-merge. State
+     reaches main. The loss is loud: <code>deferral_skip</code> is recorded per PR.`;
+          },
+        },
+        {
+          name: "3 · Doom-loop check",
+          run() {
+            reset();
+            document.getElementById("clockOn").checked = true;
+            document.getElementById("intermittent").checked = false;
+            night(4);
+            fixLint();
+            night(2);
+            return `<b>Does the clock freeze anything?</b> No — it only ever <i>releases</i>.
+     After the escape fires and the page is later fixed, runs go clean, counts clear,
+     and the baseline tracks HEAD. The CCE-151 trap was a fix that made the cursor
+     <i>refuse</i> to move; this one makes it move in a case where it previously
+     could not. Opposite direction, so the CCE-109 doom loop is not reachable from here.`;
+          },
+        },
+        {
+          name: "4 · Early-abandon risk",
+          run() {
+            reset();
+            document.getElementById("clockOn").checked = true;
+            document.getElementById("intermittent").checked = true;
+            night(9);
+            return `<b>The risk I expected, falsified by running it.</b> I predicted an
+     <i>intermittent</i> page would be wrongly abandoned: its count clears on the good
+     night, but the clock keeps running, so it reaches 4 and gets forgiven anyway.
+     <span class="pill ok">Wrong</span> Watch nights 3, 6, 9 — the good night has
+     nothing held back, so the cursor is backed, so the PR <b>auto-merges</b>, and
+     merging is exactly what resets the baseline age to 1. The clock never reaches 4.
+     <br><br>The reason is worth stating plainly: the clock measures
+     <b>time since anything was promoted to main</b>, and any night that makes real
+     progress promotes. So the quantity it measures is already the right one, and the
+     "abandons a PR that was progressing" failure mode is unreachable — progress and
+     clock-reset are the same event. <span class="pill warn">Residual</span> A
+     permanently-blocked page is forgiven once every 4 days rather than once, a
+     sawtooth: bounded, loud (<code>deferral_skip</code> per firing), and far better
+     than an unbounded freeze.`;
+          },
+        },
+      ];
+
+      function initTabs() {
+        const t = document.getElementById("tabs");
+        TABS.forEach((tab, i) => {
+          const b = document.createElement("button");
+          b.textContent = tab.name;
+          b.onclick = () => {
+            [...t.children].forEach((c) => c.classList.remove("on"));
+            b.classList.add("on");
+            document.getElementById("tabdesc").innerHTML = tab.run();
+            render();
+          };
+          t.appendChild(b);
+        });
+      }
+
+      initTabs();
+      reset();
+      document.getElementById("tabdesc").innerHTML =
+        "Pick a walkthrough, or drive it yourself with Free play.";
+    </script>
+  </body>
+</html>

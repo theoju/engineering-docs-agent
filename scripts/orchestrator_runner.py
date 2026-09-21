@@ -440,6 +440,31 @@ def resolve_deferral_threshold(config: dict) -> int:
     return int(val)
 
 
+def resolve_deferral_stall_days(config: dict) -> int:
+    """Resolve `run.deferral_stall_days` (CCE-175). 0 disables the clock.
+
+    The default is DERIVED — `resolve_deferral_threshold(config) + 1` — rather
+    than a constant, so the clock stays a time-domain mirror of the counter
+    instead of a second, independently-drifting policy. A threshold of 3 fires
+    on the 4th consecutive run, which on the nightly cadence these hosts run is
+    4 days; a host that raises the threshold to 6 gets 7 days for free, and
+    nobody has to remember that two numbers are meant to track each other.
+
+    A threshold <= 0 disables the skip hatch entirely (CCE-140), so the clock
+    resolves to 0 there too. Re-opening the hatch via the clock on a host that
+    explicitly turned it off would be the clock overriding config, which is
+    exactly the kind of surprise a backstop must not have.
+    """
+    run_cfg = _run_cfg(config)
+    threshold = resolve_deferral_threshold(config)
+    if threshold <= 0:
+        return 0
+    val = run_cfg.get("deferral_stall_days")
+    if val is None:
+        return threshold + 1
+    return int(val)
+
+
 def resolve_authoring_hard_cap(
     config: dict, budget: int, *, out_reasons: list[str] | None = None
 ) -> int:
@@ -712,6 +737,7 @@ def partition_deferrals(
     counts: dict,
     repo: dict,
     threshold: int,
+    stalled: bool = False,
 ) -> tuple[list[dict], list[dict]]:
     """Split this run's deferred PRs into ``(skipped_now, still_deferred)``.
 
@@ -726,17 +752,75 @@ def partition_deferrals(
 
     Order-independent: the prefix-boundary invariant is enforced structurally
     by ``advance_cursor_list``, not here.
+
+    CCE-175: ``stalled`` forgives every deferred PR regardless of its count,
+    because the counter alone can never reach ``threshold``.
+
+    ``counts`` is read from the ``state.json`` committed on the default branch,
+    and that file is promoted only when the docs-agent PR merges. The PR does
+    not merge while the run is partial and not cursor-backed (CCE-140's gate),
+    and the run is partial *because* a page was deferred — the exact condition
+    the counter exists to escape. So each night reads the same committed count,
+    writes count+1 into a branch that never lands, and the ratchet never turns.
+    Measured 2026-09-20 on theoju/claude-code-self-assessment: five days with
+    ``main`` holding ``{#235: 1, #236: 1}`` while PR #248 carried
+    ``{#235: 2, #236: 2}``.
+
+    ``stalled`` comes from ``baseline_stall_days`` — elapsed time since the
+    baseline last moved, which is already on the default branch and needs no
+    new write. It is a backstop, never a shortcut: a host whose baseline is
+    younger than the window behaves exactly as CCE-140 specified, and
+    ``threshold <= 0`` still disables the hatch entirely, clock or no clock.
+
+    The clock cannot abandon a PR that was making progress, and the reason is
+    structural rather than a tuning margin: a night that holds nothing back is
+    cursor-backed, so it auto-merges, and merging is what resets the clock.
+    Progress and clock-reset are the same event.
     """
     if threshold <= 0:
         return [], list(deferred)
     skipped: list[dict] = []
     still: list[dict] = []
     for pr in deferred:
-        if int(counts.get(deferral_key(repo, pr.get("number")), 0)) >= threshold:
+        count = int(counts.get(deferral_key(repo, pr.get("number")), 0))
+        if stalled or count >= threshold:
             skipped.append(pr)
         else:
             still.append(pr)
     return skipped, still
+
+
+def baseline_stall_days(state: dict, *, now: datetime) -> float | None:
+    """Days since the baseline last advanced, or ``None`` if unknowable.
+
+    Reads ``last_successful_run.completed_at``, which until CCE-175 was written
+    by the watermark guard and read nowhere. It is the one durable record of
+    when state last reached the default branch, which makes it the right clock
+    for a hatch whose own counter cannot persist.
+
+    ``None`` on an absent, empty, or unparseable timestamp. That matters: a
+    bootstrap host has no baseline, and treating absence as an infinite stall
+    would forgive every PR on the first ever run — the opposite of the
+    conservative default this is meant to have. Callers must test for ``None``
+    explicitly rather than relying on a falsy comparison.
+
+    A naive timestamp is assumed UTC; older hosts wrote one. Clock skew clamps
+    to 0.0 rather than going negative, so a baseline stamped in the future
+    reads as "just moved", never as a stall.
+    """
+    lsr = state.get("last_successful_run")
+    if not isinstance(lsr, dict):
+        return None
+    raw = lsr.get("completed_at")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max(0.0, (now - parsed).total_seconds() / 86400.0)
 
 
 def next_deferral_counts(
@@ -3007,11 +3091,25 @@ def run(
         _deferred_all = list(admission_deferred) + [
             pr_by_number[n] for n in sorted(deferred_pages_by_pr) if n in pr_by_number
         ]
+        # CCE-175: the counter cannot ratchet, because the `state.json` it
+        # lives in is promoted only by merging this run's PR — and the PR is
+        # held closed by the very deferral the counter exists to escape. The
+        # clock reads `last_successful_run.completed_at`, which is already on
+        # the default branch, so it measures real elapsed time rather than a
+        # number this run would have to persist to make progress.
+        _stall_days = resolve_deferral_stall_days(config)
+        _baseline_age = baseline_stall_days(state, now=datetime.now(timezone.utc))
+        _stalled = (
+            _stall_days > 0
+            and _baseline_age is not None
+            and _baseline_age >= _stall_days
+        )
         _skipped_prs, _still_deferred = partition_deferrals(
             _deferred_all,
             counts=_deferral_counts,
             repo=repo,
             threshold=_threshold,
+            stalled=_stalled,
         )
         skipped_numbers = {p.get("number") for p in _skipped_prs}
         # CCE-140: hold every PR this run did not finish out of the cursor
@@ -3021,6 +3119,44 @@ def run(
             set(deferred_pages_by_pr) | {p.get("number") for p in admission_deferred}
         ) - skipped_numbers
         still_deferred = _still_deferred
+        if _stalled and _skipped_prs:
+            # Guarded on `_skipped_prs`, NOT on `_stalled` alone. A stalled
+            # baseline with nothing deferred is a CLEAN run — and it is the
+            # most important run in the cycle, because holding nothing back
+            # makes it cursor-backed, so it auto-merges, so it resets the very
+            # clock that is stalled. Emitting here on `_stalled` alone would
+            # flip that run to partial and block the merge that ends the
+            # stall, converting the escape hatch into a second deadlock.
+            #
+            # info_only: the loss itself is reported per PR by the
+            # `deferral_skip` reasons below, which are `degraded=True`. This
+            # line only explains WHY they were forgiven on a run where no
+            # count reached the threshold — without it a reader sees a skip
+            # at count 1 and reasonably concludes the counter is broken.
+            add_partial(
+                state,
+                f"deferral_stall_escape: baseline has not advanced in "
+                f"{_baseline_age:.1f}d (window {_stall_days}d); forgiving "
+                f"{len(_skipped_prs)} deferred PR(s) so state can reach main",
+                info_only=True,
+            )
+        # CCE-175 observability: the 457-line nightly log never named which PRs
+        # were admitted, deferred, or held back, so diagnosing the stall meant
+        # diffing state.json between main and a run branch by hand. One line,
+        # emitted on every run including clean ones, so a future operator can
+        # answer "which PR is blocking the cursor?" by reading the log.
+        emit_log(
+            "cursor: admitted=[%s] deferred=[%s] held_back=[%s] skipped=[%s] "
+            "baseline_age=%s stall_window=%sd"
+            % (
+                ", ".join(str(p.get("number")) for p in prs) or "none",
+                ", ".join(str(p.get("number")) for p in _deferred_all) or "none",
+                ", ".join(str(n) for n in sorted(held_back, key=str)) or "none",
+                ", ".join(str(n) for n in sorted(skipped_numbers, key=str)) or "none",
+                "unknown" if _baseline_age is None else f"{_baseline_age:.1f}d",
+                _stall_days,
+            )
+        )
         if time_truncated or held_back:
             # CCE-109 Component 4: never advance to a cursor we cannot confirm
             # is forward-of-baseline and reachable from HEAD, never advance

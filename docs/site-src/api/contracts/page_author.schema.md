@@ -4,9 +4,9 @@ _Auto-generated from JSON Schema; do not edit by hand — see `scripts/contracts
 
 | Property | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | no |  |
-| `action` | string | no |  |
-| `diff_summary` | string | no |  |
+| `path` | string \| null | no |  |
+| `action` | string \| null | no |  |
+| `diff_summary` | string \| null | no |  |
 | `ok` | boolean | yes |  |
 | `error` | string \| null | no |  |
 | `evidence` | object | no |  |

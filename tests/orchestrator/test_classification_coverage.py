@@ -107,10 +107,20 @@ def test_orchestrator_has_the_expected_call_site_population():
     was reached; no page was judged and none was rejected, and the run's data
     quality is unchanged. Promoting it would cost auto-merge through CCE-140's
     `partial and not advance_cursor_backed` gate for a line about the length of
-    a suggestion list."""
+    a suggestion list.
+
+    44 -> 45, CCE-175: `deferral_stall_escape` in `run`. Audited info_only=True.
+    The loss it refers to is reported per PR by the `deferral_skip` sites, which
+    are `degraded=True`; this line only explains WHY forgiveness fired on a run
+    where no count reached the threshold, so a reader seeing a skip at count 1
+    does not conclude the counter is broken. `degraded` would be actively wrong
+    here rather than merely conservative: the site sits on the path that ENDS a
+    stall, and flipping `partial` there costs the CCE-140 cursor-backed
+    auto-merge — the merge that promotes state to main and resets the clock. A
+    reason about why the hatch opened must not close the hatch."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 44, (
-        f"expected 44 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 45, (
+        f"expected 45 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
     # 42 -> 43: CCE-141 round 5 added `citation_diagnosis_truncated` in

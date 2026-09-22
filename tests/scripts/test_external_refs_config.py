@@ -89,3 +89,56 @@ def test_a_non_colliding_prefix_passes_the_same_guard():
         host_dirs=frozenset({"docs", "scripts"}),
     )
     assert "eda" in out
+
+
+def test_an_extra_placeholder_in_blob_template_is_rejected_at_load():
+    """Round-2 review Minor 3. `_blob_url` fills exactly {url}/{ref}/{path}
+    via `format_map` -- an extra placeholder like `{repo}` raises KeyError
+    there, once per page, on every run. Catching it here means a config typo
+    fails once, at load, instead of repeatedly at render time."""
+    with pytest.raises(ExternalRepoConfigError, match="blob_template"):
+        resolve_config(
+            {
+                "lint": {
+                    "external_repos": {
+                        "eda": {
+                            "url": PUB,
+                            "blob_template": "{url}/{repo}/blob/{ref}/{path}",
+                        }
+                    }
+                }
+            }
+        )
+
+
+def test_an_unmatched_brace_in_blob_template_is_rejected_at_load():
+    with pytest.raises(ExternalRepoConfigError, match="blob_template"):
+        resolve_config(
+            {
+                "lint": {
+                    "external_repos": {
+                        "eda": {"url": PUB, "blob_template": "{url}/blob/{ref}/{path"}
+                    }
+                }
+            }
+        )
+
+
+def test_a_valid_blob_template_still_loads():
+    """The validation must not reject the legitimate overrides the existing
+    test_overrides_survive_normalization test already exercises -- a
+    dedicated regression so a change to the dummy-value formatting can't
+    silently start rejecting the one non-default template this suite has."""
+    out = resolve_config(
+        {
+            "lint": {
+                "external_repos": {
+                    "gl": {
+                        "url": "https://gitlab.com/o/r",
+                        "blob_template": "{url}/-/blob/{ref}/{path}",
+                    }
+                }
+            }
+        }
+    )
+    assert out["gl"]["blob_template"] == "{url}/-/blob/{ref}/{path}"

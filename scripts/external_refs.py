@@ -79,11 +79,27 @@ def resolve_config(
             raise ExternalRepoConfigError(
                 f"{prefix}: declares neither a url nor private; pick exactly one"
             )
+        blob_template = str(entry.get("blob_template") or DEFAULT_BLOB_TEMPLATE)
+        # Round-2 review Minor 3: fail at LOAD, not at render. `_blob_url`
+        # fills exactly {url}/{ref}/{path} via `format_map` -- the only three
+        # keys it ever supplies -- so an extra placeholder
+        # ("{url}/{repo}/blob/{ref}/{path}") or a stray unmatched brace
+        # ("...{path") raises KeyError/ValueError there, once PER PAGE, on
+        # every run, for what is a one-time config typo. `resolve_config`
+        # already validates everything else about this declaration at load;
+        # formatting against dummy values here catches this the same way,
+        # the same principle that justified the `url` schema pattern.
+        try:
+            blob_template.format_map({"url": "u", "ref": "r", "path": "p"})
+        except (KeyError, ValueError) as e:
+            raise ExternalRepoConfigError(
+                f"{prefix}: blob_template is invalid: {e}"
+            ) from e
         out[prefix] = {
             "url": url.strip() if has_url else None,
             "private": private,
             "ref": str(entry.get("ref") or DEFAULT_REF),
-            "blob_template": str(entry.get("blob_template") or DEFAULT_BLOB_TEMPLATE),
+            "blob_template": blob_template,
         }
     return out
 

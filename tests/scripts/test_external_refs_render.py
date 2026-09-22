@@ -13,6 +13,7 @@ hand-written expectation, so a change to the grammar surfaces here.
 """
 
 import sys
+import urllib.parse
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2] / "scripts" / "lint"))
@@ -152,6 +153,67 @@ def test_a_token_with_an_embedded_space_is_returned_untouched(tmp_path):
     page.write_text(out)
     ok, msg = check_path(page, tmp_path, set(), {})
     assert ok is True, msg
+    assert extract_citations(out)["paths"] == []
+
+
+def test_a_traversal_segment_is_returned_untouched():
+    """Round-2 adversarial review Important. `_REPO_PATH_RE` admits `.` and
+    `/`, so it does not by itself reject a `..` path segment -- confirmed by
+    running it PRE-FIX:
+
+        IN:  `eda/../../../../evil-org/evil-repo.md`
+        OUT: [`evil-repo.md`](https://github.com/o/eda/blob/main/../../../../evil-org/evil-repo.md)
+
+    That published link is dangerous at the URL level, independent of
+    whatever the linter does or does not do with it -- every browser applies
+    RFC 3986 dot-segment removal before the request, so the destination
+    resolves OFF the configured repository entirely:
+    """
+    src = "See `eda/../../../../evil-org/evil-repo.md` here."
+
+    # The reasoning this test documents, not an assertion on production
+    # output: what the (pre-fix) rendered URL would have resolved to, so the
+    # danger is pinned to the actual navigation target rather than just "a
+    # `..` string is present".
+    danger = urllib.parse.urljoin(
+        "https://github.com/theoju/engineering-docs-agent/blob/main/",
+        "../../../../evil-org/evil-repo.md",
+    )
+    assert danger == "https://github.com/evil-org/evil-repo.md", danger
+
+    out = render_external_refs(src, REPOS)
+    assert out == src, out  # never becomes a link -- the danger above never publishes
+
+    # NOT asserted: that citation_exists then blocks this token. Measured
+    # directly that it does not -- CCE-171's `_relativize` normalizes
+    # `eda/../../../../evil-org/evil-repo.md`, the normalized form escapes
+    # the repo root, and `_relativize` returns None for an escaping relative
+    # path, which check_path's loop treats as "not a repo citation" and
+    # silently skips (`continue`), not blocks. The safety here is the same
+    # as the Critical-1 tests above: the page text never changes.
+
+
+def test_a_placeholder_token_is_returned_untouched():
+    """Round-2 adversarial review Minor 1 (59 measured cases in the
+    reviewer's fuzz). `citation_exists` deliberately exempts `YYYY` and
+    `...` as documentation placeholders (`_is_placeholder`, checked BEFORE
+    the grammar in `extract_citations`) -- a dated-filename example like
+    `eda/docs/YYYY-MM-DD-slug.md` is meant to illustrate a naming pattern,
+    not cite a real file. Pre-fix this rendered anyway:
+
+        IN:  `eda/docs/YYYY-MM-DD-slug.md`
+        OUT: [`YYYY-MM-DD-slug.md`](PUB/blob/main/docs/YYYY-MM-DD-slug.md)
+
+    -- a live, and 404ing, link to a file that was never meant to exist.
+    Same class as the Critical-1 tests' `:symbol`-suffix reasoning: a link
+    that predictably 404s but passes every lint is a silent dead link. The
+    gate now applies `_is_placeholder` (imported, same as `_REPO_PATH_RE`),
+    so the token is left exactly as `citation_exists` would have treated it
+    -- exempt, not cited, not touched.
+    """
+    src = "See `eda/docs/YYYY-MM-DD-slug.md` here."
+    out = render_external_refs(src, REPOS)
+    assert out == src, out
     assert extract_citations(out)["paths"] == []
 
 

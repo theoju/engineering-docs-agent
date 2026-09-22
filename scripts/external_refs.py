@@ -32,11 +32,12 @@ _LINT_DIR = str(Path(__file__).resolve().parent / "lint")
 if _LINT_DIR not in sys.path:
     sys.path.append(_LINT_DIR)
 
-# _REPO_PATH_RE is imported, not duplicated (round-N review Critical 1): a
-# hand-copied second definition can drift from the linter's without anyone
-# noticing, and the whole point of the gate below is that it match what
-# citation_exists itself would accept. Same precedent as _SUFFIX_RE.
-from citation_exists import _REPO_PATH_RE, _SUFFIX_RE  # noqa: E402
+# _REPO_PATH_RE and _is_placeholder are imported, not duplicated (whole-branch
+# review Critical 1 and round-2 Minor 1): a hand-copied second definition can
+# drift from the linter's without anyone noticing, and the whole point of the
+# gate below is that it match what citation_exists itself would accept or
+# exempt. Same precedent as _SUFFIX_RE.
+from citation_exists import _REPO_PATH_RE, _SUFFIX_RE, _is_placeholder  # noqa: E402
 
 DEFAULT_REF = "main"
 DEFAULT_BLOB_TEMPLATE = "{url}/blob/{ref}/{path}"
@@ -121,16 +122,59 @@ def render_external_refs(text: str, repos: dict[str, dict]) -> str:
         # HTML, or a stray space -- interpolated unvalidated into
         # ``[`text`](url)`` that is confirmed, by running it, to break out of
         # the CommonMark link destination and re-emit as live HTML outside
-        # any code span. Gate on the SAME grammar `citation_exists` uses
-        # (`_REPO_PATH_RE`, imported above) before doing anything else with
-        # the token. A non-matching token is returned UNTOUCHED -- it keeps
-        # its `/`, so it still reaches `citation_exists` exactly as an
-        # ordinary undeclared-prefix citation would. Fail closed, same
-        # posture as the rest of this feature. `_REPO_PATH_RE`'s character
-        # class ([\w.\-/] plus the `.ext` and `:suffix` grammar) admits none
-        # of `)`, `<`, `>`, or whitespace, so anything that passes this gate
-        # is inert to interpolate as-is.
-        if not _REPO_PATH_RE.match(token):
+        # any code span. Gate on the SAME predicate `citation_exists` uses --
+        # NOT placeholder (round-2 Minor 1: `YYYY`/`...` etc. are
+        # documentation placeholders the linter deliberately exempts; without
+        # this half the gate rendered a live link to a file that is only a
+        # dated-filename example, e.g. `eda/docs/YYYY-MM-DD-slug.md`) AND
+        # matches `_REPO_PATH_RE` (imported above, same as `_is_placeholder`)
+        # -- before doing anything else with the token. `_REPO_PATH_RE`'s
+        # character class ([\w.\-/] plus the `.ext` and `:suffix` grammar)
+        # admits none of `)`, `<`, `>`, or whitespace, so anything that
+        # passes THIS half of the gate is inert to interpolate as markup.
+        #
+        # Round-2 review Important: `_REPO_PATH_RE` also admits `.` and `/`,
+        # so it does not by itself reject a `..` path segment -- confirmed by
+        # running it:
+        #   `eda/../../../../evil-org/evil-repo.md` rendered to
+        #   `[eda/../../../../evil-org/evil-repo.md]
+        #    (https://github.com/o/eda/blob/main/../../../../evil-org/evil-repo.md)`,
+        #   and every browser applies RFC 3986 dot-segment removal before the
+        #   request:
+        #   urljoin('https://github.com/o/eda/blob/main/',
+        #           '../../../../evil-org/evil-repo.md')
+        #     -> 'https://github.com/evil-org/evil-repo.md'
+        # -- a published link, under ordinary-looking filename text, that
+        # points at an arbitrary repository on the configured forge. Origin
+        # is bounded by the operator-configured `url`, so this is a
+        # link-retargeting primitive, not XSS -- but it falsifies "anything
+        # that passes the grammar gate is safe to interpolate as a URL", so
+        # it is rejected explicitly rather than folded into the grammar: no
+        # legitimate citation of a real path in an external repo ever needs
+        # a `..` segment (page-author is asked to cite `prefix/path IN that
+        # repo`, never a path relative to somewhere else), so this can never
+        # reject a token the pipeline legitimately produces.
+        # What a REJECTED token's safety actually rests on (round-2 review
+        # Minor 2a correction -- an earlier version of this comment claimed
+        # it "still reaches citation_exists exactly as an ordinary
+        # undeclared-prefix citation would," which is false for every one of
+        # these three arms: `citation_exists`'s own citable-path predicate is
+        # `not _is_placeholder(token) and _REPO_PATH_RE.match(token)`, a
+        # strict subset of what this gate accepts, so nothing this gate
+        # rejects for being a placeholder or bad grammar was ever going to be
+        # recognized as a citation downstream either -- and even the `..`
+        # arm, which DOES match citation_exists's grammar, hits CCE-171's
+        # `_relativize` escape guard and is silently skipped (`rel is None`
+        # -> `continue`), not blocked. Measured directly:
+        # `check_path` on the untouched traversal token above returns
+        # `(True, 'ok')`. The actual safety for every rejected token is that
+        # the page text never changes: it stays inside its original backtick
+        # code span, which markdown escapes and never lets become a link.
+        if (
+            _is_placeholder(token)
+            or not _REPO_PATH_RE.match(token)
+            or ".." in token.split("/")
+        ):
             return match.group(0)
         head, sep, rest = token.partition("/")
         if not sep or not rest:

@@ -133,6 +133,50 @@ def render_external_refs(text: str, repos: dict[str, dict]) -> str:
 
     def _one(match):
         token = match.group(1).strip()
+        # Round-3 review: DECLINE when either delimiter abuts another
+        # backtick. `_INLINE_CODE_RE` models a code span as exactly one
+        # backtick per side; CommonMark does not. A delimiter is a RUN of
+        # backticks, and an opener pairs with the next run of EQUAL length
+        # anywhere in the paragraph. Replacing a match that abuts a run of
+        # length >= 2 consumes exactly one backtick from each side, changing
+        # the run lengths -- and the paragraph re-pairs around the change.
+        # Content escaped inside a code span BEFORE can fall out of one
+        # AFTER. Measured, by running it:
+        #
+        #   SRC: A `eda/scripts/x.py``` B ``<b>PAY</b>` C
+        #   OUT: A [`x.py`](https://github.com/o/eda/blob/main/scripts/x.py)`` B ``<b>PAY</b>` C
+        #
+        #   BEFORE html: <p>A <code>eda/scripts/x.py``` B ``&lt;b&gt;PAY&lt;/b&gt;</code> C</p>
+        #   AFTER  html: <p>A <a href="..."><code>x.py</code></a><code>B</code><b>PAY</b>` C</p>
+        #
+        # `<b>PAY</b>` is escaped inside <code> before and live HTML after,
+        # and it is NOT in the accepted token -- a neighbouring rewrite
+        # dissolved its code span. A prior review measured 100
+        # payload-attributable Tier-1 BLOCK->PASS flips this way (84
+        # `citation_exists`, 16 `internal_links`), 0 PASS->BLOCK; every one
+        # required the accepted token to sit inside a MISMATCHED run.
+        #
+        # NOT a run-aware regex. `scripts/lint/internal_links.py` has a
+        # `CODE_SPAN_RE` that models runs correctly, and using it here would
+        # mean correctly identifying the span and then STILL rewriting it,
+        # which requires getting run-pairing right: more machinery, in the
+        # direction CCE-141 condemns. Declining to mutate when the delimiters
+        # are ambiguous is the direction CCE-141 endorses.
+        #
+        # The consequence is the POINT of the fix, not a regrettable side
+        # effect: a balanced ``double-backtick``-wrapped declared token is now
+        # left alone, so it reverts to pre-CCE-181 behaviour -- `citation_exists`
+        # reads the raw prefixed token (its own `_INLINE_CODE_RE` finds the
+        # inner single-tick pair) and blocks. Measured: `check_path` on
+        # ``eda/scripts/x.py`` returns
+        # `(False, "cites nonexistent path 'eda/scripts/x.py'")`. Loud, and
+        # self-healing via CCE-140's lint_block -> revert. That is the safe
+        # direction; publishing a link built on delimiters this module has
+        # just demonstrated it cannot model is not.
+        line = match.string
+        i, j = match.start(), match.end()
+        if (i > 0 and line[i - 1] == "`") or (j < len(line) and line[j] == "`"):
+            return match.group(0)
         # Review Critical 1: `_INLINE_CODE_RE` matches ANY character but a
         # backtick, so an LLM-authored token can carry an unbalanced `)`, raw
         # HTML, or a stray space -- interpolated unvalidated into
@@ -184,8 +228,35 @@ def render_external_refs(text: str, repos: dict[str, dict]) -> str:
         # -> `continue`), not blocked. Measured directly:
         # `check_path` on the untouched traversal token above returns
         # `(True, 'ok')`. The actual safety for every rejected token is that
-        # the page text never changes: it stays inside its original backtick
-        # code span, which markdown escapes and never lets become a link.
+        # the page text never changes -- byte-identity of rejected tokens was
+        # verified across 43,740 cases in round 2.
+        #
+        # Round-3 correction, recorded rather than quietly deleted because
+        # the reasoning it replaces IS the defect the delimiter guard above
+        # fixes. This sentence used to continue: "...it stays inside its
+        # original backtick code span, which markdown escapes and never lets
+        # become a link." That does not follow from byte-identity.
+        # Code-span membership is a per-PARAGRAPH property, not a per-token
+        # one, so a rejected token's span can be dissolved by a NEIGHBOURING
+        # accepted token's rewrite -- measured, see the guard's repro above.
+        #
+        # What actually holds the property, measured rather than assumed
+        # (tests/scripts/test_external_refs_render.py pins it as
+        # `test_every_rewrite_preserves_the_lines_backtick_run_lengths`):
+        # every rewrite this function performs leaves the line's SEQUENCE OF
+        # BACKTICK-RUN LENGTHS exactly as it found it, so CommonMark pairs
+        # the paragraph's spans identically before and after and no token's
+        # membership changes. ``[`name`](url)`` carries the same two length-1
+        # runs, in the same order, as the `` `token` `` it replaces -- neither
+        # the basename nor the URL path contributes one of its own
+        # (`_REPO_PATH_RE` admits no backtick, and `quote()` percent-encodes
+        # any that reached it) -- and the private form `` `name` `` likewise.
+        # The delimiter guard is what keeps those two runs at length 1.
+        #
+        # One gap, inside the trusted-operator boundary and parked alongside
+        # the URL-quoting asymmetry: a backtick in the configured
+        # `url`/`ref`/`blob_template` would break the property. Those values
+        # come from the host's own config, not from the agent.
         if (
             _is_placeholder(token)
             or not _REPO_PATH_RE.match(token)

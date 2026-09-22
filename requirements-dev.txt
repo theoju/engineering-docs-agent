@@ -3,3 +3,9 @@
 
 ruamel.yaml>=0.18  # YAML 1.2 parser for tests/templates/test_workflow_run_parity.py
                    # PyYAML SafeLoader collapses YAML-1.1 `on:` → True; ruamel preserves it as a string.
+markdown>=3.4      # python-markdown, the engine mkdocs renders the published site with.
+                   # tests/scripts/test_external_refs_render.py renders BEFORE/AFTER through it
+                   # to prove an external-ref rewrite cannot dissolve a neighbouring code span
+                   # (CCE-181 round 3). It arrives transitively with requirements-docs.txt, but
+                   # .github/workflows/test.yml installs only this file — without the line the
+                   # test importorskips in the suite that gates every merge.

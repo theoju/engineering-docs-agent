@@ -12,9 +12,12 @@ Both are asserted against the REAL grammar via extract_citations, not against a
 hand-written expectation, so a change to the grammar surfaces here.
 """
 
+import re
 import sys
 import urllib.parse
 from pathlib import Path
+
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2] / "scripts" / "lint"))
 
@@ -233,6 +236,177 @@ def test_a_ref_and_template_override_reach_the_url():
     )
     out = render_external_refs("See `gl/a/b.py`.", repos)
     assert "https://gitlab.com/o/r/-/blob/master/a/b.py" in out
+
+
+# --------------------------------------------------------------------------
+# Round 3: the BACKTICK-RUN DELIMITER class.
+#
+# Every test above uses single-backtick delimiters, and the only
+# triple-backtick anywhere in this file is a fence opener, which never
+# reaches `_one` at all -- so none of them can see this class. It is a latent
+# defect, not a live one: no config in this repo declares
+# `lint.external_repos`.
+# --------------------------------------------------------------------------
+
+_PAYLOAD_SRC = "A `eda/scripts/x.py``` B ``<b>PAY</b>` C"
+
+
+def test_a_token_whose_delimiter_abuts_a_backtick_run_is_left_untouched():
+    """THE DISCRIMINATING TEST for the delimiter guard.
+
+    `_INLINE_CODE_RE` models a code span as exactly one backtick per side.
+    CommonMark does not: a delimiter is a RUN of backticks, and an opener
+    pairs with the next run of EQUAL length anywhere in the paragraph. `_one`
+    replaces its match with a markdown link, consuming exactly one backtick
+    from each side -- so when the match abuts a run of length >= 2 the run
+    lengths change and the whole paragraph re-pairs.
+
+    Measured against the pre-guard code, all three mangled (PUB elided):
+
+        IN:  See ``eda/scripts/x.py`` here.
+        OUT: See `[`x.py`](PUB/blob/main/scripts/x.py)` here.
+
+        IN:  See ``eda/scripts/x.py` here.
+        OUT: See `[`x.py`](PUB/blob/main/scripts/x.py) here.
+
+        IN:  See `eda/scripts/x.py`` here.
+        OUT: See [`x.py`](PUB/blob/main/scripts/x.py)` here.
+
+    The guard declines to rewrite when either delimiter abuts another
+    backtick, so all three are byte-identical now.
+    """
+    for src in (
+        "See ``eda/scripts/x.py`` here.",  # balanced 2-run both sides
+        "See ``eda/scripts/x.py` here.",  # mismatched: opener longer
+        "See `eda/scripts/x.py`` here.",  # mismatched: closer longer
+        _PAYLOAD_SRC,  # the measured payload case below
+    ):
+        assert render_external_refs(src, REPOS) == src, src
+
+
+def test_a_neighbouring_rewrite_cannot_dissolve_a_code_span(tmp_path):
+    """THE CONSEQUENCE. This is the test that would have caught the defect.
+
+    The payload is NOT in the accepted token -- a neighbouring rewrite
+    dissolved the code span that was escaping it. Measured against the
+    pre-guard code:
+
+        SRC: A `eda/scripts/x.py``` B ``<b>PAY</b>` C
+        OUT: A [`x.py`](PUB/blob/main/scripts/x.py)`` B ``<b>PAY</b>` C
+
+        BEFORE html: <p>A <code>eda/scripts/x.py``` B ``&lt;b&gt;PAY&lt;/b&gt;</code> C</p>
+        AFTER  html: <p>A <a href="PUB/..."><code>x.py</code></a><code>B</code><b>PAY</b>` C</p>
+
+    `<b>PAY</b>` is escaped inside <code> before and live HTML after. A prior
+    review measured 100 payload-attributable Tier-1 BLOCK->PASS flips from
+    this class (84 citation_exists, 16 internal_links), 0 PASS->BLOCK; every
+    one required the accepted token to sit inside a MISMATCHED backtick run.
+
+    `markdown` is python-markdown, the engine mkdocs renders the published
+    site with -- the real consumer, not a model of it. It is a dev-only
+    dependency (requirements-dev.txt), skipped where absent, same pattern as
+    the ruamel.yaml gate in tests/templates/test_workflow_run_parity.py.
+    """
+    markdown = pytest.importorskip("markdown")
+
+    out = render_external_refs(_PAYLOAD_SRC, REPOS)
+    before_html = markdown.markdown(_PAYLOAD_SRC)
+    after_html = markdown.markdown(out)
+
+    # The pre-image: the payload IS escaped in the untouched source. Without
+    # this the assertion below would pass on any input that never had a
+    # payload in a code span to begin with.
+    assert "&lt;b&gt;PAY&lt;/b&gt;" in before_html, before_html
+    assert "<b>PAY</b>" not in before_html, before_html
+
+    # The fix: the render is a no-op here, so the rendered HTML is identical
+    # and the payload is still escaped.
+    assert out == _PAYLOAD_SRC, out
+    assert after_html == before_html, after_html
+    assert "<b>PAY</b>" not in after_html, after_html
+
+
+def test_a_declined_token_reverts_to_being_blocked_by_the_linter(tmp_path):
+    """The COST of the guard, stated because it is the point of the fix.
+
+    A declared-prefix token the guard declines is left as its raw
+    `prefix/path` form, which is pre-CCE-181 behaviour: `citation_exists`
+    sees it and blocks. Measured here rather than asserted -- `check_path`
+    is the real Tier-1 rule, run unmocked.
+
+    That is the SAFE direction. The page blocks loudly and CCE-140's
+    lint_block -> revert handles it, instead of publishing a link built on
+    delimiters this module has just demonstrated it cannot model.
+    """
+    src = "See ``eda/scripts/x.py`` here."
+    out = render_external_refs(src, REPOS)
+    assert out == src, out
+
+    page = tmp_path / "page.md"
+    page.write_text(out)
+    ok, msg = check_path(page, tmp_path, set(), {})
+    assert ok is False, msg
+    assert "cites nonexistent path 'eda/scripts/x.py'" in msg
+
+
+def test_the_guard_does_not_over_reject_ordinary_citations():
+    """Over-rejection is the quiet failure mode of a lexical guard: a
+    legitimate citation silently left unrendered, which post-CCE-140 means a
+    silently abandoned page. Single-backtick delimiters are what the pipeline
+    actually emits, and none of these abut a run, so all three must still
+    render."""
+    public = render_external_refs("See `eda/scripts/runner.py`.", REPOS)
+    assert public == "See [`runner.py`](" + PUB + "/blob/main/scripts/runner.py)."
+
+    private = render_external_refs("See `ship/spokes/pre-flight.md`.", REPOS)
+    assert private == "See `pre-flight.md`."
+
+    suffixed = render_external_refs("See `eda/scripts/x.py:Klass.method`.", REPOS)
+    assert suffixed == "See [`x.py:Klass.method`](" + PUB + "/blob/main/scripts/x.py)."
+
+    # Two adjacent citations in one line: neither abuts the other, so the
+    # guard must not reject either.
+    two = render_external_refs("`eda/a.md` and `eda/b.md`", REPOS)
+    assert two == (
+        "[`a.md`](" + PUB + "/blob/main/a.md) and [`b.md`](" + PUB + "/blob/main/b.md)"
+    )
+
+
+def test_every_rewrite_preserves_the_lines_backtick_run_lengths():
+    """The MECHANISM the guard's comment claims, pinned so it cannot go stale.
+
+    What makes a rewrite safe is not that it happens outside a code span --
+    code-span membership is a per-paragraph property nothing local can
+    determine. It is that the rewrite leaves the line's sequence of
+    backtick-run lengths exactly as it found it, so CommonMark pairs the
+    paragraph's spans identically before and after. `[`name`](url)` carries
+    the same two length-1 runs as the `` `token` `` it replaces, and the
+    guard is what keeps those runs at length 1.
+
+    Not pinned, because it is outside the trusted boundary this module
+    draws: a backtick in the operator-configured `url`/`ref`/`blob_template`
+    would break the property. Those come from the host's own config, not
+    from the agent.
+    """
+
+    def runs(s):
+        return [len(m) for m in re.findall(r"`+", s)]
+
+    lines = [
+        "See `eda/scripts/x.py`.",
+        "`eda/a.md` and `eda/b.md`",
+        "See `ship/spokes/pre-flight.md`.",
+        "See ``eda/scripts/x.py`` here.",
+        "See ``eda/scripts/x.py` here.",
+        "See `eda/scripts/x.py`` here.",
+        _PAYLOAD_SRC,
+        "``` `eda/a.md` ``` and `eda/b.md`",
+        "`eda/a.md``eda/b.md`",
+        "See `eda/../evil.md` and `eda/docs/YYYY-MM-DD.md`.",
+        "No citation here at all.",
+    ]
+    for src in lines:
+        assert runs(render_external_refs(src, REPOS)) == runs(src), src
 
 
 def test_a_path_shaped_url_is_not_re_substituted():

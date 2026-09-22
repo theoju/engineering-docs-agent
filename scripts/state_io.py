@@ -14,13 +14,22 @@ from stderr_emit import _redact_credentials, emit_stderr  # noqa: E402
 # external_refs is NOT imported here at module scope (whole-branch review
 # Important 3). It appends scripts/lint to sys.path and imports
 # citation_exists -- a lint module. state_io is the foundational config/state
-# module imported by the orchestrator, verify_runner, setup and most tests,
-# so a module-scope import here would widen that sys.path mutation and that
+# module imported by setup_scaffold, preflight_host, and most tests, so a
+# module-scope import here would widen that sys.path mutation and that
 # dependency edge onto every host, including the overwhelming majority that
 # declare no lint.external_repos at all. Generic-first applies to the import
 # graph, not only to filesystem I/O (the `if` below already exists for that).
 # Imported lazily inside load_config_validated instead, gated by the SAME
 # `if` that guards the collision-listing I/O.
+#
+# NOT verify_runner (round-2 review Minor 2b correction -- an earlier version
+# of this comment named it as spared too): verify_runner.py:11 imports
+# orchestrator_runner at module scope, and orchestrator_runner.py:17 imports
+# external_refs at module scope on its own account (it calls
+# render_external_refs/resolve_config throughout, so that import is
+# legitimate there). verify_runner pays the cost regardless of anything this
+# module does; this fix only removes state_io itself as a SECOND, redundant
+# path to the same cost for callers that don't already have it.
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 

@@ -80,3 +80,57 @@ def resolve_config(
             "blob_template": str(entry.get("blob_template") or DEFAULT_BLOB_TEMPLATE),
         }
     return out
+
+
+def _blob_url(entry: dict, path_in_repo: str) -> str:
+    return (
+        entry["blob_template"]
+        .replace("{url}", entry["url"])
+        .replace("{ref}", entry["ref"])
+        .replace("{path}", path_in_repo)
+    )
+
+
+def render_external_refs(text: str, repos: dict[str, dict]) -> str:
+    """Rewrite declared-prefix tokens to links (public) or names (private).
+
+    Deterministic substitution on an explicitly declared string. No inference,
+    no suffix matching, no corroboration -- that distinction is what separates
+    this from the CCE-141 class. It runs BEFORE the linter, never on a page the
+    linter has already blocked.
+    """
+    if not repos:
+        return text
+
+    def _one(match):
+        token = match.group(1).strip()
+        head, sep, rest = token.partition("/")
+        if not sep or not rest:
+            return match.group(0)
+        entry = repos.get(head)
+        if entry is None:
+            return match.group(0)
+        basename = rest.split("/")[-1]
+        if entry["private"]:
+            return "`" + basename + "`"
+        # The :line/:symbol suffix is CITATION grammar, not a path on disk.
+        # Left in the URL it 404s while PASSING the linter -- a silent dead
+        # link. Keep it in the visible text, where it is slash-free and inert.
+        url_path = _SUFFIX_RE.sub("", rest)
+        return "[`" + basename + "`](" + _blob_url(entry, url_path) + ")"
+
+    out: list[str] = []
+    in_fence = False
+    fence = ""
+    for line in text.split("\n"):
+        stripped = line.lstrip()
+        if not in_fence and (stripped.startswith("```") or stripped.startswith("~~~")):
+            in_fence, fence = True, stripped[:3]
+            out.append(line)
+            continue
+        if in_fence and stripped.startswith(fence):
+            in_fence = False
+            out.append(line)
+            continue
+        out.append(line if in_fence else _INLINE_CODE_RE.sub(_one, line))
+    return "\n".join(out)

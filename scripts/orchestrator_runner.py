@@ -1719,6 +1719,17 @@ def _render_external_refs_for_pages(
     Writes only when the text actually changed: an unchanged page must not get
     a new mtime, or every bare host would show spurious churn.
 
+    The write is ATOMIC (round-2 review): temp-file + `os.replace`, the same
+    cadence `_BootstrapProgress._write` already uses in this file. Plain
+    `Path.write_text` opens in `'w'` mode, which truncates before writing, so
+    a failure partway through (disk full, permission revoked mid-write) would
+    leave the page on disk as neither the old content nor the new -- and
+    `git add -A .` stages whatever is there. `os.replace` is atomic on
+    POSIX, so the page is always fully old or fully new; the class of
+    mid-write corruption does not exist rather than being merely caught and
+    reported. The temp file is cleaned up on any failure so a stray
+    `*.tmp` next to a docs page is never itself staged.
+
     A per-page failure (unreadable/undecodable text, a write error) is caught
     and reported as a BLOCKING, degraded=True reason -- unlike its neighbour
     `_diagnose_citation_paths`, which reports its own failures info_only=True.
@@ -1756,7 +1767,16 @@ def _render_external_refs_for_pages(
             before = p.read_text()
             after = render_external_refs(before, repos)
             if after != before:
-                p.write_text(after)
+                tmp = p.with_suffix(p.suffix + ".tmp")
+                try:
+                    tmp.write_text(after)
+                    os.replace(tmp, p)
+                except Exception:
+                    try:
+                        tmp.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    raise
         except Exception as exc:  # noqa: BLE001 - one bad page must not sink the run
             add_partial(
                 state,

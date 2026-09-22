@@ -107,7 +107,13 @@ def test_a_render_failure_on_one_page_does_not_stop_the_next(tmp_path, monkeypat
         == "See [`CLAUDE.md`](https://x.example/r/blob/main/CLAUDE.md) here too."
     )
     assert bad.read_text() == "BOOM See `eda/CLAUDE.md` here.", (
-        "the failed page must be untouched, not half-written"
+        "the failed page must be untouched -- but this only proves it for the "
+        "PRE-WRITE failure path: _boom raises inside render_external_refs, "
+        "before write_text/os.replace is ever reached, so bad.md is untouched "
+        "by construction here, not because of the atomic-write swap. The "
+        "write-TIME path (a failure after the write has actually been "
+        "invoked) is covered separately by "
+        "test_a_write_time_failure_leaves_the_page_untouched, below."
     )
 
     cr = state["current_run"]
@@ -115,6 +121,63 @@ def test_a_render_failure_on_one_page_does_not_stop_the_next(tmp_path, monkeypat
     assert "blind" not in cr or cr["blind"] is False, cr
     assert any(
         r.startswith("external_ref_render_failed: bad.md: RuntimeError:")
+        for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+
+
+def test_a_write_time_failure_leaves_the_page_untouched(tmp_path, monkeypatch):
+    """Round-2 review: the atomic write.
+
+    `Path.write_text` opens in `'w'` mode, which truncates before writing, so
+    a failure AFTER the write has been invoked (disk full, permission revoked
+    mid-write) could leave the real page as neither the old content nor the
+    new -- and `git add -A .` stages whatever is left. The fix writes to a
+    `.tmp` sibling and `os.replace`s it onto the real page, which is atomic
+    on POSIX: the page is always fully old or fully new.
+
+    `Path.write_text` is monkeypatched to perform the REAL write (so the call
+    genuinely happens, exercising "invoked then fails", not "never reached")
+    and then raise -- simulating e.g. a disk-full error surfacing right after
+    the bytes are flushed. Because the implementation writes to `page.md.tmp`
+    and only `os.replace`s it onto `page.md` on success, the real page is
+    never touched by this failure at all.
+
+    Verified against the round-1 (pre-atomic) code first: with a bare
+    `p.write_text(after)`, this same monkeypatch writes the NEW content
+    straight into the real page and then raises, so the page ends up fully
+    rewritten (not reverted) despite the reported failure -- see the fix
+    report for the exact transcript. That is the corruption class this test
+    exists to close: the round-1 code "failed loudly" but still left bad
+    content on disk for `git add -A .` to stage.
+    """
+    page = tmp_path / "page.md"
+    original = "See `eda/CLAUDE.md` here."
+    page.write_text(original)
+
+    real_write_text = Path.write_text
+
+    def _write_then_boom(self, *args, **kwargs):
+        real_write_text(self, *args, **kwargs)
+        raise OSError("simulated disk-full mid-write")
+
+    monkeypatch.setattr(Path, "write_text", _write_then_boom)
+
+    config = {"lint": {"external_repos": {"eda": {"url": "https://x.example/r"}}}}
+    state: dict = {}
+    orun._render_external_refs_for_pages([str(page)], tmp_path, config, state)
+
+    assert page.read_text() == original, (
+        "the real page must never be touched by a write-time failure"
+    )
+    assert not (tmp_path / "page.md.tmp").exists(), (
+        "the leftover temp file must be cleaned up"
+    )
+
+    cr = state["current_run"]
+    assert cr["partial"] is True, cr
+    assert "blind" not in cr or cr["blind"] is False, cr
+    assert any(
+        r.startswith("external_ref_render_failed: page.md: OSError:")
         for r in cr["partial_reasons"]
     ), cr["partial_reasons"]
 

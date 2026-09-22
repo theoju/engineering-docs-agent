@@ -10,6 +10,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stderr_emit import _redact_credentials, emit_stderr  # noqa: E402
+from external_refs import ExternalRepoConfigError, resolve_config  # noqa: E402
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
@@ -183,6 +184,20 @@ def load_config_validated(path: Path) -> dict[str, Any]:
     except jsonschema.ValidationError as e:
         raise ConfigError(f"config invalid at {e.json_path}: {e.message}") from e
     _validate_lens_paths_are_editable(raw)
+    # CCE-181: the collision guard needs the repo tree. The config always lives
+    # at <repo>/.engineering-docs-agent/config.yml, so the repo root is two
+    # levels up. An empty host_dirs simply means the collision arm cannot fire;
+    # every other arm (both/neither, multi-segment) still does.
+    _repo_root = path.resolve().parent.parent
+    _host_dirs = (
+        frozenset(p.name for p in _repo_root.iterdir() if p.is_dir())
+        if _repo_root.is_dir()
+        else frozenset()
+    )
+    try:
+        resolve_config(raw, host_dirs=_host_dirs)
+    except ExternalRepoConfigError as e:
+        raise ConfigError(f"config invalid at $.lint.external_repos: {e}") from e
     _validate_site_sections(raw)
     _validate_api_sections(raw)
     return raw

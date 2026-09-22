@@ -94,6 +94,21 @@
             "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]*$"
           },
           "description": "Extra package roots citation_exists tries when resolving a cited repo path, after the repo root and docs_dir (CCE-139). Additive; empty by default, so a host that declares nothing is unaffected. Single-segment package roots only (\"backend\", \"frontend\") — a nested tail like \"backend/storage\" is suffix-matching in disguise and admits confabulated paths, which is why the pattern rejects any entry containing a slash."
+        },
+        "external_repos": {
+          "type": "object",
+          "description": "Repositories OTHER than this host that pages may cite (CCE-181). Keyed by the single-segment path prefix an author writes: `<prefix>/<path in that repo>`. A public entry declares `url` and renders to a markdown link; a private entry declares `private: true` and renders to the bare filename with the repo never named. Exactly one of url/private per entry. Empty by default, so a host that declares nothing is unaffected.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string" },
+              "private": { "type": "boolean" },
+              "ref": { "type": "string" },
+              "blob_template": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "propertyNames": { "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]*$" }
         }
       }
     },

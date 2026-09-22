@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Cross-Repo Citations</title>
+    <style>
+      :root {
+        --bg: #fbfaf8;
+        --panel: #fff;
+        --ink: #1c1b19;
+        --muted: #6b6862;
+        --line: #e5e1da;
+        --accent: #b4531f;
+        --ok: #2f6b46;
+        --bad: #a32b1c;
+        --code: #f4f1ec;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --bg: #161513;
+          --panel: #1f1e1b;
+          --ink: #eceae6;
+          --muted: #9a958c;
+          --line: #33312d;
+          --accent: #e08a4e;
+          --ok: #6fbf90;
+          --bad: #e8836f;
+          --code: #26251f;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          16px/1.6 ui-serif,
+          Georgia,
+          "Times New Roman",
+          serif;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 40px 16px 80px;
+      }
+      h1 {
+        font-size: 30px;
+        line-height: 1.2;
+        margin: 0 0 6px;
+        letter-spacing: -0.01em;
+      }
+      h2 {
+        font-size: 14px;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 38px 0 12px;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-weight: 600;
+      }
+      p {
+        margin: 0 0 14px;
+      }
+      .lede {
+        font-size: 18px;
+        color: var(--muted);
+        margin-bottom: 26px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 18px 20px;
+        margin-bottom: 14px;
+      }
+      .fidelity {
+        border-left: 3px solid var(--accent);
+      }
+      .fidelity b {
+        color: var(--accent);
+      }
+      code,
+      pre,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+      }
+      code {
+        background: var(--code);
+        padding: 1px 5px;
+        border-radius: 4px;
+      }
+      pre {
+        background: var(--code);
+        padding: 12px 14px;
+        border-radius: 8px;
+        overflow-x: auto;
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      button {
+        font: inherit;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 13px;
+        background: var(--panel);
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 7px 12px;
+        cursor: pointer;
+        margin: 0 6px 6px 0;
+      }
+      button:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      button.primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      button.primary:hover {
+        opacity: 0.9;
+        color: #fff;
+      }
+      button.done {
+        opacity: 0.45;
+      }
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .tabs button.active {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: baseline;
+        margin-bottom: 6px;
+      }
+      .k {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        min-width: 150px;
+      }
+      .ok {
+        color: var(--ok);
+        font-weight: 600;
+      }
+      .bad {
+        color: var(--bad);
+        font-weight: 600;
+      }
+      ul {
+        margin: 0 0 14px;
+        padding-left: 20px;
+      }
+      li {
+        margin-bottom: 5px;
+      }
+      .note {
+        font-size: 14px;
+        color: var(--muted);
+      }
+      hr {
+        border: 0;
+        border-top: 1px solid var(--line);
+        margin: 30px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Cross-Repo Citations</h1>
+      <p class="lede">
+        CCE-181 &mdash; a docs page must point at a file that lives in a
+        <em>different</em> repository. Writing the path plainly breaks the
+        build. This demo lets you drive the proposed fix and watch what the real
+        linter makes of the result.
+      </p>
+
+      <div class="panel fidelity">
+        <p>
+          <b>What is real here, and what is invented.</b> A prototype that
+          quietly models the code instead of running it can confirm a design
+          that is about to fail &mdash; that happened on CCE-175, and the lesson
+          is now recorded in <code>CLAUDE.md</code>. So this file keeps the two
+          halves apart:
+        </p>
+        <ul>
+          <li>
+            <b>Ported verbatim</b> from
+            <code>scripts/lint/citation_exists.py</code> at
+            <code>77c6894</code>: the inline-code scan, the test-id and
+            repo-path patterns, the placeholder rules, fence stripping, and
+            <code>extract_citations</code>. This is the <em>oracle</em> &mdash;
+            the judge, never the thing being judged.
+          </li>
+          <li>
+            <b>Invented here</b>, and the actual subject of the demo:
+            <code>renderSiblings</code> and <code>validateConfig</code>. No
+            production code exists for these yet.
+          </li>
+          <li>
+            <b>Not modelled at all:</b> the orchestrator, the page-author agent,
+            file I/O.
+          </li>
+        </ul>
+        <p class="note">
+          If the ported half ever drifts from production, everything below is
+          worthless. That is the one thing to re-check before trusting a verdict
+          here.
+        </p>
+      </div>
+
+      <h2>The idea being tested</h2>
+      <p>
+        The host declares its sibling repositories. When the author writes a
+        path beginning with a declared name, the pipeline rewrites it before the
+        linter ever sees it &mdash; into a clickable link for a public sibling,
+        or into a bare filename for a private one. Anything
+        <em>not</em> declared is left exactly as it is, and keeps failing the
+        way it does today.
+      </p>
+
+      <h2>Current state</h2>
+      <div class="panel" id="state"></div>
+
+      <h2>Page source, as the author wrote it</h2>
+      <div class="panel"><pre id="src"></pre></div>
+
+      <h2>What the pipeline produces</h2>
+      <div class="panel"><pre id="out"></pre></div>
+
+      <h2>What the linter says about it</h2>
+      <div class="panel" id="verdict"></div>
+
+      <h2>Free play</h2>
+      <p class="note">Everything is available at any time, in any order.</p>
+      <div class="panel" id="freeplay"></div>
+
+      <h2>Guided walkthroughs</h2>
+      <div class="tabs" id="tabs"></div>
+      <div class="panel" id="scenario"></div>
+
+      <hr />
+      <p class="note">
+        Throwaway. Not production. Branch
+        <code>proto/CCE-181-sibling-render</code>.
+      </p>
+    </div>
+    <script>
+      /* ============================================================
+   PART 1 - THE ORACLE.  Ported from scripts/lint/citation_exists.py
+   at 77c6894.  Do not "improve" this; its only job is to match
+   production.  If it drifts, the demo lies.
+   ============================================================ */
+      const INLINE_CODE = /`([^`\n]+)`/g;
+      const TEST_ID = /^test_[a-z0-9_]+$/;
+      const REPO_PATH =
+        /^[\w.\-/]+\/[\w.\-]+\.\w{1,8}(?::(?:\d+(?:-\d+)?|[A-Za-z_][\w.]*))?$/;
+      const SUFFIX = /:(?:\d+(?:-\d+)?|[A-Za-z_][\w.]*)$/;
+      const MARKERS = ["<", ">", "*", "{", "}", "YYYY", "..."];
+
+      function stripFences(text) {
+        const out = [];
+        let inFence = false,
+          fence = "",
+          start = 0;
+        for (const line of text.split("\n")) {
+          const s = line.replace(/^\s+/, "");
+          if (!inFence && (s.startsWith("```") || s.startsWith("~~~"))) {
+            inFence = true;
+            fence = s.slice(0, 3);
+            start = out.length;
+            continue;
+          }
+          if (inFence && s.startsWith(fence)) {
+            inFence = false;
+            out.length = start;
+            continue;
+          }
+          out.push(line);
+        }
+        return out.join("\n");
+      }
+      function isPlaceholder(t) {
+        return (
+          MARKERS.some((m) => t.includes(m)) ||
+          t.startsWith("~") ||
+          t.startsWith("$") ||
+          t.includes("://")
+        );
+      }
+      function extractCitations(text) {
+        const paths = [],
+          tests = [];
+        const body = stripFences(text);
+        let m;
+        INLINE_CODE.lastIndex = 0;
+        while ((m = INLINE_CODE.exec(body)) !== null) {
+          const tok = m[1].trim();
+          if (!tok || isPlaceholder(tok)) continue;
+          if (TEST_ID.test(tok)) {
+            if (!tests.includes(tok)) tests.push(tok);
+          } else if (REPO_PATH.test(tok)) {
+            const bare = tok.replace(SUFFIX, "");
+            if (!paths.includes(bare)) paths.push(bare);
+          }
+        }
+        return { paths, tests };
+      }
+
+      /* ============================================================
+   PART 2 - THE DESIGN UNDER TEST.  Invented for CCE-181.
+   Pure: no DOM, nothing reaches in.  This is the half that would
+   lift into the real module if the demo says it holds up.
+   ============================================================ */
+
+      // Exactly one of {url} or {private:true}.  Loud on both / neither.
+      function validateConfig(siblings, hostDirs) {
+        const errors = [];
+        for (const prefix of Object.keys(siblings)) {
+          const d = siblings[prefix];
+          const hasUrl = typeof d.url === "string" && d.url.length > 0;
+          if (hasUrl && d.private)
+            errors.push(prefix + ": declares BOTH a link and privacy");
+          if (!hasUrl && !d.private)
+            errors.push(prefix + ": declares NEITHER a link nor privacy");
+          if (prefix.indexOf("/") >= 0)
+            errors.push(prefix + ": must be a single path segment");
+          if (hostDirs.indexOf(prefix) >= 0)
+            errors.push(
+              prefix + ": collides with a real directory in this repo",
+            );
+        }
+        return errors;
+      }
+
+      function blobUrl(d, pathInSibling) {
+        const tpl = d.blob_template || "{url}/blob/{ref}/{path}";
+        return tpl
+          .replace("{url}", d.url)
+          .replace("{ref}", d.ref || "main")
+          .replace("{path}", pathInSibling);
+      }
+
+      // linkTextMode exists ONLY so walkthrough 2 can exhibit the trap.
+      // Production would hard-code "basename".
+      function renderSiblings(text, siblings, opts) {
+        const mode = (opts && opts.linkTextMode) || "basename";
+        const hostDirs = (opts && opts.hostDirs) || [];
+        if (validateConfig(siblings, hostDirs).length) return text; // refused -> untouched
+
+        // Never rewrite inside a fenced block: those are samples, not citations.
+        let inFence = false,
+          fence = "";
+        return text
+          .split("\n")
+          .map(function (line) {
+            const s = line.replace(/^\s+/, "");
+            if (!inFence && (s.startsWith("```") || s.startsWith("~~~"))) {
+              inFence = true;
+              fence = s.slice(0, 3);
+              return line;
+            }
+            if (inFence && s.startsWith(fence)) {
+              inFence = false;
+              return line;
+            }
+            if (inFence) return line;
+            return line.replace(/`([^`\n]+)`/g, function (whole, tok) {
+              const t = tok.trim();
+              const slash = t.indexOf("/");
+              if (slash < 1) return whole;
+              const prefix = t.slice(0, slash),
+                rest = t.slice(slash + 1);
+              const d = siblings[prefix];
+              if (!d || !rest) return whole; // undeclared -> untouched
+              const base = rest.split("/").pop();
+              if (d.private) return "`" + base + "`"; // name only, repo unnamed
+              const textPart = mode === "fullpath" ? rest : base;
+              // The :symbol suffix is CITATION GRAMMAR, not part of the file's
+              // path on disk. Left in the URL it produces a 404 that passes the
+              // linter -- a silent dead link. Found by running case 9, not by
+              // reading the code. Keep it in the visible text, strip it from
+              // the address.
+              const urlPath = rest.replace(SUFFIX, "");
+              return "[`" + textPart + "`](" + blobUrl(d, urlPath) + ")";
+            });
+          })
+          .join("\n");
+      }
+
+      /* ============================================================
+   PART 3 - throwaway page shell.  Nothing below lifts anywhere.
+   ============================================================ */
+      const HOST_FILES = [
+        "docs/site-src/index.md",
+        "scripts/build.py",
+        "README.md",
+      ];
+      const HOST_DIRS = ["docs", "scripts"];
+
+      const PUBLIC = {
+        url: "https://github.com/theoju/engineering-docs-agent",
+        ref: "main",
+      };
+      const PRIVATE = { private: true };
+
+      const INITIAL = {
+        siblings: { "engineering-docs-agent": PUBLIC },
+        linkTextMode: "basename",
+        src: "The merge gate is recorded in `engineering-docs-agent/CLAUDE.md`.",
+      };
+      let S = JSON.parse(JSON.stringify(INITIAL));
+
+      function resolves(p) {
+        return HOST_FILES.indexOf(p) >= 0;
+      }
+      function esc(s) {
+        return s
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+      function row(k, v) {
+        return (
+          "<div class='row'><span class='k'>" +
+          k +
+          "</span><span>" +
+          v +
+          "</span></div>"
+        );
+      }
+
+      function compute() {
+        const errors = validateConfig(S.siblings, HOST_DIRS);
+        const out = renderSiblings(S.src, S.siblings, {
+          linkTextMode: S.linkTextMode,
+          hostDirs: HOST_DIRS,
+        });
+        return {
+          errors: errors,
+          out: out,
+          before: extractCitations(S.src).paths,
+          after: extractCitations(out).paths,
+          blocked: extractCitations(out).paths.filter(function (p) {
+            return !resolves(p);
+          }),
+        };
+      }
+
+      function render() {
+        const c = compute();
+
+        document.getElementById("state").innerHTML =
+          row(
+            "Declared siblings",
+            Object.keys(S.siblings).length
+              ? Object.keys(S.siblings)
+                  .map(function (k) {
+                    const v = S.siblings[k];
+                    return (
+                      "<code>" +
+                      k +
+                      "</code> &rarr; " +
+                      (v.private
+                        ? "<em>private, no link</em>"
+                        : "<code>" + esc(v.url || "") + "</code>")
+                    );
+                  })
+                  .join("<br>")
+              : "<em>none &mdash; a bare host</em>",
+          ) +
+          row(
+            "Link text",
+            "<code>" +
+              S.linkTextMode +
+              "</code>" +
+              (S.linkTextMode === "fullpath"
+                ? " &nbsp;<span class='bad'>&larr; the trap</span>"
+                : ""),
+          ) +
+          row(
+            "This repo contains",
+            HOST_FILES.map(function (f) {
+              return "<code>" + f + "</code>";
+            }).join(" "),
+          ) +
+          row(
+            "Config check",
+            c.errors.length
+              ? "<span class='bad'>REFUSED</span><br>" +
+                  c.errors.map(esc).join("<br>")
+              : "<span class='ok'>accepted</span>",
+          );
+
+        document.getElementById("src").textContent = S.src;
+        const outEl = document.getElementById("out");
+        if (c.out === S.src) {
+          outEl.innerHTML =
+            esc(c.out) +
+            "\n\n<span style='color:var(--muted)'>(unchanged)</span>";
+        } else {
+          outEl.textContent = c.out;
+        }
+
+        document.getElementById("verdict").innerHTML =
+          row(
+            "Paths the linter saw<br>before rewriting",
+            c.before.length
+              ? c.before
+                  .map(function (p) {
+                    return "<code>" + p + "</code>";
+                  })
+                  .join(" ")
+              : "<em>none</em>",
+          ) +
+          row(
+            "Paths it sees after",
+            c.after.length
+              ? c.after
+                  .map(function (p) {
+                    return "<code>" + p + "</code>";
+                  })
+                  .join(" ")
+              : "<em>none</em>",
+          ) +
+          row(
+            "Result",
+            c.blocked.length
+              ? "<span class='bad'>BUILD BLOCKED</span> &mdash; " +
+                  c.blocked
+                    .map(function (p) {
+                      return "<code>" + p + "</code>";
+                    })
+                    .join(" ") +
+                  "<br><span class='note'>the page is discarded and never published</span>"
+              : "<span class='ok'>PASSES</span> &mdash; the page publishes",
+          );
+
+        renderTabs();
+        renderScenario();
+      }
+
+      /* ---- free play ---- */
+      const ACTIONS = [
+        [
+          "Cite a file at the sibling's root",
+          function () {
+            S.src =
+              "The merge gate is recorded in `engineering-docs-agent/CLAUDE.md`.";
+          },
+        ],
+        [
+          "Cite a file deep in the sibling",
+          function () {
+            S.src =
+              "The gate lives in `engineering-docs-agent/scripts/orchestrator_runner.py`.";
+          },
+        ],
+        [
+          "Cite a file in THIS repo",
+          function () {
+            S.src = "The build entry point is `scripts/build.py`.";
+          },
+        ],
+        [
+          "Cite a file that exists nowhere",
+          function () {
+            S.src = "See `scripts/does_not_exist.py` for details.";
+          },
+        ],
+        [
+          "Put the citation in a code sample",
+          function () {
+            S.src =
+              "Example:\n\n```\n`engineering-docs-agent/CLAUDE.md`\n```\n";
+          },
+        ],
+        [
+          "Make the sibling public",
+          function () {
+            S.siblings = { "engineering-docs-agent": PUBLIC };
+          },
+        ],
+        [
+          "Make the sibling private",
+          function () {
+            S.siblings = { "engineering-docs-agent": PRIVATE };
+          },
+        ],
+        [
+          "Declare nothing (bare host)",
+          function () {
+            S.siblings = {};
+          },
+        ],
+        [
+          "Claim a name this repo already uses",
+          function () {
+            S.siblings = { docs: PUBLIC };
+          },
+        ],
+        [
+          "Claim both a link and privacy",
+          function () {
+            S.siblings = {
+              "engineering-docs-agent": {
+                url: "https://x.example",
+                private: true,
+              },
+            };
+          },
+        ],
+        [
+          "Link text: filename only",
+          function () {
+            S.linkTextMode = "basename";
+          },
+        ],
+        [
+          "Link text: the whole path",
+          function () {
+            S.linkTextMode = "fullpath";
+          },
+        ],
+        [
+          "Reset",
+          function () {
+            S = JSON.parse(JSON.stringify(INITIAL));
+          },
+        ],
+      ];
+      document.getElementById("freeplay").innerHTML = ACTIONS.map(
+        function (a, i) {
+          return "<button onclick='act(" + i + ")'>" + a[0] + "</button>";
+        },
+      ).join("");
+      function act(i) {
+        ACTIONS[i][1]();
+        render();
+      }
+
+      /* ---- walkthroughs ---- */
+      const SCENARIOS = [
+        {
+          name: "It works",
+          blurb:
+            "The ordinary case. A page points at two files in the sibling repository &mdash; one at its root, one buried in a subdirectory. Watch the <em>Result</em> line stay green while the reference survives as something a reader can actually click.",
+          steps: [
+            "Start clean",
+            "Point at a file at its root",
+            "Point at one deep inside",
+          ],
+          acts: [12, 0, 1],
+        },
+
+        {
+          name: "The trap",
+          blurb:
+            "The obvious way to write the link is to show the reader the whole path. Press step 2 and watch the build break anyway. The linter reads the text <em>inside</em> the link, and a slash is all it takes &mdash; wrapping a path in a link exempts nothing. This is the bug that nearly went into the design.",
+          steps: [
+            "A deep citation, rendered normally",
+            "Now show the whole path as link text",
+            "Back to filename only",
+          ],
+          acts: [1, 11, 10],
+        },
+
+        {
+          name: "No free pass",
+          blurb:
+            "The worry with any escape hatch is that it quietly becomes a general one. Here the author cites a file that exists in no repository at all. Nothing is declared for it, so nothing rewrites it, and it breaks the build exactly as it does today &mdash; the hatch is opt-in per citation and cannot be reached by accident.",
+          steps: [
+            "Cite something that exists nowhere",
+            "Confirm the sibling is still declared",
+          ],
+          acts: [3, 5],
+        },
+
+        {
+          name: "Private stays private",
+          blurb:
+            "Some sibling repositories are private, and this documentation site is public. A link would be useless to readers and would advertise a repository that should not be advertised. Watch the output closely: the file gets named, the repository never does.",
+          steps: ["Point deep into the sibling", "Make that sibling private"],
+          acts: [1, 6],
+        },
+
+        {
+          name: "Bad declarations",
+          blurb:
+            "Two ways an operator can get the configuration wrong. Both are refused outright rather than half-applied &mdash; a refused configuration leaves every page exactly as it is today, which is the safe direction for a rule that can stop a build.",
+          steps: [
+            "Claim a name this repo already uses",
+            "Claim both a link and privacy",
+            "Reset",
+          ],
+          acts: [8, 9, 12],
+        },
+      ];
+      let tab = 0,
+        step = 0;
+      function renderTabs() {
+        document.getElementById("tabs").innerHTML = SCENARIOS.map(
+          function (s, i) {
+            return (
+              "<button class='" +
+              (i === tab ? "active" : "") +
+              "' onclick='pick(" +
+              i +
+              ")'>" +
+              s.name +
+              "</button>"
+            );
+          },
+        ).join("");
+      }
+      function pick(i) {
+        tab = i;
+        step = 0;
+        S = JSON.parse(JSON.stringify(INITIAL));
+        render();
+      }
+      function renderScenario() {
+        const sc = SCENARIOS[tab];
+        document.getElementById("scenario").innerHTML =
+          "<p>" +
+          sc.blurb +
+          "</p>" +
+          sc.steps
+            .map(function (label, i) {
+              return (
+                "<button class='" +
+                (i === step ? "primary" : i < step ? "done" : "") +
+                "' " +
+                (i === step
+                  ? ""
+                  : "disabled style='opacity:.35;cursor:default'") +
+                " onclick='doStep(" +
+                i +
+                ")'>" +
+                (i + 1) +
+                ". " +
+                label +
+                "</button>"
+              );
+            })
+            .join("") +
+          (step >= sc.steps.length
+            ? "<p class='note' style='margin-top:10px'>Walkthrough complete.</p>"
+            : "");
+      }
+      function doStep(i) {
+        if (i !== step) return;
+        ACTIONS[SCENARIOS[tab].acts[i]][1]();
+        step++;
+        render();
+      }
+      render();
+    </script>
+  </body>
+</html>

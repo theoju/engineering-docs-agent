@@ -101,7 +101,11 @@
           "additionalProperties": {
             "type": "object",
             "properties": {
-              "url": { "type": "string" },
+              "url": {
+                "type": "string",
+                "pattern": "^https?://",
+                "description": "A scheme typo (or a non-http(s) scheme) fails at config load instead of downstream. internal_links.is_external returns False for e.g. a javascript: URL, so an unconstrained scheme would be treated as an internal link, fail to resolve, and block -- a real defence, but failing at load is better."
+              },
               "private": { "type": "boolean" },
               "ref": { "type": "string" },
               "blob_template": { "type": "string" }

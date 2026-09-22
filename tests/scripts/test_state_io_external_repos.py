@@ -63,6 +63,19 @@ def test_both_url_and_private_is_refused_at_load(tmp_path):
         load_config_validated(cfg)
 
 
+def test_a_non_http_url_scheme_is_refused_at_load(tmp_path):
+    """Whole-branch review Minor: `url` is schema-constrained to `^https?://`
+    (templates/config.schema.json), so a scheme typo -- or a non-http(s)
+    scheme such as `javascript:` -- fails at config load rather than
+    downstream. `internal_links.is_external` returns False for a
+    `javascript:` URL, so before this constraint such a declaration would be
+    treated as an internal link, fail to resolve, and block -- a real
+    defence, but failing at load is better, and this pins the earlier gate."""
+    cfg = _write(tmp_path, {"external_repos": {"eda": {"url": "javascript:alert(1)"}}})
+    with pytest.raises(ConfigError):
+        load_config_validated(cfg)
+
+
 def test_a_prefix_colliding_with_a_real_repo_directory_is_refused(tmp_path):
     """`docs/` exists in the fixture repo, so declaring `docs` as external
     would rewrite real local paths into foreign links."""

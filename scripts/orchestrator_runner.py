@@ -1745,13 +1745,27 @@ def _render_external_refs_for_pages(
     `_diagnose_citation_paths`, which reports its own failures info_only=True.
     That difference is deliberate, not copied: `_diagnose_citation_paths` is a
     diagnostic, so losing it only costs an explanation. This function is a
-    TRANSFORM; a swallowed failure here leaves the page's raw `prefix:path`
-    token in place, and that token is invisible to `citation_exists`
-    (`_REPO_PATH_RE`'s character class excludes `:` mid-token) -- nothing
-    downstream would block it, and the page would publish the raw token as
-    prose. `degraded=True` flips `partial`, which the CCE-101 auto-merge gate
-    already treats as ineligible, so a render failure forces human review of
-    the PR instead of shipping silently on an otherwise-clean run.
+    TRANSFORM; a swallowed failure here leaves the page's raw `prefix/path`
+    token in place. On a LIVE lens that token is visible and correctly BLOCKS
+    -- the token still carries its `/`, `citation_exists` still recognizes it
+    as a path citation, and the page degrades to exactly the pre-CCE-181
+    bug: loud, and self-healing via `lint_block` -> revert -> the batch held
+    out of the CCE-151 cursor. The residual this classification actually
+    guards is `archive-index`: CCE-124 downgrades `citation_exists` to `warn`
+    under an archive section, so a swallowed failure there ships the raw
+    token as prose with NO block at all -- silent. `degraded=True` is what
+    makes that case visible: it flips `partial`, which the CCE-101
+    auto-merge gate already treats as ineligible, so a render failure forces
+    human review of the PR instead of shipping silently on an otherwise-clean
+    run.
+
+    (An earlier draft of this docstring, this function's wiring test, and the
+    classification-coverage audit all justified this with the inverse claim
+    -- that an unrendered token is invisible to `citation_exists` because its
+    grammar excludes a `:` separator. The shipped separator is `/`
+    (`token.partition("/")` above), not `:`; that premise was never true of
+    this code. The classification was right regardless -- degraded=True, not
+    info_only -- for the stronger reason recorded here.)
 
     The failed page is deliberately LEFT IN `authored` rather than pulled out
     (round-1 review judgment call): content-validator's own lint pass --

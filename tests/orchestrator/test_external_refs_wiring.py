@@ -76,12 +76,18 @@ def test_a_render_failure_on_one_page_does_not_stop_the_next(tmp_path, monkeypat
     Two pages; the first raises during render, the second must still be
     processed -- one bad page must not sink the batch. The failure must be
     reported as a BLOCKING reason (flips `partial`) with `degraded=True`,
-    never `info_only=True`: an unrendered `prefix:path` token is invisible to
-    `citation_exists`, so a swallowed failure would ship the raw token
-    silently. `degraded=True` (not the bare/blind default) marks this as work
-    the run held back -- the same shape as `page_author_invalid` -- rather
-    than the blind "consumed input it could not process" shape; asserting
-    `"blind" not in cr or cr["blind"] is False` pins that choice.
+    never `info_only=True`. NOT because an unrendered `prefix/path` token is
+    invisible to `citation_exists` -- the separator is `/`
+    (`token.partition("/")` in external_refs.py), so on a live lens the token
+    keeps its slash and `citation_exists` still blocks it; a swallowed
+    failure there just degrades to the pre-CCE-181 bug, loud and
+    self-healing. The real reason: under an `archive-index` section CCE-124
+    downgrades `citation_exists` to `warn`, so there the raw token would ship
+    as prose with no block at all -- and that residual is what `degraded=True`
+    makes visible. `degraded=True` (not the bare/blind default) marks this as
+    work the run held back -- the same shape as `page_author_invalid` --
+    rather than the blind "consumed input it could not process" shape;
+    asserting `"blind" not in cr or cr["blind"] is False` pins that choice.
     """
     bad = tmp_path / "bad.md"
     good = tmp_path / "good.md"

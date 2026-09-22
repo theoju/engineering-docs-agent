@@ -128,18 +128,25 @@ def test_orchestrator_has_the_expected_call_site_population():
     right below reports its own failures info_only=True, and this site
     deliberately does not copy that: that function is a DIAGNOSTIC, so losing
     it only costs an explanation, while this one is a TRANSFORM, so a
-    swallowed failure would leave the page's raw `prefix:path` token in
-    place — and that token is invisible to `citation_exists` (`_REPO_PATH_RE`
-    excludes `:` mid-token), so nothing downstream would block it from
-    shipping as prose. `degraded=True` flips `partial`, which the CCE-101
-    auto-merge gate already treats as ineligible, so the page's batch is held
-    for human review instead. It is not the blind default either: the run did
-    not consume the page's authored work unprocessed and lose it — the page
+    swallowed failure would leave the page's raw `prefix/path` token in
+    place. That is NOT invisible to `citation_exists` — the separator is `/`
+    (`token.partition("/")`), the token keeps it, and on a live lens
+    `citation_exists` still blocks it: the failure degrades to exactly the
+    pre-CCE-181 bug, loud and self-healing (`lint_block` -> revert -> the
+    batch held out of the CCE-151 cursor). The residual this classification
+    actually guards is narrower: under an `archive-index` section CCE-124
+    downgrades `citation_exists` to `warn`, so there a swallowed failure
+    would ship the raw token as prose with no block at all — silent.
+    `degraded=True` flips `partial`, which the CCE-101 auto-merge gate
+    already treats as ineligible, so the page's batch is held for human
+    review instead. It is not the blind default either: the run did not
+    consume the page's authored work unprocessed and lose it — the page
     stays on disk, in `authored`, and reaches content-validator's own
     `lint_block` revert exactly as before, which is what actually keeps bad
-    content out of the committed diff. That is the same held-back,
-    self-healing shape as `page_author_invalid`, not the blind
-    consumed-and-lost shape."""
+    content out of the committed diff on the live-lens path, with
+    `degraded=True` covering the archive-index path that revert does not
+    reach. That is the same held-back, self-healing shape as
+    `page_author_invalid`, not the blind consumed-and-lost shape."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
     assert len(calls) == 46, (
         f"expected 46 add_partial calls, found {len(calls)}; re-audit and "

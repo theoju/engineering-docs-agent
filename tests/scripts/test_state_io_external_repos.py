@@ -6,6 +6,8 @@ root is path.parent.parent. Deriving it there keeps the guard at load time, as
 the spec requires, without changing load_config_validated's signature.
 """
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -65,3 +67,27 @@ def test_a_prefix_colliding_with_a_real_repo_directory_is_refused(tmp_path):
     cfg = _write(tmp_path, {"external_repos": {"docs": {"url": "https://x.example/r"}}})
     with pytest.raises(ConfigError, match="collides"):
         load_config_validated(cfg)
+
+
+def test_absent_external_repos_does_no_filesystem_listing(tmp_path, monkeypatch):
+    """A host that never declares lint.external_repos must not pay for the
+    collision guard's repo-tree listing at all -- not just get a no-op result
+    after listing. Path.iterdir is monkeypatched to blow up; a clean load
+    proves _repo_root.iterdir() was never reached. The block-present case is
+    the contrasting proof: the same monkeypatch surfaces the attempted call,
+    showing the guard's I/O is conditional on the feature being declared,
+    not skipped altogether.
+    """
+
+    def _boom(self):
+        raise OSError("iterdir must not run when lint.external_repos is absent")
+
+    monkeypatch.setattr(Path, "iterdir", _boom)
+
+    cfg = _write(tmp_path, {})
+    loaded = load_config_validated(cfg)
+    assert "external_repos" not in (loaded.get("lint") or {})
+
+    cfg2 = _write(tmp_path, {"external_repos": {"eda": {"url": "https://x.example/r"}}})
+    with pytest.raises(OSError):
+        load_config_validated(cfg2)

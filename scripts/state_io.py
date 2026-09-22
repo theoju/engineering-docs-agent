@@ -184,20 +184,24 @@ def load_config_validated(path: Path) -> dict[str, Any]:
     except jsonschema.ValidationError as e:
         raise ConfigError(f"config invalid at {e.json_path}: {e.message}") from e
     _validate_lens_paths_are_editable(raw)
-    # CCE-181: the collision guard needs the repo tree. The config always lives
-    # at <repo>/.engineering-docs-agent/config.yml, so the repo root is two
-    # levels up. An empty host_dirs simply means the collision arm cannot fire;
-    # every other arm (both/neither, multi-segment) still does.
-    _repo_root = path.resolve().parent.parent
-    _host_dirs = (
-        frozenset(p.name for p in _repo_root.iterdir() if p.is_dir())
-        if _repo_root.is_dir()
-        else frozenset()
-    )
-    try:
-        resolve_config(raw, host_dirs=_host_dirs)
-    except ExternalRepoConfigError as e:
-        raise ConfigError(f"config invalid at $.lint.external_repos: {e}") from e
+    # CCE-181: only a host that actually declares lint.external_repos pays for
+    # the collision guard's repo-tree listing. The overwhelming majority of
+    # hosts don't, and must stay byte-identical to pre-CCE-181 behavior -- no
+    # new filesystem access on every config load. The config always lives at
+    # <repo>/.engineering-docs-agent/config.yml, so the repo root is two
+    # levels up. An empty host_dirs simply means the collision arm cannot
+    # fire; every other arm (both/neither, multi-segment) still does.
+    if (raw.get("lint") or {}).get("external_repos"):
+        _repo_root = path.resolve().parent.parent
+        _host_dirs = (
+            frozenset(p.name for p in _repo_root.iterdir() if p.is_dir())
+            if _repo_root.is_dir()
+            else frozenset()
+        )
+        try:
+            resolve_config(raw, host_dirs=_host_dirs)
+        except ExternalRepoConfigError as e:
+            raise ConfigError(f"config invalid at $.lint.external_repos: {e}") from e
     _validate_site_sections(raw)
     _validate_api_sections(raw)
     return raw

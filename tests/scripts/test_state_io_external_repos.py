@@ -6,6 +6,8 @@ root is path.parent.parent. Deriving it there keeps the guard at load time, as
 the spec requires, without changing load_config_validated's signature.
 """
 
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -91,3 +93,43 @@ def test_absent_external_repos_does_no_filesystem_listing(tmp_path, monkeypatch)
     cfg2 = _write(tmp_path, {"external_repos": {"eda": {"url": "https://x.example/r"}}})
     with pytest.raises(OSError):
         load_config_validated(cfg2)
+
+
+def test_the_external_refs_import_is_lazy(tmp_path, monkeypatch):
+    """Whole-branch review Important 3: `from external_refs import ...` must
+    not be a module-scope import in state_io.py. state_io is the foundational
+    config/state module imported by the orchestrator, verify_runner, setup
+    and most tests; external_refs pulls in scripts/lint's citation_exists via
+    a sys.path mutation (the exact CCE-122 hazard) as a side effect of import
+    alone, so a module-scope import here would widen both for every host,
+    including the overwhelming majority that declare no external_repos.
+
+    A `sys.modules` presence check cannot discriminate this cleanly: by the
+    time this test runs as part of the full suite, other test modules
+    (test_external_refs_render.py, orchestrator_runner.py's own import) have
+    already imported the real `external_refs`, so `'external_refs' in
+    sys.modules` is True regardless of what state_io.py does -- "already
+    imported by someone" says nothing about "imported by THIS module at
+    THIS time."
+
+    Instead: swap `sys.modules['external_refs']` for a bare, broken stand-in
+    module that defines neither `resolve_config` nor
+    `ExternalRepoConfigError`. Since `from external_refs import X` resolves
+    against whatever is in `sys.modules` (Python never re-executes an already
+    -imported module), any code path that performs that import -- module
+    scope or otherwise -- resolves against the broken stand-in and raises
+    ImportError the moment it runs. A host with NO external_repos declared
+    must load clean without ever touching it; a host WITH it declared must
+    still hit the (now broken) import, proving the import genuinely only
+    happens on that gated path rather than having already run at module load
+    before this monkeypatch was even installed.
+    """
+    monkeypatch.setitem(sys.modules, "external_refs", types.ModuleType("external_refs"))
+
+    cfg = _write(tmp_path, {})
+    loaded = load_config_validated(cfg)  # must never import external_refs at all
+    assert "external_repos" not in (loaded.get("lint") or {})
+
+    cfg2 = _write(tmp_path, {"external_repos": {"eda": {"url": "https://x.example/r"}}})
+    with pytest.raises(ImportError):
+        load_config_validated(cfg2)  # DOES import it -- against the broken stand-in

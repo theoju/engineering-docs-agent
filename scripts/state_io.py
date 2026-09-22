@@ -10,7 +10,17 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stderr_emit import _redact_credentials, emit_stderr  # noqa: E402
-from external_refs import ExternalRepoConfigError, resolve_config  # noqa: E402
+
+# external_refs is NOT imported here at module scope (whole-branch review
+# Important 3). It appends scripts/lint to sys.path and imports
+# citation_exists -- a lint module. state_io is the foundational config/state
+# module imported by the orchestrator, verify_runner, setup and most tests,
+# so a module-scope import here would widen that sys.path mutation and that
+# dependency edge onto every host, including the overwhelming majority that
+# declare no lint.external_repos at all. Generic-first applies to the import
+# graph, not only to filesystem I/O (the `if` below already exists for that).
+# Imported lazily inside load_config_validated instead, gated by the SAME
+# `if` that guards the collision-listing I/O.
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
@@ -192,6 +202,8 @@ def load_config_validated(path: Path) -> dict[str, Any]:
     # levels up. An empty host_dirs simply means the collision arm cannot
     # fire; every other arm (both/neither, multi-segment) still does.
     if (raw.get("lint") or {}).get("external_repos"):
+        from external_refs import ExternalRepoConfigError, resolve_config
+
         _repo_root = path.resolve().parent.parent
         _host_dirs = (
             frozenset(p.name for p in _repo_root.iterdir() if p.is_dir())

@@ -144,7 +144,8 @@ def test_a_write_time_failure_leaves_the_page_untouched(tmp_path, monkeypatch):
     `Path.write_text` is monkeypatched to perform the REAL write (so the call
     genuinely happens, exercising "invoked then fails", not "never reached")
     and then raise -- simulating e.g. a disk-full error surfacing right after
-    the bytes are flushed. Because the implementation writes to `page.md.tmp`
+    the bytes are flushed. Because the implementation writes to a `.tmp`
+    sibling (`.page.md.tmp` -- named as a dotfile, whole-branch review Minor)
     and only `os.replace`s it onto `page.md` on success, the real page is
     never touched by this failure at all.
 
@@ -175,7 +176,7 @@ def test_a_write_time_failure_leaves_the_page_untouched(tmp_path, monkeypatch):
     assert page.read_text() == original, (
         "the real page must never be touched by a write-time failure"
     )
-    assert not (tmp_path / "page.md.tmp").exists(), (
+    assert not (tmp_path / ".page.md.tmp").exists(), (
         "the leftover temp file must be cleaned up"
     )
 

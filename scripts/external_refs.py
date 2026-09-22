@@ -151,6 +151,19 @@ def render_external_refs(text: str, repos: dict[str, dict]) -> str:
         quoted_path = urllib.parse.quote(url_path, safe="/")
         return "[`" + basename + "`](" + _blob_url(entry, quoted_path) + ")"
 
+    # NOT IN SCOPE / known divergence (whole-branch review, parked): on an
+    # UNTERMINATED fence, this loop treats every line to EOF as still fenced
+    # (never rewritten, `in_fence` stays True) -- but citation_exists's own
+    # `strip_fenced_blocks` deliberately fails CLOSED on the same input
+    # (CCE-131): it does NOT cut the unterminated region back out, so those
+    # lines are scanned as ordinary prose. A declared-prefix token inside an
+    # unterminated fence is therefore left as its raw, un-rewritten
+    # `prefix/path` form here, while the linter treats that same location as
+    # prose and blocks it as an ordinary nonexistent-path citation. The
+    # disagreement is SAFE in only one direction -- the token survives
+    # unrendered, so the linter still sees and blocks it -- and changing
+    # either side's fence handling to agree is deliberately out of scope
+    # here; see the whole-branch review for the ruling.
     out: list[str] = []
     in_fence = False
     fence = ""

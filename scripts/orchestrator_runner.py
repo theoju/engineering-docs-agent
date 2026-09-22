@@ -1737,8 +1737,13 @@ def _render_external_refs_for_pages(
     `git add -A .` stages whatever is there. `os.replace` is atomic on
     POSIX, so the page is always fully old or fully new; the class of
     mid-write corruption does not exist rather than being merely caught and
-    reported. The temp file is cleaned up on any failure so a stray
-    `*.tmp` next to a docs page is never itself staged.
+    reported. The temp file is cleaned up on any CAUGHT failure, so a stray
+    tmp sibling next to a docs page is never itself staged on that path.
+    Named as a dotfile (`.<name>.tmp`, same directory as the page -- keeping
+    `os.replace` on the same filesystem, which its atomicity requires) so a
+    sibling that DOES survive an uncaught hard kill -- the one case this
+    cleanup cannot reach -- reads as clearly not page content, even though
+    nothing here gitignores it (whole-branch review Minor).
 
     A per-page failure (unreadable/undecodable text, a write error) is caught
     and reported as a BLOCKING, degraded=True reason -- unlike its neighbour
@@ -1791,7 +1796,16 @@ def _render_external_refs_for_pages(
             before = p.read_text()
             after = render_external_refs(before, repos)
             if after != before:
-                tmp = p.with_suffix(p.suffix + ".tmp")
+                # Whole-branch review Minor: named as a DOTFILE, same
+                # directory (preserves os.replace's same-filesystem atomicity
+                # -- a separate scratch dir on another mount could turn this
+                # into a cross-device rename and raise OSError instead of
+                # swapping atomically). This does not by itself keep the
+                # sibling out of `git add -A .` on a hard kill (no plugin
+                # .gitignore pattern matches it); it does make a leftover
+                # visually distinct from real page content on the rare
+                # occasion one survives.
+                tmp = p.with_name("." + p.name + ".tmp")
                 try:
                     tmp.write_text(after)
                     os.replace(tmp, p)

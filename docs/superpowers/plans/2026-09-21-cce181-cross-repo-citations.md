@@ -6,7 +6,7 @@
 
 **Architecture:** A new pure stdlib module `scripts/external_refs.py` parses `lint.external_repos` and performs a deterministic prefix→link substitution on authored page text. The orchestrator calls it after the authoring loop and _before_ `_diagnose_citation_paths`, so the order is render → diagnose → validate. `citation_exists` itself is unchanged: links, URLs and slash-free backticked names already pass its grammar.
 
-**Tech Stack:** Python 3.11/3.12, stdlib only (`re`, `pathlib`), pytest, `jsonschema` (already a dependency, used by `state_io.load_config`).
+**Tech Stack:** Python 3.11/3.12, stdlib only (`re`, `pathlib`), pytest, `jsonschema` (already a dependency, used by `state_io.load_config_validated`).
 
 **Spec:** `docs/superpowers/specs/2026-09-21-cce181-cross-repo-citations-design.md` (commit `0d23142`)
 
@@ -32,7 +32,7 @@
 | `tests/scripts/test_external_refs_config.py`      | **New.** Task 1 — `resolve_config` validation.                                                                   |
 | `tests/scripts/test_external_refs_render.py`      | **New.** Task 2 — `render_external_refs` transform.                                                              |
 | `templates/config.schema.json`                    | **Modify.** Declare `lint.external_repos`.                                                                       |
-| `scripts/state_io.py`                             | **Modify.** Call `resolve_config` from `load_config`, passing host dirs.                                         |
+| `scripts/state_io.py`                             | **Modify.** Call `resolve_config` from `load_config_validated`, passing host dirs.                                         |
 | `tests/scripts/test_state_io_external_repos.py`   | **New.** Task 3 — load-time rejection.                                                                           |
 | `scripts/orchestrator_runner.py`                  | **Modify.** Render pass before the `_diagnose_citation_paths` loop; pass prefixes into the page-author dispatch. |
 | `tests/orchestrator/test_external_refs_wiring.py` | **New.** Tasks 4 and 5 — ordering and payload.                                                                   |
@@ -475,13 +475,13 @@ git commit -m "feat(external-refs): render declared-prefix tokens to links or na
 **Files:**
 
 - Modify: `templates/config.schema.json` — add `external_repos` under `properties.lint.properties`
-- Modify: `scripts/state_io.py` — inside `load_config`, after `_validate_lens_paths_are_editable(raw)`
+- Modify: `scripts/state_io.py` — inside `load_config_validated`, after `_validate_lens_paths_are_editable(raw)`
 - Test: `tests/scripts/test_state_io_external_repos.py`
 
 **Interfaces:**
 
 - Consumes: `resolve_config(config, host_dirs=...)` and `ExternalRepoConfigError` from Task 1.
-- Produces: `load_config` raises `ConfigError` for an invalid `lint.external_repos`.
+- Produces: `load_config_validated` raises `ConfigError` for an invalid `lint.external_repos`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -490,16 +490,16 @@ Create `tests/scripts/test_state_io_external_repos.py`:
 ```python
 """CCE-181: an invalid external_repos declaration must stop the run at load.
 
-The collision guard needs the repo tree. load_config takes only the config
+The collision guard needs the repo tree. load_config_validated takes only the config
 path -- but that path is <repo>/.engineering-docs-agent/config.yml, so the repo
 root is path.parent.parent. Deriving it there keeps the guard at load time, as
-the spec requires, without changing load_config's signature.
+the spec requires, without changing load_config_validated's signature.
 """
 
 import pytest
 import yaml
 
-from scripts.state_io import ConfigError, load_config
+from scripts.state_io import ConfigError, load_config_validated
 
 BASE = {
     "docs": {
@@ -523,7 +523,7 @@ def _write(tmp_path, lint):
 
 def test_a_valid_declaration_loads(tmp_path):
     cfg = _write(tmp_path, {"external_repos": {"eda": {"url": "https://x.example/r"}}})
-    loaded = load_config(cfg)
+    loaded = load_config_validated(cfg)
     assert loaded["lint"]["external_repos"]["eda"]["url"] == "https://x.example/r"
 
 
@@ -533,7 +533,7 @@ def test_both_url_and_private_is_refused_at_load(tmp_path):
         {"external_repos": {"eda": {"url": "https://x.example/r", "private": True}}},
     )
     with pytest.raises(ConfigError):
-        load_config(cfg)
+        load_config_validated(cfg)
 
 
 def test_a_prefix_colliding_with_a_real_repo_directory_is_refused(tmp_path):
@@ -541,7 +541,7 @@ def test_a_prefix_colliding_with_a_real_repo_directory_is_refused(tmp_path):
     would rewrite real local paths into foreign links."""
     cfg = _write(tmp_path, {"external_repos": {"docs": {"url": "https://x.example/r"}}})
     with pytest.raises(ConfigError, match="collides"):
-        load_config(cfg)
+        load_config_validated(cfg)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -577,7 +577,7 @@ In `scripts/state_io.py`, add beside the other module imports at the top:
 from external_refs import ExternalRepoConfigError, resolve_config
 ```
 
-and inside `load_config`, immediately after `_validate_lens_paths_are_editable(raw)`:
+and inside `load_config_validated`, immediately after `_validate_lens_paths_are_editable(raw)`:
 
 ```python
     # CCE-181: the collision guard needs the repo tree. The config always lives

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 import sys
+import urllib.parse
 from pathlib import Path
 
 # Same pattern as scripts/citation_repair.py: append (never insert) the lint
@@ -31,7 +32,11 @@ _LINT_DIR = str(Path(__file__).resolve().parent / "lint")
 if _LINT_DIR not in sys.path:
     sys.path.append(_LINT_DIR)
 
-from citation_exists import _SUFFIX_RE  # noqa: E402
+# _REPO_PATH_RE is imported, not duplicated (round-N review Critical 1): a
+# hand-copied second definition can drift from the linter's without anyone
+# noticing, and the whole point of the gate below is that it match what
+# citation_exists itself would accept. Same precedent as _SUFFIX_RE.
+from citation_exists import _REPO_PATH_RE, _SUFFIX_RE  # noqa: E402
 
 DEFAULT_REF = "main"
 DEFAULT_BLOB_TEMPLATE = "{url}/blob/{ref}/{path}"
@@ -104,6 +109,22 @@ def render_external_refs(text: str, repos: dict[str, dict]) -> str:
 
     def _one(match):
         token = match.group(1).strip()
+        # Review Critical 1: `_INLINE_CODE_RE` matches ANY character but a
+        # backtick, so an LLM-authored token can carry an unbalanced `)`, raw
+        # HTML, or a stray space -- interpolated unvalidated into
+        # ``[`text`](url)`` that is confirmed, by running it, to break out of
+        # the CommonMark link destination and re-emit as live HTML outside
+        # any code span. Gate on the SAME grammar `citation_exists` uses
+        # (`_REPO_PATH_RE`, imported above) before doing anything else with
+        # the token. A non-matching token is returned UNTOUCHED -- it keeps
+        # its `/`, so it still reaches `citation_exists` exactly as an
+        # ordinary undeclared-prefix citation would. Fail closed, same
+        # posture as the rest of this feature. `_REPO_PATH_RE`'s character
+        # class ([\w.\-/] plus the `.ext` and `:suffix` grammar) admits none
+        # of `)`, `<`, `>`, or whitespace, so anything that passes this gate
+        # is inert to interpolate as-is.
+        if not _REPO_PATH_RE.match(token):
+            return match.group(0)
         head, sep, rest = token.partition("/")
         if not sep or not rest:
             return match.group(0)
@@ -117,7 +138,11 @@ def render_external_refs(text: str, repos: dict[str, dict]) -> str:
         # Left in the URL it 404s while PASSING the linter -- a silent dead
         # link. Keep it in the visible text, where it is slash-free and inert.
         url_path = _SUFFIX_RE.sub("", rest)
-        return "[`" + basename + "`](" + _blob_url(entry, url_path) + ")"
+        # Defence in depth (review Critical 1): the grammar gate above already
+        # restricts every character that reaches here, but quoting the URL
+        # path is one line and costs nothing.
+        quoted_path = urllib.parse.quote(url_path, safe="/")
+        return "[`" + basename + "`](" + _blob_url(entry, quoted_path) + ")"
 
     out: list[str] = []
     in_fence = False

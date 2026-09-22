@@ -38,9 +38,9 @@ Voice must match the provided samples.
   "type": "object",
   "required": ["ok"],
   "properties": {
-    "path": { "type": "string" },
-    "action": { "type": "string" },
-    "diff_summary": { "type": "string" },
+    "path": { "type": ["string", "null"] },
+    "action": { "type": ["string", "null"] },
+    "diff_summary": { "type": ["string", "null"] },
     "ok": { "type": "boolean" },
     "error": { "type": ["string", "null"] },
     "evidence": {
@@ -81,6 +81,6 @@ Write/edit the file, then return:
 
 ## Failure handling
 
-If `target_path` resolves outside `agent_editable_paths` (the orchestrator should pre-filter, but verify), return `{ok: false, error: "path_not_agent_editable", path: ...}` and write nothing.
+If `target_path` resolves outside `agent_editable_paths` (the orchestrator should pre-filter, but verify), return `{ok: false, error: "path_not_agent_editable", path: <the target_path you were given>}` and write nothing. If no path applies, send `null` — never omit `ok`, and never invent a path.
 
 If voice samples are empty AND no CLAUDE.md AND no voice file, still produce content but include `notes: "no voice signal"` in the response.

@@ -4,9 +4,9 @@
   "type": "object",
   "required": ["ok"],
   "properties": {
-    "path": { "type": "string" },
-    "action": { "type": "string" },
-    "diff_summary": { "type": "string" },
+    "path": { "type": ["string", "null"] },
+    "action": { "type": ["string", "null"] },
+    "diff_summary": { "type": ["string", "null"] },
     "ok": { "type": "boolean" },
     "error": { "type": ["string", "null"] },
     "evidence": {

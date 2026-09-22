@@ -88,11 +88,18 @@ def resolve_config(
 
 
 def _blob_url(entry: dict, path_in_repo: str) -> str:
-    return (
-        entry["blob_template"]
-        .replace("{url}", entry["url"])
-        .replace("{ref}", entry["ref"])
-        .replace("{path}", path_in_repo)
+    """Fill the blob template in one pass (whole-branch review Minor).
+
+    Chained `.replace()` calls substitute into their OWN prior output: a
+    `{path}` embedded in the configured `url` (`"https://h/{path}"`) got
+    substituted a second time when the `{path}` replacement ran last,
+    producing `https://h/a.md/blob/main/a.md` instead of the intended
+    literal. `str.format_map` substitutes every placeholder against the
+    ORIGINAL template in one pass, so a value that happens to contain
+    another placeholder's spelling is never re-scanned.
+    """
+    return entry["blob_template"].format_map(
+        {"url": entry["url"], "ref": entry["ref"], "path": path_in_repo}
     )
 
 

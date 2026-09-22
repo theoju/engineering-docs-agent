@@ -171,3 +171,17 @@ def test_a_ref_and_template_override_reach_the_url():
     )
     out = render_external_refs("See `gl/a/b.py`.", repos)
     assert "https://gitlab.com/o/r/-/blob/master/a/b.py" in out
+
+
+def test_a_path_shaped_url_is_not_re_substituted():
+    """Whole-branch review Minor: chained `.replace()` scans its OWN output,
+    so a `{path}` embedded inside the configured `url` was substituted AGAIN
+    when the `{path}` replacement ran last. Pre-fix, `url: "https://h/{path}"`
+    plus a citation of `a.md` produced `https://h/a.md/blob/main/a.md` (the
+    URL's own literal `{path}` got the real path substituted into it) instead
+    of the correct `https://h/{path}/blob/main/a.md`."""
+    repos = resolve_config(
+        {"lint": {"external_repos": {"eda": {"url": "https://h/{path}"}}}}
+    )
+    out = render_external_refs("See `eda/a.md`.", repos)
+    assert "https://h/{path}/blob/main/a.md" in out, out

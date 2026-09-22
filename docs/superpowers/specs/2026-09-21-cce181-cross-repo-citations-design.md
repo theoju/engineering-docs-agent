@@ -1,6 +1,6 @@
 # CCE-181 — cross-repo citations: declared external repos, rendered before lint
 
-**Status:** design approved, not yet implemented
+**Status:** implemented — Revision 2 (2026-09-21), see Revision history
 **Date:** 2026-09-21
 **Ticket:** CCE-181
 **Prototype:** `proto/CCE-181-sibling-render` @ `0c1f23b` — `scripts/PROTOTYPE-cce181-sibling-render.html`
@@ -106,7 +106,8 @@ Deterministic prefix substitution. No inference of any kind.
 | `` `ship-skill/spokes/pre-flight.md` ``                       | `private:`  | `` `pre-flight.md` ``                                                              |
 | `` `scripts/foo.py` ``                                        | undeclared  | unchanged → still blocks                                                           |
 
-Three properties are load-bearing and each was verified by running the prototype, not by reading it:
+Five properties are load-bearing and each was verified by running it, not by reading it — 1–3 against the
+prototype, 4–5 against the implementation during review (see Revision history):
 
 1. **Link text must be slash-free.** ``[`scripts/orchestrator_runner.py`](url)`` **still blocks** —
    `extract_citations` scans backticked spans wherever they appear, and markdown link syntax exempts
@@ -115,8 +116,27 @@ Three properties are load-bearing and each was verified by running the prototype
    yields `…/blob/main/scripts/x.py:Klass.method`, a 404 that **passes the linter** — a silent dead link
    nothing downstream can catch. Strip it from the URL with the existing `_SUFFIX_RE`; keep it in the
    visible text, where it is slash-free and therefore inert.
-3. **Fenced blocks are never rewritten.** They are samples, not citations, and `strip_fenced_blocks`
-   already makes them invisible to the linter.
+3. **Fenced blocks are never rewritten.** They are samples, not citations. For a _terminated_ fence the
+   renderer and `strip_fenced_blocks` agree. For an **unterminated** one they deliberately do not: the
+   renderer treats every line to EOF as still fenced and rewrites nothing, while `strip_fenced_blocks`
+   fails closed the other way. The divergence is one-way safe — the renderer only ever declines to
+   rewrite — so a citation after an unterminated fence ships as its raw prefixed token. Parked as Minor
+   rather than reconciled: making the two agree means a second fence parser in the codebase, and the
+   input is malformed markdown the page's own author introduced.
+4. **A token is rendered only if it would have been a citation.** The gate is
+   `citation_exists._REPO_PATH_RE` imported, not copied, plus `_is_placeholder`, plus a lexical rejection
+   of any `..` segment. Anything else is returned untouched. This is not defensive tidying — see Revision
+   history; interpolating an unvalidated agent-authored token into markdown was a live injection vector,
+   and `..` retargeted the rendered link to a different GitHub org.
+5. **A rewrite never crosses a backtick run.** If either delimiter of the matched span abuts another
+   backtick, the token is returned untouched. `_INLINE_CODE_RE` models a code span as exactly one
+   backtick per side; CommonMark does not — a delimiter is a _run_, and an opener pairs with the next run
+   of equal length anywhere in the paragraph. Consuming one backtick per side changes those lengths and
+   re-pairs the paragraph, so content escaped inside a code span before the rewrite can fall out of one
+   after it. Code-span membership is a **per-paragraph** property, not a per-token one: this dissolves the
+   span of a _neighbouring_ token, not the accepted one. A balanced ` ``token`` ` is therefore left alone
+   and reverts to pre-CCE-181 behaviour — `citation_exists` reads the raw prefixed token and blocks,
+   which is the safe direction.
 
 The prefix names the _repo_, so it is stripped from the URL path. Private renders to the backticked
 basename, with no link and the repo never named — matching what host PR #255 did by hand.
@@ -189,14 +209,26 @@ covers every token, and it fails closed — a refused config leaves every page e
 byte-identical. This follows `citation_source_roots` verbatim: "empty by default — a host that declares
 nothing keeps today's exact behavior."
 
+**A render failure is `degraded`, not `blind`.** `_render_external_refs_for_pages` wraps each page and
+records `external_ref_render_failed: <label>` with `degraded=True` (CCE-144). The reasoning that matters
+is the residual, not the common case: when rendering is skipped the token keeps its `/`, so
+`citation_exists` still sees a path citation and still blocks — loud, and self-healing through
+`lint_block` → revert → the batch held out of the CCE-151 cursor. The exception is an `archive-index`
+section, where CCE-124 downgrades `citation_exists` to `warn`: there a swallowed failure ships the raw
+prefixed token as prose with no block at all. That silent case is what the classification actually
+guards, by surfacing the run through the CCE-101 auto-merge gate.
+
 ## Accepted risks
 
-| Risk                             | Behaviour            | Why acceptable                                                                                             |
-| -------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Agent uses an undeclared prefix  | Blocks, as today     | Fails closed                                                                                               |
-| Agent writes a raw URL itself    | Passes, unverified   | A dead link is visible to readers, unlike a wrong code pointer that reads as authoritative                 |
-| Declared `url` or `ref` is wrong | Dead links site-wide | The cost of not putting a network call inside a Tier-1 block rule                                          |
-| `url` added to a private entry   | Publishes the URL    | Requiring _exactly one_ of `url`/`private` makes this an explicit, reviewable edit, never a silent default |
+| Risk                             | Behaviour                     | Why acceptable                                                                                              |
+| -------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Agent uses an undeclared prefix  | Blocks, as today              | Fails closed                                                                                                |
+| Agent writes a raw URL itself    | Passes, unverified            | A dead link is visible to readers, unlike a wrong code pointer that reads as authoritative                  |
+| Declared `url` or `ref` is wrong | Dead links site-wide          | The cost of not putting a network call inside a Tier-1 block rule                                           |
+| `url` added to a private entry   | Publishes the URL             | Requiring _exactly one_ of `url`/`private` makes this an explicit, reviewable edit, never a silent default  |
+| Unterminated fence in a page     | Token ships unrendered        | Renderer only ever declines to rewrite; the input is malformed markdown the page's own author introduced    |
+| Token fails the render gate      | Ships as an escaped code span | Same visible outcome as today, and `citation_exists` still blocks it outside an archive section             |
+| Token wrapped in a backtick run  | Left untouched, then blocks   | Reverts to pre-CCE-181 behaviour rather than publishing a link built on delimiters this module cannot model |
 
 ## Rejected
 
@@ -256,6 +288,39 @@ Running it found the `:symbol` URL defect (item 3 of the test plan), which readi
 Confirmed by running: basename link text passes while full-path link text still blocks; an undeclared
 token is untouched and still blocks; a refused config leaves pages as-is; fenced samples are never
 rewritten; rendering is idempotent; a bare host is a true no-op.
+
+## Revision history
+
+**Revision 2 (2026-09-21) — implementation.** Four corrections the build forced, recorded because each
+contradicts something Revision 1 asserted or assumed.
+
+- **Properties 4 and 5 did not exist in Revision 1.** The whole-branch review found that an unvalidated
+  agent-authored token interpolated into a markdown link escapes its code span: `_INLINE_CODE_RE` matches
+  any character but a backtick, so a token carrying `)` truncates the CommonMark destination and re-emits
+  the remainder as live markup. A scoped re-review then found `..` segments retargeting the link to an
+  arbitrary GitHub org through RFC 3986 dot-segment removal. A convergence check found the third: a
+  rewrite adjacent to a backtick _run_ changes run lengths and re-pairs the paragraph's code spans,
+  dissolving a **neighbouring** token's span — 100 payload-attributable Tier-1 BLOCK→PASS flips, 0 the
+  other way. All three are closed by declining to rewrite.
+- **The through-line is one blind spot, not three bugs.** No task in the plan owned the output format's
+  safety. Six reviews checked the rendered output against the _linter_ and none rendered it through a
+  markdown parser; after that was fixed, the gate checked the _token_ against the linter's grammar and
+  still did not check the _delimiters_. The accept-set being closed was true and insufficient — closure
+  of **what** gets rewritten says nothing about **where the rewrite's boundaries land**.
+- **Revision 1 reasoned about an unrendered token from the prototype's colon separator.** The spec moved
+  the separator to `/` and the consequence was never re-measured: an unrendered token is _visible_ to
+  `citation_exists` and blocks, where the colon form would have been invisible. The classification
+  decision survives unchanged and is better supported — the real residual is the `archive-index` warn
+  downgrade, which nothing in Revision 1 named.
+- **Property 3's claim of agreement with `strip_fenced_blocks` was too strong.** Corrected in place.
+
+Against the CCE-141 precedent, which says three fixes each revealing a new defect in a new place means a
+wrong architecture rather than a failed hypothesis: that rule is a conjunction, and only its second
+conjunct held. Each fix here was structurally _simpler_ than the last and narrowed the accept-set by
+reusing an already-tested predicate, where CCE-141's guards each added a heuristic. The load-bearing
+difference is inference — CCE-141's repair inferred which file a token meant, so every guard had to bound
+an inference over an open population; this infers nothing, because the prefix is an operator-declared
+literal. Every rejected token's output is byte-identical to its input.
 
 ## References
 

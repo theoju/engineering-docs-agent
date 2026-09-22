@@ -76,6 +76,49 @@ def test_a_non_http_url_scheme_is_refused_at_load(tmp_path):
         load_config_validated(cfg)
 
 
+@pytest.mark.parametrize(
+    "template",
+    [
+        "{url.foo}/blob/{ref}/{path}",  # AttributeError -- escaped pre-fix
+        "{url[5]}",  # IndexError     -- escaped pre-fix
+        "{url[a]}",  # TypeError      -- escaped pre-fix
+        "{url}/{repo}/blob/{ref}/{path}",  # KeyError   -- already caught
+        "{url}/blob/{ref}/{path",  # ValueError -- already caught
+    ],
+)
+def test_an_invalid_blob_template_fails_as_a_config_error_not_a_traceback(
+    tmp_path, template
+):
+    """Round-3 review. `resolve_config` validated `blob_template` by
+    formatting it against dummy values and catching `(KeyError, ValueError)`.
+    The format mini-language raises more than that, measured against that
+    exact three-key mapping:
+
+        "{url.foo}" -> AttributeError: 'str' object has no attribute 'foo'
+        "{url[5]}"  -> IndexError: string index out of range
+        "{url[a]}"  -> TypeError: string indices must be integers
+
+    Each escaped `ExternalRepoConfigError`, and `load_config_validated`
+    catches only that -- so the first host to make one of these typos got a
+    raw traceback out of a lint helper instead of the clean
+    "config invalid at $.lint.external_repos:" message every other invalid
+    declaration produces. The two already-caught rows are kept so this pins
+    the WHOLE family at the load boundary rather than only the three that
+    were escaping, which is the shape the fix took: catch anything, because
+    nothing legitimate can raise on that line.
+    """
+    cfg = _write(
+        tmp_path,
+        {
+            "external_repos": {
+                "eda": {"url": "https://x.example/r", "blob_template": template}
+            }
+        },
+    )
+    with pytest.raises(ConfigError, match=r"\$\.lint\.external_repos:"):
+        load_config_validated(cfg)
+
+
 def test_a_prefix_colliding_with_a_real_repo_directory_is_refused(tmp_path):
     """`docs/` exists in the fixture repo, so declaring `docs` as external
     would rewrite real local paths into foreign links."""

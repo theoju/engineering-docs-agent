@@ -89,9 +89,27 @@ def resolve_config(
         # already validates everything else about this declaration at load;
         # formatting against dummy values here catches this the same way,
         # the same principle that justified the `url` schema pattern.
+        #
+        # Round-3 review: catch broadly, not a tuple. `(KeyError, ValueError)`
+        # covered only the two failure modes the round-2 comment above names;
+        # the format mini-language raises more than that, measured against
+        # this exact dummy mapping:
+        #   "{url.foo}"  -> AttributeError: 'str' object has no attribute 'foo'
+        #   "{url[5]}"   -> IndexError: string index out of range
+        #   "{url[a]}"   -> TypeError: string indices must be integers
+        # All three escaped `ExternalRepoConfigError`, and
+        # `state_io.load_config_validated` catches only that -- so the host
+        # got a raw traceback instead of the clean
+        # "config invalid at $.lint.external_repos:" message. The raisable
+        # set here is undocumented and varies by Python version, so
+        # enumerating it is the CCE-141 mistake in miniature: a list
+        # discovered incrementally, one escaped exception per adopting host.
+        # Nothing legitimate can raise in this line -- it formats a str
+        # against a fixed three-key dict of dummy values -- so ANY exception
+        # means exactly one thing: the template is invalid.
         try:
             blob_template.format_map({"url": "u", "ref": "r", "path": "p"})
-        except (KeyError, ValueError) as e:
+        except Exception as e:
             raise ExternalRepoConfigError(
                 f"{prefix}: blob_template is invalid: {e}"
             ) from e

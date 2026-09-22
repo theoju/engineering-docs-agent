@@ -14,6 +14,7 @@ import yaml
 
 from gh_client import GhClient
 from build_poller import resolve_build_trigger
+from external_refs import render_external_refs, resolve_config
 from state_io import (
     ConfigError,
     StateError,
@@ -1706,6 +1707,29 @@ _CITATION_FINDINGS_CAP = 10
 _CITATION_RUN_FINDINGS_CAP = 40
 
 
+def _render_external_refs_for_pages(authored: list[str], config: dict) -> None:
+    """CCE-181: rewrite declared-prefix citations before anything reads them.
+
+    Runs AHEAD of _diagnose_citation_paths so the diagnostic never sees a token
+    that is about to become a link -- otherwise it reports suffix-match noise
+    for a citation that was never shortened.
+
+    Writes only when the text actually changed: an unchanged page must not get
+    a new mtime, or every bare host would show spurious churn.
+    """
+    repos = resolve_config(config)
+    if not repos:
+        return
+    for rel in authored:
+        p = Path(rel)
+        if not p.exists():
+            continue
+        before = p.read_text()
+        after = render_external_refs(before, repos)
+        if after != before:
+            p.write_text(after)
+
+
 def _diagnose_citation_paths(
     path: Path, repo_root: Path, config: dict, state: dict, source_paths: set[str]
 ) -> None:
@@ -2729,6 +2753,11 @@ def run(
         #     nothing to say.
         # Deliberately NOT nested under any agent_fields guard: a shortened
         # citation blocks any page, not only the agent-authored ones.
+        #
+        # CCE-181: render -> diagnose -> validate. Placement is load-bearing;
+        # see the helper's docstring.
+        _render_external_refs_for_pages(authored, config)
+
         for _authored_page in authored:
             _authored_path = Path(_authored_page)
             if not _authored_path.exists():

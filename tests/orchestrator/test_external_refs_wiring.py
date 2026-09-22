@@ -260,3 +260,32 @@ def test_the_production_call_site_renders_before_the_diagnostic(
         rendered
     )
     assert "eda/CLAUDE.md" not in rendered, rendered
+
+
+def test_the_payload_carries_declared_prefixes_only():
+    """An agent that cannot see the declaration cannot use it. Prefixes only --
+    the agent must never construct the URL itself, so it is not given one."""
+    config = {
+        "lint": {
+            "external_repos": {
+                "eda": {"url": "https://x.example/r"},
+                "ship": {"private": True},
+            }
+        }
+    }
+    assert orun._external_repo_prefixes(config) == ["eda", "ship"]
+
+
+def test_a_bare_host_offers_no_prefixes():
+    assert orun._external_repo_prefixes({"lint": {}}) == []
+
+
+def test_the_contract_documents_the_third_escape():
+    """The grounding rule offered only `example/` (fictional) and fenced blocks
+    (dead names). Real-but-elsewhere was the missing third case."""
+    text = (
+        Path(__file__).resolve().parents[2] / "agents" / "page-author.md"
+    ).read_text()
+    assert "declared as external" in text
+    assert "Never construct the URL yourself" in text
+    assert "exists in the HOST repo" in text

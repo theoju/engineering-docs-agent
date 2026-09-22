@@ -1707,6 +1707,16 @@ _CITATION_FINDINGS_CAP = 10
 _CITATION_RUN_FINDINGS_CAP = 40
 
 
+def _external_repo_prefixes(config: dict) -> list[str]:
+    """Declared prefixes for the page-author prompt. PREFIXES ONLY.
+
+    The agent must never build the URL itself -- guessing the default branch or
+    a host's blob grammar produces dead links that pass the linter. It gets the
+    vocabulary; the pipeline owns the address.
+    """
+    return sorted(resolve_config(config))
+
+
 def _render_external_refs_for_pages(
     authored: list[str], repo_root: Path, config: dict, state: dict
 ) -> None:
@@ -2744,6 +2754,7 @@ def run(
                     "voice_samples": voice_samples,
                     "frontmatter_template": fm_template,
                     "source_paths": sorted(grounding),
+                    "external_repos": _external_repo_prefixes(config),
                 },
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,

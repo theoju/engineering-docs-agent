@@ -1707,7 +1707,9 @@ _CITATION_FINDINGS_CAP = 10
 _CITATION_RUN_FINDINGS_CAP = 40
 
 
-def _render_external_refs_for_pages(authored: list[str], config: dict) -> None:
+def _render_external_refs_for_pages(
+    authored: list[str], repo_root: Path, config: dict, state: dict
+) -> None:
     """CCE-181: rewrite declared-prefix citations before anything reads them.
 
     Runs AHEAD of _diagnose_citation_paths so the diagnostic never sees a token
@@ -1716,6 +1718,28 @@ def _render_external_refs_for_pages(authored: list[str], config: dict) -> None:
 
     Writes only when the text actually changed: an unchanged page must not get
     a new mtime, or every bare host would show spurious churn.
+
+    A per-page failure (unreadable/undecodable text, a write error) is caught
+    and reported as a BLOCKING, degraded=True reason -- unlike its neighbour
+    `_diagnose_citation_paths`, which reports its own failures info_only=True.
+    That difference is deliberate, not copied: `_diagnose_citation_paths` is a
+    diagnostic, so losing it only costs an explanation. This function is a
+    TRANSFORM; a swallowed failure here leaves the page's raw `prefix:path`
+    token in place, and that token is invisible to `citation_exists`
+    (`_REPO_PATH_RE`'s character class excludes `:` mid-token) -- nothing
+    downstream would block it, and the page would publish the raw token as
+    prose. `degraded=True` flips `partial`, which the CCE-101 auto-merge gate
+    already treats as ineligible, so a render failure forces human review of
+    the PR instead of shipping silently on an otherwise-clean run.
+
+    The failed page is deliberately LEFT IN `authored` rather than pulled out
+    (round-1 review judgment call): content-validator's own lint pass --
+    with its `lint_block` revert, the mechanism that actually keeps bad
+    content out of the committed diff -- is the real protection here, since
+    `git add -A .` at the end of `run()` stages the whole working tree
+    regardless of list membership. Pulling the page out of `authored` would
+    only remove it from that check, for no compensating benefit: it would
+    still be committed exactly as it sits on disk.
     """
     repos = resolve_config(config)
     if not repos:
@@ -1724,10 +1748,22 @@ def _render_external_refs_for_pages(authored: list[str], config: dict) -> None:
         p = Path(rel)
         if not p.exists():
             continue
-        before = p.read_text()
-        after = render_external_refs(before, repos)
-        if after != before:
-            p.write_text(after)
+        try:
+            label = p.relative_to(repo_root).as_posix()[:_STDERR_TRUNCATE]
+        except ValueError:
+            label = p.name[:_STDERR_TRUNCATE]
+        try:
+            before = p.read_text()
+            after = render_external_refs(before, repos)
+            if after != before:
+                p.write_text(after)
+        except Exception as exc:  # noqa: BLE001 - one bad page must not sink the run
+            add_partial(
+                state,
+                f"external_ref_render_failed: {label}: {type(exc).__name__}: "
+                f"{str(exc)[:_STDERR_TRUNCATE]}",
+                degraded=True,
+            )
 
 
 def _diagnose_citation_paths(
@@ -2756,7 +2792,7 @@ def run(
         #
         # CCE-181: render -> diagnose -> validate. Placement is load-bearing;
         # see the helper's docstring.
-        _render_external_refs_for_pages(authored, config)
+        _render_external_refs_for_pages(authored, repo_root, config, state)
 
         for _authored_page in authored:
             _authored_path = Path(_authored_page)

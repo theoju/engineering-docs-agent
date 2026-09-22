@@ -117,10 +117,32 @@ def test_orchestrator_has_the_expected_call_site_population():
     here rather than merely conservative: the site sits on the path that ENDS a
     stall, and flipping `partial` there costs the CCE-140 cursor-backed
     auto-merge — the merge that promotes state to main and resets the clock. A
-    reason about why the hatch opened must not close the hatch."""
+    reason about why the hatch opened must not close the hatch.
+
+    45 -> 46, CCE-181 round-1 review (Fix 1): `external_ref_render_failed` in
+    the new `_render_external_refs_for_pages`. A per-page read/render/write
+    failure is now caught so one bad page cannot abort the whole run.
+
+    Classification: degraded=True — explicitly NOT info_only, and explicitly
+    NOT left bare (which would default to blind). `_diagnose_citation_paths`
+    right below reports its own failures info_only=True, and this site
+    deliberately does not copy that: that function is a DIAGNOSTIC, so losing
+    it only costs an explanation, while this one is a TRANSFORM, so a
+    swallowed failure would leave the page's raw `prefix:path` token in
+    place — and that token is invisible to `citation_exists` (`_REPO_PATH_RE`
+    excludes `:` mid-token), so nothing downstream would block it from
+    shipping as prose. `degraded=True` flips `partial`, which the CCE-101
+    auto-merge gate already treats as ineligible, so the page's batch is held
+    for human review instead. It is not the blind default either: the run did
+    not consume the page's authored work unprocessed and lose it — the page
+    stays on disk, in `authored`, and reaches content-validator's own
+    `lint_block` revert exactly as before, which is what actually keeps bad
+    content out of the committed diff. That is the same held-back,
+    self-healing shape as `page_author_invalid`, not the blind
+    consumed-and-lost shape."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 45, (
-        f"expected 45 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 46, (
+        f"expected 46 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
     # 42 -> 43: CCE-141 round 5 added `citation_diagnosis_truncated` in

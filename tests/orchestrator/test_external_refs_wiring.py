@@ -24,7 +24,7 @@ def test_the_renderer_runs_before_the_diagnostic(tmp_path, monkeypatch):
 
     monkeypatch.setattr(orun, "_diagnose_citation_paths", _spy)
     config = {"lint": {"external_repos": {"eda": {"url": "https://x.example/r"}}}}
-    orun._render_external_refs_for_pages([str(page)], config)
+    orun._render_external_refs_for_pages([str(page)], tmp_path, config, {})
     orun._diagnose_citation_paths(str(page), tmp_path, config, {}, source_paths=set())
 
     assert seen == ["See [`CLAUDE.md`](https://x.example/r/blob/main/CLAUDE.md)."]
@@ -35,13 +35,88 @@ def test_a_bare_host_leaves_the_file_byte_identical(tmp_path):
     original = "See `eda/CLAUDE.md` and `scripts/x.py`."
     page.write_text(original)
     before = page.stat().st_mtime_ns
-    orun._render_external_refs_for_pages([str(page)], {"lint": {}})
+    orun._render_external_refs_for_pages([str(page)], tmp_path, {"lint": {}}, {})
     assert page.read_text() == original
     assert page.stat().st_mtime_ns == before, "an unchanged page must not be rewritten"
 
 
 def test_a_missing_page_is_skipped_not_raised(tmp_path):
-    orun._render_external_refs_for_pages([str(tmp_path / "gone.md")], {"lint": {}})
+    """Round-1 review fix. The old version passed `{"lint": {}}`, under which
+    `resolve_config` returns `{}` and the function returns at
+    `if not repos: return` BEFORE the loop even starts -- the
+    `if not p.exists(): continue` line this test is named for was never
+    reached, and the test would have passed identically with that guard
+    deleted.
+
+    `external_repos` must be DECLARED so the loop actually runs, and the
+    listed page must actually be missing from disk (an authored path can
+    legitimately point at nothing -- e.g. a page-author create the dry-run
+    synth never wrote -- and that is routine, not a failure).
+
+    Asserting `state == {}` is the real point: a missing page must be a
+    silent skip, not a reason. Removing the `continue` guard no longer makes
+    this raise (round-1's new exception guard around the read/render/write
+    catches the resulting FileNotFoundError) -- it instead makes this
+    assertion fail, because `external_ref_render_failed: ...` gets appended
+    to `state["current_run"]["partial_reasons"]`. Verified: with `continue`
+    removed, this test fails with
+    `AssertionError: {'current_run': {'partial': True, 'partial_reasons':
+    ['external_ref_render_failed: gone.md: FileNotFoundError: ...']}}`.
+    """
+    config = {"lint": {"external_repos": {"eda": {"url": "https://x.example/r"}}}}
+    missing = tmp_path / "gone.md"
+    state: dict = {}
+    orun._render_external_refs_for_pages([str(missing)], tmp_path, config, state)
+    assert state == {}, state
+
+
+def test_a_render_failure_on_one_page_does_not_stop_the_next(tmp_path, monkeypatch):
+    """Round-1 review Fix 1: the new per-page exception guard.
+
+    Two pages; the first raises during render, the second must still be
+    processed -- one bad page must not sink the batch. The failure must be
+    reported as a BLOCKING reason (flips `partial`) with `degraded=True`,
+    never `info_only=True`: an unrendered `prefix:path` token is invisible to
+    `citation_exists`, so a swallowed failure would ship the raw token
+    silently. `degraded=True` (not the bare/blind default) marks this as work
+    the run held back -- the same shape as `page_author_invalid` -- rather
+    than the blind "consumed input it could not process" shape; asserting
+    `"blind" not in cr or cr["blind"] is False` pins that choice.
+    """
+    bad = tmp_path / "bad.md"
+    good = tmp_path / "good.md"
+    bad.write_text("BOOM See `eda/CLAUDE.md` here.")
+    good.write_text("See `eda/CLAUDE.md` here too.")
+
+    real_render = orun.render_external_refs
+
+    def _boom(text, repos):
+        if "BOOM" in text:
+            raise RuntimeError("simulated render failure")
+        return real_render(text, repos)
+
+    monkeypatch.setattr(orun, "render_external_refs", _boom)
+
+    config = {"lint": {"external_repos": {"eda": {"url": "https://x.example/r"}}}}
+    state: dict = {}
+    # bad.md is listed FIRST: proves a failure does not stop the pages after it.
+    orun._render_external_refs_for_pages([str(bad), str(good)], tmp_path, config, state)
+
+    assert (
+        good.read_text()
+        == "See [`CLAUDE.md`](https://x.example/r/blob/main/CLAUDE.md) here too."
+    )
+    assert bad.read_text() == "BOOM See `eda/CLAUDE.md` here.", (
+        "the failed page must be untouched, not half-written"
+    )
+
+    cr = state["current_run"]
+    assert cr["partial"] is True, cr
+    assert "blind" not in cr or cr["blind"] is False, cr
+    assert any(
+        r.startswith("external_ref_render_failed: bad.md: RuntimeError:")
+        for r in cr["partial_reasons"]
+    ), cr["partial_reasons"]
 
 
 # --- the production call site ------------------------------------------------
@@ -50,9 +125,10 @@ def test_a_missing_page_is_skipped_not_raised(tmp_path):
 # `_diagnose_citation_paths` directly, in whatever order the test wrote them
 # in -- it proves the two functions COMPOSE correctly but says nothing about
 # whether `run()` actually calls them in that order. Verified empirically:
-# commenting out the `_render_external_refs_for_pages(authored, config)` call
-# site in `run()` left all three tests above green. The test below is what
-# fails when the call site is removed or moved after the diagnostic.
+# commenting out the `_render_external_refs_for_pages(authored, repo_root,
+# config, state)` call site in `run()` left all three tests above green. The
+# test below is what fails when the call site is removed or moved after the
+# diagnostic.
 
 _SEED_STATE = {"version": "1", "dismissed_gap_flags": {}, "cursors": {}}
 FAKES = Path(__file__).parent / "fakes"
@@ -73,17 +149,22 @@ def test_the_production_call_site_renders_before_the_diagnostic(
     in. If the render call is deleted from `run()`, "render" never appears in
     `order` and the first assertion fails. If it is moved to AFTER the
     `_diagnose_citation_paths` loop, `order.index("render") <
-    order.index("diagnose")` fails. Either mutation also leaves the page
-    carrying the raw `eda/CLAUDE.md` token instead of a rendered link, which
-    the final assertion catches independently of the spies.
+    order.index("diagnose")` fails.
+
+    The final content assertion is an INDEPENDENT check, but only for the
+    deletion case: a deleted call leaves the page carrying the raw
+    `eda/CLAUDE.md` token instead of a rendered link. The reorder-to-after-
+    the-loop mutation still renders the page correctly, just too late, so
+    that content assertion alone would pass under it -- only the
+    `order.index()` assertions above catch the reorder.
     """
     order: list[str] = []
     real_render = orun._render_external_refs_for_pages
     real_diagnose = orun._diagnose_citation_paths
 
-    def _render_spy(authored, config):
+    def _render_spy(authored, repo_root, config, state):
         order.append("render")
-        return real_render(authored, config)
+        return real_render(authored, repo_root, config, state)
 
     def _diagnose_spy(path, repo_root, config, state, source_paths=None):
         order.append("diagnose")

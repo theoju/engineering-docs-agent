@@ -28,6 +28,7 @@ Voice must match the provided samples.
 - `voice_samples`: list of `{path, content}`, read in precedence order and capped at 20KB total — an optional `docs-agent-voice.md` at the host repo root, then each configured `voice.sample_paths` entry, then `CLAUDE.md` if present. A path reached twice is included once.
 - `frontmatter_template`: dict of the frontmatter keys the caller wants written. The required set is generator-aware (see `scripts/frontmatter_contract.py`): the default authoring path uses `status`, `sources`, `synthesized_into`; `agent-authored` (Capability C2 core) pages use `description`, `source_files`, `last_reviewed`, `status`. For an agent-authored create, `description`/`source_files`/`last_reviewed` must be written verbatim (they are lint-guarded and orchestrator-authoritative).
 - `source_paths`: optional list of repo-relative code files the summarized PRs touched. Ground your claims in these files (see Procedure step 3).
+- `external_repos`: list of prefixes the host has declared as external; may be empty, meaning none are declared and no prefix is legal for this dispatch. See Procedure step 3.
 
 ## Output schema (canonical)
 

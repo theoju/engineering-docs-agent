@@ -289,3 +289,17 @@ def test_the_contract_documents_the_third_escape():
     assert "declared as external" in text
     assert "Never construct the URL yourself" in text
     assert "exists in the HOST repo" in text
+
+
+def test_external_repos_is_declared_in_the_inputs_list():
+    """## Inputs is a complete enumeration of the payload keys (CLAUDE.md:
+    each agent's .md file is the canonical input shape) -- an eighth payload
+    key absent from it makes the list wrong, not merely terse. Scoped to the
+    Inputs section specifically: `external_repos` is already mentioned in
+    Procedure step 3's prose, so a bare substring check on the whole file
+    would pass even if the Inputs bullet were deleted."""
+    text = (
+        Path(__file__).resolve().parents[2] / "agents" / "page-author.md"
+    ).read_text()
+    inputs_section = text.split("## Inputs", 1)[1].split("\n## ", 1)[0]
+    assert "- `external_repos`" in inputs_section, inputs_section

@@ -319,6 +319,8 @@ DEFAULT_TIME_BUDGET_SECONDS = 2700
 
 DEFAULT_DEFERRAL_SKIP_THRESHOLD = 3
 
+DEFAULT_WINDOW_PR_CAP = 10
+
 # CCE-152: how far past the soft budget the authoring loop may run in order to
 # finish the PR it is in the middle of. 1.15 puts a 2100s host at ~2415s, which
 # still leaves room for the merge poll (`merge.checks_timeout_seconds`, 900s)
@@ -463,6 +465,29 @@ def resolve_deferral_stall_days(config: dict) -> int:
     val = run_cfg.get("deferral_stall_days")
     if val is None:
         return threshold + 1
+    return int(val)
+
+
+def resolve_window_cap(config: dict) -> int:
+    """Resolve `run.window_pr_cap` (CCE-169). 0 = unlimited.
+
+    The maximum number of merged PRs a single run admits, oldest-first. PRs
+    beyond the cap are held for a later run: they enter `held_back`, so the
+    CCE-151 cursor stops at the cap boundary, but they do NOT accrue deferral
+    counts and are not exposed to the CCE-140 skip hatch, because the run never
+    attempted them.
+
+    Default-ON, unlike `citation_source_roots` and `lint.external_repos`. That
+    is deliberate: every CCE-169 incident happened on a host that had configured
+    nothing, and an opt-in guard against an unrecoverable failure is discovered
+    by having the failure. A cap set too tight is a visible nightly reason an
+    operator raises in one edit; a cap set too loose is a silent stall that cost
+    113 PRs of documentation on ADIS.
+    """
+    run_cfg = _run_cfg(config)
+    val = run_cfg.get("window_pr_cap")
+    if val is None:
+        return DEFAULT_WINDOW_PR_CAP
     return int(val)
 
 

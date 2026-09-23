@@ -888,9 +888,13 @@ def next_deferral_counts(
       an intermittently-slow PR never accumulates toward a skip.
     - not in this window at all → carried forward unchanged. A window can
       shrink transiently when the source-collector degrades, and absence is
-      not evidence a PR was processed. Growth is bounded because a PR leaves
-      the window only once the baseline passes it, which requires it to be in
-      the cursor prefix, which requires it not to be deferred.
+      not evidence a PR was processed. CCE-169: growth used to be justified by
+      "a PR leaves the window only once the baseline passes it, which requires
+      it to be in the cursor prefix, which requires it not to be deferred" —
+      false under a window cap, which removes a PR from the window without the
+      baseline passing it. The BEHAVIOUR is unchanged and still correct (carry
+      forward is exactly right for a PR that was never attempted); growth is now
+      bounded by `run.window_pr_cap` instead.
     """
     out = dict(counts)
     for n in window_pr_numbers:
@@ -2470,6 +2474,37 @@ def run(
             head_sha=head_sha,
             repo_root=repo_root,
         )
+        # CCE-169: bound the window BEFORE admission. The only pre-existing
+        # truncation is the time-based cut inside the admission loop below,
+        # which fires after the run has already begun failing to keep up — so a
+        # stalled baseline widened by a day every night and each run finished a
+        # smaller fraction of it. `window_capped` is a THIRD category, not a
+        # reuse of `admission_deferred`: those two have the same shape and
+        # different causes (`admission_deferred` means the run TRIED and ran out
+        # of time; `window_capped` means the run deliberately DID NOT TRY), and
+        # per CCE-144 classification follows the call site, never the
+        # resemblance. It enters `held_back` so the cursor stops at the cap
+        # boundary, and stays out of `window_prs` and `_deferred_all` so it
+        # accrues no deferral count and the skip hatch cannot abandon it.
+        _window_cap = resolve_window_cap(config)
+        window_capped: list[dict] = []
+        if _window_cap and len(prs) > _window_cap:
+            window_capped = prs[_window_cap:]
+            prs = prs[:_window_cap]
+        if window_capped:
+            # A plain literal, deliberately NOT routed through `_rsn` below:
+            # that helper only discriminates truncated-vs-degraded, so a cap
+            # reason passed through it renders as `time_budget_window_capped` on
+            # a truncated run — factually wrong, since the cap fires before any
+            # clock is consulted. degraded=True (CCE-144): the run HELD BACK
+            # what it did not process; it did not consume and lose it.
+            add_partial(
+                state,
+                f"held_back_window_capped: {len(window_capped)} of "
+                f"{len(prs) + len(window_capped)} PRs held for a later run "
+                f"(cap {_window_cap})",
+                degraded=True,
+            )
         jira_issues = sources.get("jira_issues", []) or []
         jira_lookup = {issue["key"]: issue for issue in jira_issues}
 
@@ -2492,8 +2527,12 @@ def run(
             except (KeyError, OSError):
                 available_sections_by_lens[_ln] = []
         time_truncated = False
-        # CCE-140: the full window, oldest-first, before admission truncation.
-        # Deferral counting is keyed to the window a run actually saw.
+        # CCE-140: the admitted window, oldest-first, before admission
+        # truncation. Deferral counting is keyed to the window a run actually
+        # saw — which since CCE-169 EXCLUDES PRs the cap held back, because
+        # `next_deferral_counts` pops the entry for any in-window PR that is not
+        # still deferred, and a capped PR can never be in that set. Leaving them
+        # here would erase their genuine history every night they wait.
         window_prs = list(prs)
         # PRs the admission gate never reached (oldest-first), and the pages
         # an admitted PR still owes because the authoring loop was cut.
@@ -3303,7 +3342,15 @@ def run(
         # prefix. On a run with no skips `skipped_numbers` is empty and
         # `held_back` is exactly "everything unfinished".
         held_back = (
-            set(deferred_pages_by_pr) | {p.get("number") for p in admission_deferred}
+            set(deferred_pages_by_pr)
+            | {p.get("number") for p in admission_deferred}
+            # CCE-169: capped PRs stop the cursor exactly like unfinished ones.
+            # They cannot intersect `skipped_numbers` — that set comes from
+            # `partition_deferrals(_deferred_all, ...)` and a capped PR is in
+            # neither of `_deferred_all`'s two writers — so the subtraction
+            # below is a no-op for them, which is row 3 of the routing table
+            # holding by construction rather than by a guard.
+            | {p.get("number") for p in window_capped}
         ) - skipped_numbers
         still_deferred = _still_deferred
         if _forgive:
@@ -3333,11 +3380,12 @@ def run(
         # emitted on every run including clean ones, so a future operator can
         # answer "which PR is blocking the cursor?" by reading the log.
         emit_log(
-            "cursor: admitted=[%s] deferred=[%s] held_back=[%s] skipped=[%s] "
-            "baseline_age=%s stall_window=%sd"
+            "cursor: admitted=[%s] deferred=[%s] capped=[%s] held_back=[%s] "
+            "skipped=[%s] baseline_age=%s stall_window=%sd"
             % (
                 ", ".join(str(p.get("number")) for p in prs) or "none",
                 ", ".join(str(p.get("number")) for p in _deferred_all) or "none",
+                ", ".join(str(p.get("number")) for p in window_capped) or "none",
                 ", ".join(str(n) for n in sorted(held_back, key=str)) or "none",
                 ", ".join(str(n) for n in sorted(skipped_numbers, key=str)) or "none",
                 "unknown" if _baseline_age is None else f"{_baseline_age:.1f}d",

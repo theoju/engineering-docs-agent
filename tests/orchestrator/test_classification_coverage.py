@@ -146,10 +146,24 @@ def test_orchestrator_has_the_expected_call_site_population():
     content out of the committed diff on the live-lens path, with
     `degraded=True` covering the archive-index path that revert does not
     reach. That is the same held-back, self-healing shape as
-    `page_author_invalid`, not the blind consumed-and-lost shape."""
+    `page_author_invalid`, not the blind consumed-and-lost shape.
+
+    46 -> 47, CCE-169: `held_back_window_capped` in `run`. Audited
+    degraded=True. The run HELD BACK the PRs beyond the cap — it did not
+    consume and lose them, which is the blind shape. They enter `held_back`, so
+    CCE-151's cursor stops at the cap boundary and their content is documented
+    by a later run; nothing is stranded outside every future window. Explicitly
+    NOT info_only: the reason must flip `partial` so the count is visible in the
+    digest, and it is the run's ONLY signal that any PR was held — on a healthy
+    capped run CCE-151's walk takes its `if ok:` branch, which sets
+    `advance_sha` and `advance_cursor_backed` without calling `add_partial` at
+    all. Also explicitly NOT left bare, which would default to blind and turn
+    every draining nightly red; and NOT added to `_MERGE_VETO_REASON_PREFIXES`,
+    because a capped run is the healthy case and must merge or the cap
+    accomplishes nothing."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 46, (
-        f"expected 46 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 47, (
+        f"expected 47 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
     # 42 -> 43: CCE-141 round 5 added `citation_diagnosis_truncated` in

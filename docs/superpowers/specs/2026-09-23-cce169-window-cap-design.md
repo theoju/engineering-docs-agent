@@ -72,31 +72,54 @@ A PR's page group is already the unit that must complete atomically (CCE-152 cut
 the authoring loop on PR boundaries), so PR count matches the thing that actually
 has to finish.
 
-**Default 10, on by default.** Measured over 90 days on this host: **67 merge
-commits** across 30 active days, median 2/day, max 6 under nightly-aligned day
-bucketing. No day exceeded 10.
+**Default 10, on by default.**
 
-Three corrections to that measurement, because an earlier draft of this spec
-overstated it and the overstatement pointed the wrong way:
+Every figure below is over a **pinned** window, `2026-06-25..2026-09-23` on
+`origin/main`, so it is reproducible rather than drifting with `--since="90 days
+ago"`. An earlier draft quoted a sliding window and the day counts moved between
+readings.
 
-- **The relevant population is 50, not 67.** `pr_branch_filter`
-  (`scripts/orchestrator_runner.py`) excludes 17 of those 67 before the window is
-  built, so the headroom argument must be made on 50. This makes the cap _safer_,
-  not less safe.
-- **p90 is 3, not 5.** Nearest-rank p90 over the 30 buckets is 3 (interpolated
-  3.2); the values 5, 5, 6 sit at ranks 28–30, around p93. The earlier figure
-  overstated routine load, which argues for a _larger_ cap than the evidence
-  supports — so the error was in the unsafe direction for the wrong reason.
-- **"Max 6" depends on a bucketing convention that was never stated.** Under plain
-  UTC calendar days the same data gives 29 active days and **max 8** (2026-08-08
-  carried 8 merges). Both figures are defensible; this spec uses nightly-aligned
-  bucketing, because that is the boundary a nightly run actually sees.
+```bash
+git log origin/main --since=2026-06-25T00:00:00Z --until=2026-09-23T00:00:00Z \
+    --pretty='%cI|%s' | grep -E '\(#[0-9]+\)$'
+```
 
-**The cap will fire on the very first run after this lands** — roughly 20 admitted
-PRs against a cap of 10 — and would have fired on 2 of the 18 historical windows.
-`held_back_window_capped` is therefore the **routine** path during a drain, not an
-exotic branch. Test it as the common case; the sub-cap pass-through is the rarer
-one while a backlog exists.
+**64 merge commits.** `pr_branch_filter` (`scripts/orchestrator_runner.py`,
+`["docs-agent/*"]`; `agents/source-collector.md` documents it as a list of globs to
+**exclude**) drops 17 `docs(agent): run` merges before the window is built, so the
+orchestrator's actual population is **47**. Both are given, because they diverge:
+
+| Population      | Bucketing       | Active days | Median | Max   | p90 (nearest-rank) |
+| --------------- | --------------- | ----------- | ------ | ----- | ------------------ |
+| All 64          | nightly-aligned | 30          | 2      | 6     | 3                  |
+| **Admitted 47** | nightly-aligned | 22          | 2      | **5** | **4**              |
+| All 64          | UTC calendar    | 28          | 1.5    | 8     | 4                  |
+| Admitted 47     | UTC calendar    | 22          | 1.5    | 7     | 4                  |
+
+**The binding claim is the last column of a fifth one that is not in the table: on
+every population × bucketing combination above, `days_over_10` is 0.** That is what
+the default rests on. Three notes on the rest, because an earlier draft of this spec
+got each of them wrong in a way that pointed somewhere:
+
+- **Read the admitted-47 row, not the all-64 one.** The headroom argument has to be
+  made on the population the orchestrator sees. It makes the cap _safer_: peak drops
+  6 → 5.
+- **p90 is 4 on the admitted population — not 5 (the first draft) and not 3 (the
+  first correction).** The 3 is real but belongs to the all-64 row; the first
+  correction switched population for the headline and left p90 behind, which is the
+  same error in the opposite direction. Neither value changes the choice of 10,
+  which rests on the observed maximum and on nothing exceeding the cap, not on p90.
+- **Bucketing is a stated convention, not a fact.** This spec buckets by the 07:07
+  UTC nightly boundary, because that is the boundary a nightly run actually sees.
+  Plain UTC calendar days give a higher peak (8 on all-64, 7 on admitted) and are
+  equally defensible; the choice is declared here so nobody re-derives a different
+  number and assumes one of us is wrong.
+
+**The cap will fire on the very first run after this lands.** The current window is
+22 commits past the baseline: 21 PR merges, 2 of them `docs-agent`, so **19 admitted
+PRs against a cap of 10**. `held_back_window_capped` is therefore the **routine**
+path during a drain, not an exotic branch. Test it as the common case; the sub-cap
+pass-through is the rarer one while a backlog exists.
 
 On-by-default breaks this repo's usual "empty by default keeps today's exact
 behavior" precedent (`citation_source_roots`, `lint.external_repos`), and that is
@@ -119,16 +142,24 @@ run:
 ```
 
 **The schema edit is load-bearing, not bookkeeping.** `templates/config.schema.json`'s
-`run` block is `additionalProperties: false`. Omit this key and a host that writes
-`window_pr_cap: 0` — the advertised opt-out, the entire bare-host degradation story,
-and an operator's only way to disable a cap that is misbehaving — **hard-fails config
-load with exit 2**. It therefore needs its own test (test 7 below), not a passing
-mention.
+`run` block is `additionalProperties: false`. Omit this key and every host that
+**writes** it — at `0` for the advertised opt-out, at any other value to retune the
+cap — **hard-fails config load with exit 2** (`jsonschema.validate` inside
+`load_config_validated`, `scripts/state_io.py`, raising `ConfigError`, which `run`
+turns into `return 2`).
+
+**The bare host is the one case the omission spares, and that is what makes it
+dangerous.** A host that configures nothing writes no `run.window_pr_cap` at all,
+resolves to the default 10 exactly as `resolve_deferral_threshold` resolves an absent
+key, and loads clean. So the gap stays invisible on every unconfigured host and
+surfaces only on the night an operator reaches for the opt-out to disable a cap that
+is misbehaving — the worst possible moment for a config file to stop loading. It
+therefore needs its own test (test 7 below), not a passing mention.
 
 Precedent that this is a live hazard rather than a hypothetical:
 **`run.deferral_stall_days` is already missing from this schema in this tree**, and
 the suite is green because its only test bypasses schema validation. Setting that key
-in a host config today fails the load. Worth its own ticket; noted here because it is
+in a host config today fails the load. Filed as **CCE-184**; noted here because it is
 the same defect this spec is one careless step away from repeating.
 
 `templates/config.schema.json`, under `run`:
@@ -222,30 +253,60 @@ boundary → `advance_cursor_backed=True` → CCE-140's carve-out
 `state.json` is promoted to the default branch → the baseline advances → the next
 run takes the next `cap` PRs.
 
-Against this host's measured 2.2 PRs/day accrual, a cap of 10 drains the current
-22-PR backlog in roughly three nights. That is the property today's mechanism
-lacks: CCE-178's stall escape forgives exactly one PR per stalled night, which
-does not converge against a window that keeps filling.
+A cap of 10 drains the current 19-PR backlog in **two nights** (night 1 admits 10
+and holds 9; night 2 admits the 9 plus whatever accrued). The accrual figure that
+matters is per **calendar** day, because the nightly runs every day whether or not
+anything merged: **0.71/day** across all 64 merges, **0.52/day** across the admitted 47. An earlier draft quoted "2.2 PRs/day," which is the mean over _active_ days — a
+different denominator that overstates accrual roughly 3x. The conclusion is
+unaffected and in fact strengthened: drain rate is `cap - accrual` per night, and
+10 − 0.71 is not meaningfully different from 10 − 2.2 against a backlog of 19.
+
+That is the property today's mechanism lacks: CCE-178's stall escape forgives exactly
+one PR per stalled night, which does not converge against a window that keeps
+filling.
 
 ## Reporting
 
 One reason, `degraded=True`:
 
 ```
-held_back_window_capped: 12 of 22 PRs held for a later run (cap 10)
+held_back_window_capped: 9 of 19 PRs held for a later run (cap 10)
 ```
+
+(19 is the admitted count for the current window — 21 PR merges past the baseline
+less 2 `docs-agent` runs excluded by `pr_branch_filter`. The counts are `held` of
+`admitted`, never of raw commits.)
 
 `degraded`, not `blind`: the run **held back** what it did not process, which is
 CCE-144's definition.
 
 Deliberately **not** the `time_budget_*` family. An earlier draft of this spec
 justified that with three claims that do not survive checking, corrected here so
-nobody acts on them: `test_deferral_skip.py` asserts **no** `time_budget_*` string
-at all; 24 of the 25 assertion sites are Python `in` substring tests rather than
-exact matches, so a prefix-sharing reason would not have broken them; and there is
-no CCE-109/CCE-140 runbook telling operators to grep for those strings. The real
-exact-match assertion lives in `tests/orchestrator/test_authoring_truncation_advance.py`,
-which the earlier draft did not name.
+nobody acts on them: `test_deferral_skip.py` asserts **no** `time_budget_*` reason
+string at all (its only `time_budget` matches are the `time_budget_seconds=` kwarg);
+the assertion sites are overwhelmingly Python `in` substring tests rather than exact
+matches, so a prefix-sharing reason would not have broken them; and **no runbook
+mentions `time_budget` at all** — `grep -rl time_budget docs/runbooks/` returns
+nothing.
+
+**Those three claims are not an artefact of this spec's drafting.** They are the
+comment sitting immediately above `_rsn = "time_budget" if time_truncated else
+"held_back"` in `scripts/orchestrator_runner.py`, and the same sentence is in
+`CLAUDE.md`'s CCE-151 entry, which is where the draft copied it from. **Both must be
+corrected in this change.** Measuring a justification false in a spec while leaving
+it in the code is the same outcome by a shorter route: the next person weighing a
+reason-string rename reads the comment, not this section. This is CCE-127's
+`_TEMPLATE_ONLY_DIVERGENCES` lesson exactly — a written-down justification nobody
+re-examines is worse than none, because it converts an unexamined gap into an
+accepted one.
+
+The strings genuinely must stay byte-identical, for two reasons the false ones
+displaced: `tests/orchestrator/test_time_budget_authoring.py` and
+`test_time_budget.py` pin five distinct `time_budget_exceeded:` prefixes including
+their counts, and the family is quoted verbatim in five **published** pages
+(`docs/site-src/architecture/orchestrator.md`, `whats-new.md`, and three archive
+pages). A rename silently falsifies the published docs — which is a `citation_exists`
+-shaped failure the linter cannot see, because these are prose strings, not paths.
 
 The decision stands on a different and better reason: a `time_budget_*` name would
 be **factually wrong**. The cap is not a budget outcome — it fires before any clock
@@ -267,7 +328,13 @@ bump. Neither is optional, and neither was in the earlier test plan.
 Not in `_MERGE_VETO_REASON_PREFIXES`: a capped run is the healthy case and must
 merge, or the cap accomplishes nothing.
 
-## The docstring this invalidates
+## Stale justifications this change must correct
+
+Two, not one. The second — the `_rsn` comment in `scripts/orchestrator_runner.py`
+and the sentence it was copied from in `CLAUDE.md`'s CCE-151 entry — is under
+**Reporting** above. The first follows.
+
+### The `next_deferral_counts` docstring
 
 `next_deferral_counts` justifies its carry-forward branch with:
 
@@ -296,12 +363,12 @@ physically cannot walk past the cap boundary.
 
 ## Accepted risks
 
-| Risk                                          | Behaviour                                | Why acceptable                                                                  |
-| --------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------- |
-| A host sustainably merges more than `cap`/day | Backlog never drains                     | Emits a `held_back_window_capped` reason every night; loud and trivially raised |
-| Default changes behaviour for existing hosts  | A >10-PR night takes two runs            | Measured: 0 of 30 active days over 90 days exceeded 10 on this host             |
-| A capped PR waits many nights                 | Documented later than it would have been | Its content is never lost; the cursor cannot pass it                            |
-| Cap is set below a single PR's page group     | Run still cannot finish that group       | Out of scope — that is CCE-155 (see Scope)                                      |
+| Risk                                          | Behaviour                                                                       | Why acceptable                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A host sustainably merges more than `cap`/day | Backlog never drains                                                            | Emits a `held_back_window_capped` reason every night; loud and trivially raised                                                                                                                                                                                                                                             |
+| Default changes behaviour for existing hosts  | Fires on the first run here: 19 admitted PRs vs a cap of 10, ~2 nights to drain | The drain is the intended behaviour, not a regression — held PRs enter `held_back`, so the cursor stops at the cap boundary (CCE-151), no content is lost, and every held run says so via `held_back_window_capped`. Once drained the cap stops binding: no day in the pinned 90 exceeded 10 on any population or bucketing |
+| A capped PR waits many nights                 | Documented later than it would have been                                        | Its content is never lost; the cursor cannot pass it                                                                                                                                                                                                                                                                        |
+| Cap is set below a single PR's page group     | Run still cannot finish that group                                              | Out of scope — that is CCE-155 (see Scope)                                                                                                                                                                                                                                                                                  |
 
 ## Rejected
 
@@ -314,7 +381,7 @@ physically cannot walk past the cap boundary.
 - **Off by default (`0`).** Zero regression risk and consistent with
   `citation_source_roots`, but it ships a fix for a bug it then does not fix:
   every incident hit an unconfigured host.
-- **Default 25.** Never fires on a healthy day (max observed 6) — identical to 10
+- **Default 25.** Never fires on a healthy day (max admitted 5) — identical to 10
   there — but admits enough PRs on a stalled host to blow the budget and truncate
   anyway, leaving the cap inert in precisely the case it exists for. It buys the
   regression risk of on-by-default and returns none of the benefit.
@@ -329,10 +396,26 @@ physically cannot walk past the cap boundary.
 
 Red/green on the load-bearing claims, each of which must fail before the change:
 
-1. **A capped run advances to the cap boundary, not to HEAD.** The CCE-151
-   regression guard, and the most important test here: assert the resulting
-   `advance_sha` equals the cap-boundary PR's `merge_sha` and is **not**
-   `head_sha`.
+1. **A capped run advances to the cap boundary, not to HEAD, and says so.** The
+   CCE-151 regression guard, and the most important test here: assert the resulting
+   `advance_sha` equals the cap-boundary PR's `merge_sha` and is **not** `head_sha`.
+
+   **It must also assert the reason is PRESENT**, by list membership on the fully
+   rendered line — token, both counts, and the cap — in the style of
+   `tests/orchestrator/test_authoring_truncation_advance.py`, not the
+   `any("..." in r for r in ...)` substring form, which would accept a line that
+   misreported the counts. Nothing else in this plan distinguishes the right label
+   from a wrong one or from no label at all, and **emitting nothing is the dangerous
+   variant because it passes every other test**: on a healthy capped run CCE-151's
+   walk takes its `if ok:` branch, which sets `advance_sha` and
+   `advance_cursor_backed` without calling `add_partial`, so this site is the run's
+   only signal that any PR was held. Without it the run is not `partial` at all, so
+   test 6's gate (`if partial and not advance_cursor_backed`) holds vacuously,
+   `test_classification_coverage.py` stays green on 46 instead of moving to 47, and
+   the operator gets a green nightly whose baseline stopped short of HEAD with no
+   explanation — the exact outcome the Accepted-risks table assumes away when it
+   calls the cap "loud and trivially raised."
+
 2. **Capped PRs do not accrue deferral counts.** `deferral_counts` for a capped
    PR is byte-identical before and after the run.
 3. **A capped PR already at threshold is not abandoned.** It must not appear in
@@ -341,8 +424,18 @@ Red/green on the load-bearing claims, each of which must fail before the change:
    reasons against a >cap window.
 5. **A sub-cap window is untouched.** No `held_back_window_capped` reason, and
    the advance reaches HEAD exactly as today.
-6. **A capped run still auto-merges.** `_maybe_auto_merge` is reached and does
-   not return `skip("partial_run")`, since it is partial but cursor-backed.
+6. **A capped run still auto-merges.** Assert `pr_merge` appears in the fake `gh`
+   call log. Nothing weaker distinguishes "the gate opened" from "the gate opened and
+   something downstream closed it": `_maybe_auto_merge` returns
+   `skip("merge_vetoed", veto)` and then `skip("blind_run")` **before** it ever
+   reaches `skip("partial_run")`, so "did not return `partial_run`" is equally true
+   of a run vetoed by a `held_back_window_capped` entry mistakenly added to
+   `_MERGE_VETO_REASON_PREFIXES`, and of one misclassified `blind` — neither merges,
+   and both leave the cap inert. Pin the preconditions beside the merge assertion, as
+   `tests/orchestrator/test_cursor_backed_merge.py::test_cursor_backed_partial_run_actually_merges_end_to_end`
+   does: the run is partial, carries `held_back_window_capped`, and is cursor-backed.
+   Otherwise the merge can pass for the wrong reason, since a run that is not partial
+   at all also reaches the merge path under today's rules.
 7. **The key survives schema validation.** A host config carrying
    `run: {window_pr_cap: 0}` loads without raising. This is not ceremony: the
    `run` block is `additionalProperties: false` in `templates/config.schema.json`,
@@ -350,11 +443,28 @@ Red/green on the load-bearing claims, each of which must fail before the change:
    ignored field. Test 4's no-op assertion is unreachable until this passes. Goes
    beside the existing cases in `tests/schemas/test_config_schema.py`; assert on a
    successful load, never on a `ValidationError` count.
+8. **The default is 10.** A direct unit assertion: `resolve_window_cap({}) == 10`
+   **and** `resolve_window_cap({"run": {}}) == 10`, mirroring
+   `test_deferral_skip.py::test_threshold_defaults_to_three` and
+   `test_deferral_stall_escape.py::test_stall_window_defaults_to_threshold_plus_one_day`.
+
+   **Without this test the whole suite is blind to the default value.** The largest
+   window any existing fixture builds is **3 PRs** — every `fake_source_collector.json`
+   in the tree tops out at 3, and each helper that rewrites them
+   (`test_time_budget.py:_write_fakes_with_prs`, `test_deferral_skip.py:_window_prs`,
+   the four-commit helper in `test_cursor_backed_merge.py`) keeps 3. So
+   `len(prs) > cap` is False for any default ≥ 3 and no end-to-end test can observe
+   it: tests 4 and 7 set the key to `0`, test 5 passes under any default including
+   `0`, and tests 1–3 and 6 need a >cap window, which against these fixtures means
+   setting the key explicitly. An implementer who writes
+   `int(run_cfg.get("window_pr_cap") or 0)` — the shape the rejected "off by default"
+   alternative takes — therefore ships that alternative with **every test green**.
 
 Tests 1 and 6 are the pair that prove convergence; either failing means the cap
-is inert or actively harmful. Test 7 is the one that fails first if the schema
-edit is skipped, and it fails in a way that looks like a config typo rather than a
-missing feature — see the Config section.
+is inert or actively harmful. Tests 7 and 8 are the two that fail first if a piece
+of the wiring is skipped, and both fail in ways that do not look like the cap: 7
+looks like a config typo (see the Config section), and 8 does not fail at all
+without being written, because no fixture is large enough to catch it.
 
 ## Scope
 
@@ -366,11 +476,16 @@ window-growth half**:
 - **NOT closed here:** a single PR whose page group cannot finish within the
   budget. ADIS's quoted run authored `3/152` batches and reported
   `time_budget_no_advance_no_cursor` — it could not finish even the first PR's
-  group. When that holds, the cap cannot manufacture a cursor:
-  `advance_cursor_list` breaks at index 0, `cursor is None`, the baseline is
-  unchanged, and the capped PRs' `held_back` membership is never even consulted.
-  Byte-identical outcome, capped or not. That case is **CCE-155** (resumable page
-  groups), still in Backlog.
+  group. When that holds, the cap cannot manufacture a cursor: `advance_cursor_list`
+  breaks at index 0 on the first `held_back` PR, `cursor is None`, and the baseline
+  is unchanged — the capped PRs sit behind that break, so the walk never reaches
+  them. **The _advance_ is what is identical capped or not; the run is not.** It
+  emits an extra `held_back_window_capped` reason, and its shorter `window_prs`
+  writes different `deferral_counts` and `pr_summaries` into `state.json`. Per the
+  correction below it also returns the held PRs' `pr-summarizer` dispatches to the
+  authoring loop, so it may author strictly more of the first group's batches — what
+  it cannot do is _finish_ that group, which is what producing a cursor requires.
+  That case is **CCE-155** (resumable page groups), still in Backlog.
 
 **Correcting an earlier draft:** it justified the above with "a cap of 10 PRs would
 not have changed that by one batch," which is false and misleading in a way that

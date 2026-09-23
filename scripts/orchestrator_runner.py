@@ -3426,9 +3426,21 @@ def run(
             # never truncated reporting `time_budget_no_advance_*` would be a
             # false statement in the operator digest — and the digest is the
             # only place most of these are ever read. The `time_budget_` family
-            # is preserved verbatim on the truncated path: those exact strings
-            # are asserted by test_time_budget.py and test_deferral_skip.py,
-            # and are what the CCE-109/CCE-140 runbooks tell operators to grep.
+            # is preserved verbatim on the truncated path.
+            #
+            # CCE-169 retired the two reasons this comment used to give, both
+            # measurably false: `test_deferral_skip.py` asserts no
+            # `time_budget_*` reason string at all (its only matches are the
+            # `time_budget_seconds=` kwarg), and no runbook mentions
+            # `time_budget` — `grep -rl time_budget docs/runbooks/` is empty.
+            # The real reasons: `test_time_budget.py` and
+            # `test_time_budget_authoring.py` pin five distinct
+            # `time_budget_exceeded:` prefixes including their counts, and the
+            # family is quoted verbatim in five PUBLISHED pages
+            # (docs/site-src/architecture/orchestrator.md, whats-new.md, and
+            # three archive pages). A rename silently falsifies the published
+            # docs, which `citation_exists` cannot catch — these are prose
+            # strings, not paths.
             _rsn = "time_budget" if time_truncated else "held_back"
             _kind = "truncated run" if time_truncated else "degraded run"
             if cursor is None:

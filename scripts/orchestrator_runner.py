@@ -3433,10 +3433,19 @@ def run(
             # `time_budget_*` reason string at all (its only matches are the
             # `time_budget_seconds=` kwarg), and no runbook mentions
             # `time_budget` — `grep -rl time_budget docs/runbooks/` is empty.
-            # The real reasons: `test_time_budget.py` and
-            # `test_time_budget_authoring.py` pin five distinct
-            # `time_budget_exceeded:` prefixes including their counts, and the
-            # family is quoted verbatim in five PUBLISHED pages
+            # The real guard is uneven and spans four files: test_time_budget.py
+            # positively pins all four members (`_exceeded` with counts,
+            # `_advance_out_of_window`, `_no_advance_no_cursor`,
+            # `_no_advance_unanchored_deferred`); test_time_budget_authoring.py
+            # pins `_exceeded` only; test_authoring_truncation_advance.py and
+            # test_pr_boundary_authoring_cut.py add the only further coverage
+            # of the non-`_exceeded` members. Some sites in the first two
+            # files instead assert the string's ABSENCE (`assert not any(...)`
+            # at test_time_budget.py:115,254,565 and
+            # test_time_budget_authoring.py:141) — those pass vacuously after
+            # a rename and guard nothing. test_fact_checker.py:398 supplies
+            # `_exceeded` only as an input fixture, not an assertion. The
+            # family is also quoted verbatim in five PUBLISHED pages
             # (docs/site-src/architecture/orchestrator.md, whats-new.md, and
             # three archive pages). A rename silently falsifies the published
             # docs, which `citation_exists` cannot catch — these are prose

@@ -187,6 +187,22 @@ def test_a_capped_pr_at_threshold_is_not_abandoned(
     Threshold is 3 by default, so a count of 3 is exactly at it. The PR is only
     safe because it never reaches `_deferred_all` -- `partition_deferrals` is
     order-independent and would skip it on sight.
+
+    THE ADVANCE ASSERTION IS THE ONE THAT DISCRIMINATES. The `skipped_prs`
+    assertion below does not, and it is kept only to document intent. Trace the
+    counterfactual where a future change puts capped PRs into `_deferred_all`:
+    `partition_deferrals` skips PR 3, so `skipped_numbers == {3}` and
+    `held_back == ({3}) - {3} == set()` -- the subtraction the cut's comment
+    calls "a no-op for them" stops being one. `time_truncated` is False, so
+    control takes the `else` branch to full window HEAD, and `cursor_prs` is
+    `[1, 2]`, so the `if _skipped_prs:` loop filters PR 3 out on
+    `not in _crossed` and appends NO record and NO `deferral_skip` reason.
+    `merge_skipped_pr_records(state, [])` then returns early and the
+    `skipped_prs` key is never even created. The record assertion passes on an
+    empty list while the baseline sails past PR 3's merge commit and strands it
+    outside every future window, silently, with `rc == 0` -- the exact loss this
+    test is named for. Only the baseline itself distinguishes the two worlds:
+    correct -> `held_back == {3}` -> the walk runs -> c2; broken -> c4.
     """
     state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
         tmp_path,
@@ -198,8 +214,15 @@ def test_a_capped_pr_at_threshold_is_not_abandoned(
     rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
     assert rc == 0
     written = json.loads(state_path.read_text())
+    # Documents intent; does NOT discriminate -- see the docstring. Ordered
+    # first deliberately, so that running this test against the counterfactual
+    # shows it passing while the assertion below fails.
     skipped = written.get("skipped_prs", [])
     assert not [s for s in skipped if "#3" in json.dumps(s)], skipped
+    # The assertion that discriminates.
+    assert written["last_successful_run"]["head_sha"] == c2, written[
+        "last_successful_run"
+    ]
 
 
 def test_window_pr_cap_zero_is_a_true_no_op(

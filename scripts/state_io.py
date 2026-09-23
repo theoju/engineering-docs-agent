@@ -11,6 +11,26 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stderr_emit import _redact_credentials, emit_stderr  # noqa: E402
 
+# external_refs is NOT imported here at module scope (whole-branch review
+# Important 3). It appends scripts/lint to sys.path and imports
+# citation_exists -- a lint module. state_io is the foundational config/state
+# module imported by setup_scaffold, preflight_host, and most tests, so a
+# module-scope import here would widen that sys.path mutation and that
+# dependency edge onto every host, including the overwhelming majority that
+# declare no lint.external_repos at all. Generic-first applies to the import
+# graph, not only to filesystem I/O (the `if` below already exists for that).
+# Imported lazily inside load_config_validated instead, gated by the SAME
+# `if` that guards the collision-listing I/O.
+#
+# NOT verify_runner (round-2 review Minor 2b correction -- an earlier version
+# of this comment named it as spared too): verify_runner.py:11 imports
+# orchestrator_runner at module scope, and orchestrator_runner.py:17 imports
+# external_refs at module scope on its own account (it calls
+# render_external_refs/resolve_config throughout, so that import is
+# legitimate there). verify_runner pays the cost regardless of anything this
+# module does; this fix only removes state_io itself as a SECOND, redundant
+# path to the same cost for callers that don't already have it.
+
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
 
@@ -183,6 +203,26 @@ def load_config_validated(path: Path) -> dict[str, Any]:
     except jsonschema.ValidationError as e:
         raise ConfigError(f"config invalid at {e.json_path}: {e.message}") from e
     _validate_lens_paths_are_editable(raw)
+    # CCE-181: only a host that actually declares lint.external_repos pays for
+    # the collision guard's repo-tree listing. The overwhelming majority of
+    # hosts don't, and must stay byte-identical to pre-CCE-181 behavior -- no
+    # new filesystem access on every config load. The config always lives at
+    # <repo>/.engineering-docs-agent/config.yml, so the repo root is two
+    # levels up. An empty host_dirs simply means the collision arm cannot
+    # fire; every other arm (both/neither, multi-segment) still does.
+    if (raw.get("lint") or {}).get("external_repos"):
+        from external_refs import ExternalRepoConfigError, resolve_config
+
+        _repo_root = path.resolve().parent.parent
+        _host_dirs = (
+            frozenset(p.name for p in _repo_root.iterdir() if p.is_dir())
+            if _repo_root.is_dir()
+            else frozenset()
+        )
+        try:
+            resolve_config(raw, host_dirs=_host_dirs)
+        except ExternalRepoConfigError as e:
+            raise ConfigError(f"config invalid at $.lint.external_repos: {e}") from e
     _validate_site_sections(raw)
     _validate_api_sections(raw)
     return raw

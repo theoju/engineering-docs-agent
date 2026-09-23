@@ -1,0 +1,41 @@
+{
+  "prs": [
+    {
+      "number": 1,
+      "title": "Add foo",
+      "body": "",
+      "merge_sha": "a",
+      "merged_at": "2026-05-19T07:00:00Z",
+      "author": "alice",
+      "files": [{ "path": "x.py", "additions": 50, "deletions": 0 }],
+      "labels": [],
+      "jira_keys": [],
+      "url": "https://github.com/owner/repo/pull/1"
+    },
+    {
+      "number": 2,
+      "title": "Add bar",
+      "body": "",
+      "merge_sha": "b",
+      "merged_at": "2026-05-19T07:00:00Z",
+      "author": "bob",
+      "files": [{ "path": "y.py", "additions": 70, "deletions": 0 }],
+      "labels": [],
+      "jira_keys": [],
+      "url": "https://github.com/owner/repo/pull/2"
+    },
+    {
+      "number": 3,
+      "title": "Add baz",
+      "body": "",
+      "merge_sha": "c",
+      "merged_at": "2026-05-19T07:00:00Z",
+      "author": "carol",
+      "files": [{ "path": "z.py", "additions": 60, "deletions": 0 }],
+      "labels": [],
+      "jira_keys": [],
+      "url": "https://github.com/owner/repo/pull/3"
+    }
+  ],
+  "jira_issues": []
+}

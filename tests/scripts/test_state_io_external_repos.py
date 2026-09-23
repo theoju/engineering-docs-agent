@@ -1,0 +1,191 @@
+"""CCE-181: an invalid external_repos declaration must stop the run at load.
+
+The collision guard needs the repo tree. load_config_validated takes only the config
+path -- but that path is <repo>/.engineering-docs-agent/config.yml, so the repo
+root is path.parent.parent. Deriving it there keeps the guard at load time, as
+the spec requires, without changing load_config_validated's signature.
+"""
+
+import sys
+import types
+from pathlib import Path
+
+import pytest
+import yaml
+
+from scripts.state_io import ConfigError, load_config_validated
+
+# BASE carries the schema-required keys outside of `lint` (docs.whats_new_file,
+# sources, publishing, notifications) so each fixture below exercises only the
+# external_repos validation, never an unrelated "is a required property" error.
+# Same pattern as tests/state_io/test_config_validation_lens_editable.py's
+# _SCHEMA_TAIL.
+BASE = {
+    "docs": {
+        "framework": "mkdocs",
+        "source_dir": "docs",
+        "whats_new_file": "docs/whats-new.md",
+        "agent_editable_paths": ["docs/**"],
+        "lens_paths": {"core": "docs/"},
+    },
+    "sources": {"git": {"host": "github.com"}},
+    "publishing": {
+        "base_url": "https://example.com",
+        "build_workflow": "ci.yml",
+        "url_map_rule": "strip-ext",
+    },
+    "notifications": {},
+}
+
+
+def _write(tmp_path, lint):
+    repo = tmp_path
+    (repo / "docs").mkdir(parents=True, exist_ok=True)
+    cfg_dir = repo / ".engineering-docs-agent"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = cfg_dir / "config.yml"
+    cfg.write_text(yaml.safe_dump({**BASE, "lint": lint}))
+    return cfg
+
+
+def test_a_valid_declaration_loads(tmp_path):
+    cfg = _write(tmp_path, {"external_repos": {"eda": {"url": "https://x.example/r"}}})
+    loaded = load_config_validated(cfg)
+    assert loaded["lint"]["external_repos"]["eda"]["url"] == "https://x.example/r"
+
+
+def test_both_url_and_private_is_refused_at_load(tmp_path):
+    cfg = _write(
+        tmp_path,
+        {"external_repos": {"eda": {"url": "https://x.example/r", "private": True}}},
+    )
+    with pytest.raises(ConfigError):
+        load_config_validated(cfg)
+
+
+def test_a_non_http_url_scheme_is_refused_at_load(tmp_path):
+    """Whole-branch review Minor: `url` is schema-constrained to `^https?://`
+    (templates/config.schema.json), so a scheme typo -- or a non-http(s)
+    scheme such as `javascript:` -- fails at config load rather than
+    downstream. `internal_links.is_external` returns False for a
+    `javascript:` URL, so before this constraint such a declaration would be
+    treated as an internal link, fail to resolve, and block -- a real
+    defence, but failing at load is better, and this pins the earlier gate."""
+    cfg = _write(tmp_path, {"external_repos": {"eda": {"url": "javascript:alert(1)"}}})
+    with pytest.raises(ConfigError):
+        load_config_validated(cfg)
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "{url.foo}/blob/{ref}/{path}",  # AttributeError -- escaped pre-fix
+        "{url[5]}",  # IndexError     -- escaped pre-fix
+        "{url[a]}",  # TypeError      -- escaped pre-fix
+        "{url}/{repo}/blob/{ref}/{path}",  # KeyError   -- already caught
+        "{url}/blob/{ref}/{path",  # ValueError -- already caught
+    ],
+)
+def test_an_invalid_blob_template_fails_as_a_config_error_not_a_traceback(
+    tmp_path, template
+):
+    """Round-3 review. `resolve_config` validated `blob_template` by
+    formatting it against dummy values and catching `(KeyError, ValueError)`.
+    The format mini-language raises more than that, measured against that
+    exact three-key mapping:
+
+        "{url.foo}" -> AttributeError: 'str' object has no attribute 'foo'
+        "{url[5]}"  -> IndexError: string index out of range
+        "{url[a]}"  -> TypeError: string indices must be integers
+
+    Each escaped `ExternalRepoConfigError`, and `load_config_validated`
+    catches only that -- so the first host to make one of these typos got a
+    raw traceback out of a lint helper instead of the clean
+    "config invalid at $.lint.external_repos:" message every other invalid
+    declaration produces. The two already-caught rows are kept so this pins
+    the WHOLE family at the load boundary rather than only the three that
+    were escaping, which is the shape the fix took: catch anything, because
+    nothing legitimate can raise on that line.
+    """
+    cfg = _write(
+        tmp_path,
+        {
+            "external_repos": {
+                "eda": {"url": "https://x.example/r", "blob_template": template}
+            }
+        },
+    )
+    with pytest.raises(ConfigError, match=r"\$\.lint\.external_repos:"):
+        load_config_validated(cfg)
+
+
+def test_a_prefix_colliding_with_a_real_repo_directory_is_refused(tmp_path):
+    """`docs/` exists in the fixture repo, so declaring `docs` as external
+    would rewrite real local paths into foreign links."""
+    cfg = _write(tmp_path, {"external_repos": {"docs": {"url": "https://x.example/r"}}})
+    with pytest.raises(ConfigError, match="collides"):
+        load_config_validated(cfg)
+
+
+def test_absent_external_repos_does_no_filesystem_listing(tmp_path, monkeypatch):
+    """A host that never declares lint.external_repos must not pay for the
+    collision guard's repo-tree listing at all -- not just get a no-op result
+    after listing. Path.iterdir is monkeypatched to blow up; a clean load
+    proves _repo_root.iterdir() was never reached. The block-present case is
+    the contrasting proof: the same monkeypatch surfaces the attempted call,
+    showing the guard's I/O is conditional on the feature being declared,
+    not skipped altogether.
+    """
+
+    def _boom(self):
+        raise OSError("iterdir must not run when lint.external_repos is absent")
+
+    monkeypatch.setattr(Path, "iterdir", _boom)
+
+    cfg = _write(tmp_path, {})
+    loaded = load_config_validated(cfg)
+    assert "external_repos" not in (loaded.get("lint") or {})
+
+    cfg2 = _write(tmp_path, {"external_repos": {"eda": {"url": "https://x.example/r"}}})
+    with pytest.raises(OSError):
+        load_config_validated(cfg2)
+
+
+def test_the_external_refs_import_is_lazy(tmp_path, monkeypatch):
+    """Whole-branch review Important 3: `from external_refs import ...` must
+    not be a module-scope import in state_io.py. state_io is the foundational
+    config/state module imported by the orchestrator, verify_runner, setup
+    and most tests; external_refs pulls in scripts/lint's citation_exists via
+    a sys.path mutation (the exact CCE-122 hazard) as a side effect of import
+    alone, so a module-scope import here would widen both for every host,
+    including the overwhelming majority that declare no external_repos.
+
+    A `sys.modules` presence check cannot discriminate this cleanly: by the
+    time this test runs as part of the full suite, other test modules
+    (test_external_refs_render.py, orchestrator_runner.py's own import) have
+    already imported the real `external_refs`, so `'external_refs' in
+    sys.modules` is True regardless of what state_io.py does -- "already
+    imported by someone" says nothing about "imported by THIS module at
+    THIS time."
+
+    Instead: swap `sys.modules['external_refs']` for a bare, broken stand-in
+    module that defines neither `resolve_config` nor
+    `ExternalRepoConfigError`. Since `from external_refs import X` resolves
+    against whatever is in `sys.modules` (Python never re-executes an already
+    -imported module), any code path that performs that import -- module
+    scope or otherwise -- resolves against the broken stand-in and raises
+    ImportError the moment it runs. A host with NO external_repos declared
+    must load clean without ever touching it; a host WITH it declared must
+    still hit the (now broken) import, proving the import genuinely only
+    happens on that gated path rather than having already run at module load
+    before this monkeypatch was even installed.
+    """
+    monkeypatch.setitem(sys.modules, "external_refs", types.ModuleType("external_refs"))
+
+    cfg = _write(tmp_path, {})
+    loaded = load_config_validated(cfg)  # must never import external_refs at all
+    assert "external_repos" not in (loaded.get("lint") or {})
+
+    cfg2 = _write(tmp_path, {"external_repos": {"eda": {"url": "https://x.example/r"}}})
+    with pytest.raises(ImportError):
+        load_config_validated(cfg2)  # DOES import it -- against the broken stand-in

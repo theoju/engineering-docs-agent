@@ -14,6 +14,7 @@ import yaml
 
 from gh_client import GhClient
 from build_poller import resolve_build_trigger
+from external_refs import render_external_refs, resolve_config
 from state_io import (
     ConfigError,
     StateError,
@@ -1706,6 +1707,123 @@ _CITATION_FINDINGS_CAP = 10
 _CITATION_RUN_FINDINGS_CAP = 40
 
 
+def _external_repo_prefixes(config: dict) -> list[str]:
+    """Declared prefixes for the page-author prompt. PREFIXES ONLY.
+
+    The agent must never build the URL itself -- guessing the default branch or
+    a host's blob grammar produces dead links that pass the linter. It gets the
+    vocabulary; the pipeline owns the address.
+    """
+    return sorted(resolve_config(config))
+
+
+def _render_external_refs_for_pages(
+    authored: list[str], repo_root: Path, config: dict, state: dict
+) -> None:
+    """CCE-181: rewrite declared-prefix citations before anything reads them.
+
+    Runs AHEAD of _diagnose_citation_paths so the diagnostic never sees a token
+    that is about to become a link -- otherwise it reports suffix-match noise
+    for a citation that was never shortened.
+
+    Writes only when the text actually changed: an unchanged page must not get
+    a new mtime, or every bare host would show spurious churn.
+
+    The write is ATOMIC (round-2 review): temp-file + `os.replace`, the same
+    cadence `_BootstrapProgress._write` already uses in this file. Plain
+    `Path.write_text` opens in `'w'` mode, which truncates before writing, so
+    a failure partway through (disk full, permission revoked mid-write) would
+    leave the page on disk as neither the old content nor the new -- and
+    `git add -A .` stages whatever is there. `os.replace` is atomic on
+    POSIX, so the page is always fully old or fully new; the class of
+    mid-write corruption does not exist rather than being merely caught and
+    reported. The temp file is cleaned up on any CAUGHT failure, so a stray
+    tmp sibling next to a docs page is never itself staged on that path.
+    Named as a dotfile (`.<name>.tmp`, same directory as the page -- keeping
+    `os.replace` on the same filesystem, which its atomicity requires) so a
+    sibling that DOES survive an uncaught hard kill -- the one case this
+    cleanup cannot reach -- reads as clearly not page content, even though
+    nothing here gitignores it (whole-branch review Minor).
+
+    A per-page failure (unreadable/undecodable text, a write error) is caught
+    and reported as a BLOCKING, degraded=True reason -- unlike its neighbour
+    `_diagnose_citation_paths`, which reports its own failures info_only=True.
+    That difference is deliberate, not copied: `_diagnose_citation_paths` is a
+    diagnostic, so losing it only costs an explanation. This function is a
+    TRANSFORM; a swallowed failure here leaves the page's raw `prefix/path`
+    token in place. On a LIVE lens that token is visible and correctly BLOCKS
+    -- the token still carries its `/`, `citation_exists` still recognizes it
+    as a path citation, and the page degrades to exactly the pre-CCE-181
+    bug: loud, and self-healing via `lint_block` -> revert -> the batch held
+    out of the CCE-151 cursor. The residual this classification actually
+    guards is `archive-index`: CCE-124 downgrades `citation_exists` to `warn`
+    under an archive section, so a swallowed failure there ships the raw
+    token as prose with NO block at all -- silent. `degraded=True` is what
+    makes that case visible: it flips `partial`, which the CCE-101
+    auto-merge gate already treats as ineligible, so a render failure forces
+    human review of the PR instead of shipping silently on an otherwise-clean
+    run.
+
+    (An earlier draft of this docstring, this function's wiring test, and the
+    classification-coverage audit all justified this with the inverse claim
+    -- that an unrendered token is invisible to `citation_exists` because its
+    grammar excludes a `:` separator. The shipped separator is `/`
+    (`token.partition("/")` above), not `:`; that premise was never true of
+    this code. The classification was right regardless -- degraded=True, not
+    info_only -- for the stronger reason recorded here.)
+
+    The failed page is deliberately LEFT IN `authored` rather than pulled out
+    (round-1 review judgment call): content-validator's own lint pass --
+    with its `lint_block` revert, the mechanism that actually keeps bad
+    content out of the committed diff -- is the real protection here, since
+    `git add -A .` at the end of `run()` stages the whole working tree
+    regardless of list membership. Pulling the page out of `authored` would
+    only remove it from that check, for no compensating benefit: it would
+    still be committed exactly as it sits on disk.
+    """
+    repos = resolve_config(config)
+    if not repos:
+        return
+    for rel in authored:
+        p = Path(rel)
+        if not p.exists():
+            continue
+        try:
+            label = p.relative_to(repo_root).as_posix()[:_STDERR_TRUNCATE]
+        except ValueError:
+            label = p.name[:_STDERR_TRUNCATE]
+        try:
+            before = p.read_text()
+            after = render_external_refs(before, repos)
+            if after != before:
+                # Whole-branch review Minor: named as a DOTFILE, same
+                # directory (preserves os.replace's same-filesystem atomicity
+                # -- a separate scratch dir on another mount could turn this
+                # into a cross-device rename and raise OSError instead of
+                # swapping atomically). This does not by itself keep the
+                # sibling out of `git add -A .` on a hard kill (no plugin
+                # .gitignore pattern matches it); it does make a leftover
+                # visually distinct from real page content on the rare
+                # occasion one survives.
+                tmp = p.with_name("." + p.name + ".tmp")
+                try:
+                    tmp.write_text(after)
+                    os.replace(tmp, p)
+                except Exception:
+                    try:
+                        tmp.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    raise
+        except Exception as exc:  # noqa: BLE001 - one bad page must not sink the run
+            add_partial(
+                state,
+                f"external_ref_render_failed: {label}: {type(exc).__name__}: "
+                f"{str(exc)[:_STDERR_TRUNCATE]}",
+                degraded=True,
+            )
+
+
 def _diagnose_citation_paths(
     path: Path, repo_root: Path, config: dict, state: dict, source_paths: set[str]
 ) -> None:
@@ -2664,6 +2782,7 @@ def run(
                     "voice_samples": voice_samples,
                     "frontmatter_template": fm_template,
                     "source_paths": sorted(grounding),
+                    "external_repos": _external_repo_prefixes(config),
                 },
                 dry_run_dir=dry_run_dir,
                 cwd=repo_root,
@@ -2729,6 +2848,11 @@ def run(
         #     nothing to say.
         # Deliberately NOT nested under any agent_fields guard: a shortened
         # citation blocks any page, not only the agent-authored ones.
+        #
+        # CCE-181: render -> diagnose -> validate. Placement is load-bearing;
+        # see the helper's docstring.
+        _render_external_refs_for_pages(authored, repo_root, config, state)
+
         for _authored_page in authored:
             _authored_path = Path(_authored_page)
             if not _authored_path.exists():

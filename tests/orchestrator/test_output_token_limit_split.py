@@ -79,12 +79,14 @@ class _FakeCompleted:
         self.returncode = returncode
 
 
-def _dispatch(monkeypatch, debug_dir: Path, events: list[dict]) -> tuple:
+def _dispatch(
+    monkeypatch, debug_dir: Path, events: list[dict], returncode: int = 0
+) -> tuple:
     """Run dispatch_subagent against a faked CLI emitting `events`."""
     monkeypatch.setattr(
         orun.subprocess,
         "run",
-        lambda *a, **k: _FakeCompleted(stdout=_ndjson(events)),
+        lambda *a, **k: _FakeCompleted(stdout=_ndjson(events), returncode=returncode),
     )
     monkeypatch.setenv("DOCS_AGENT_DEBUG_DIR", str(debug_dir))
     reasons: list[str] = []
@@ -193,6 +195,43 @@ def test_split_answer_still_leaves_its_forensics_stream_on_disk(tmp_path, monkey
     assert result is None
     stream = next(p for p in tmp_path.iterdir() if p.name.endswith(".stream.jsonl"))
     assert stream.read_text() == _ndjson(events)
+
+
+def test_a_split_answer_that_also_exits_nonzero_still_names_the_cause(
+    tmp_path, monkeypatch
+):
+    """The other half of the placement guard, and the one a mutation survived.
+
+    `test_split_answer_still_leaves_its_forensics_stream_on_disk` pins the
+    refusal ABOVE nothing and BELOW the forensics write. This pins the
+    opposite edge: the refusal must sit ABOVE `if r.returncode != 0: return
+    None`. Moving it below that guard left all 19 tests in this file green,
+    because every one of them faked a returncode of 0.
+
+    What the mutation costs in production: a CLI that both split the answer
+    AND exited non-zero returns `(None, [])`. The source-collector call site's
+    `if not reasons:` fallback then writes `source_collector_invalid: returned
+    None` — the cause-free signature CCE-177 exists to replace. The one
+    diagnosis the event stream actually supports is discarded at the moment it
+    is most needed, because a truncated answer is exactly the kind of run that
+    also ends badly.
+    """
+    result, reasons = _dispatch(
+        monkeypatch,
+        tmp_path,
+        [
+            _assistant('{"prs": [{"number": 221, "url": "https://x/221"}],'),
+            _limit_turn(),
+            _assistant(' "jira_issues": []}'),
+        ],
+        returncode=1,
+    )
+    assert result is None
+    assert reasons == ["output_token_limit_truncated: source-collector"], (
+        "a non-zero exit must not swallow the truncation reason; an empty "
+        "`reasons` sends the call site down its cause-free "
+        "`source_collector_invalid: returned None` fallback"
+    )
 
 
 def test_a_parseable_tail_fragment_is_still_refused(tmp_path, monkeypatch):

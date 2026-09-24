@@ -320,7 +320,7 @@ def test_a_capped_pr_at_threshold_is_not_abandoned(
 
 
 def test_window_pr_cap_zero_is_a_true_no_op(
-    tmp_path, init_host, base_config_yaml, read_current_run
+    tmp_path, init_host, base_config_yaml, capsys
 ):
     """The advertised opt-out. No reason, and the advance reaches the FULL
     WINDOW HEAD exactly as an uncapped run would.
@@ -339,10 +339,11 @@ def test_window_pr_cap_zero_is_a_true_no_op(
     )
     rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
     assert rc == 0
-    cr = read_current_run(state_path)
-    assert not [r for r in cr["partial_reasons"] if "window_capped" in r], cr[
-        "partial_reasons"
-    ]
+    # Asserted POSITIVELY, off the cursor line's own `capped` set. The earlier
+    # form here was `assert not [r for r in partial_reasons if "window_capped"
+    # in r]`, which passes VACUOUSLY the moment `held_back_window_capped` is
+    # renamed -- it guards nothing in exactly the direction a rename breaks.
+    assert _cursor_line(capsys)["capped"] == []
     written = json.loads(state_path.read_text())
     assert written["last_successful_run"]["head_sha"] == _git(
         tmp_path, "rev-parse", "HEAD"
@@ -435,9 +436,7 @@ def test_the_cap_still_holds_back_an_anchored_pr_beside_an_unanchored_one(
     assert c3 in set(_git(tmp_path, "rev-list", f"{advance}..HEAD").split())
 
 
-def test_a_sub_cap_window_is_untouched(
-    tmp_path, init_host, base_config_yaml, read_current_run
-):
+def test_a_sub_cap_window_is_untouched(tmp_path, init_host, base_config_yaml, capsys):
     """Three PRs against a cap of 10 -- `window_capped` stays empty, nothing is
     added to `held_back`, and the code path is today's.
 
@@ -450,10 +449,10 @@ def test_a_sub_cap_window_is_untouched(
     )
     rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
     assert rc == 0
-    cr = read_current_run(state_path)
-    assert not [r for r in cr["partial_reasons"] if "window_capped" in r], cr[
-        "partial_reasons"
-    ]
+    # Asserted POSITIVELY, off the cursor line's own `capped` set -- see the
+    # cap-0 test above for why the `assert not [... "window_capped" in r]`
+    # form this replaces guarded nothing.
+    assert _cursor_line(capsys)["capped"] == []
     written = json.loads(state_path.read_text())
     assert written["last_successful_run"]["head_sha"] == _git(
         tmp_path, "rev-parse", "HEAD"

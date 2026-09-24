@@ -35,15 +35,20 @@ Write failures (unwritable path, missing parent directory) are swallowed silentl
 
 Each bullet identifies the failure stage and a short reason string. Common prefixes and their meaning:
 
-| Prefix | Stage |
-|---|---|
-| `source_collector_error` | Source-collector subagent returned an error field |
-| `pr_summarizer_invalid` | PR-summarizer returned `None` or failed schema validation |
-| `page_author_invalid` | Page-author returned `None` or failed schema validation |
-| `lint_block` | Content-validator blocked a page at `severity: block` |
-| `gap_detector_invalid` | Gap-detector returned `None` |
-| `verify_citations_failed` | Citation-drift stage threw an exception (advisory, run continued) |
-| `source_map_failed` | Source-drift stage threw an exception (advisory, run continued) |
+| Prefix                         | Stage                                                                                                       |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `source_collector_error`       | Source-collector subagent returned an error field                                                           |
+| `pr_summarizer_invalid`        | PR-summarizer returned `None` or failed schema validation                                                   |
+| `page_author_invalid`          | Page-author returned `None` or failed schema validation                                                     |
+| `lint_block`                   | Content-validator blocked a page at `severity: block`                                                       |
+| `gap_detector_invalid`         | Gap-detector returned `None`                                                                                |
+| `verify_citations_failed`      | Citation-drift stage threw an exception (advisory, run continued)                                           |
+| `source_map_failed`            | Source-drift stage threw an exception (advisory, run continued)                                             |
+| `output_token_limit_truncated` | Subagent's answer crossed the CLI output-token ceiling and was refused unparsed (blind at source-collector) |
+
+`output_token_limit_truncated` names a subagent answer the CLI split across two assistant messages after hitting its 64,000-output-token ceiling. Only the second half reaches the orchestrator, so the captured payload is known-incomplete and is refused rather than parsed — a fragment that happened to parse would be accepted as the whole answer and the watermark would advance past changes the run never documented. At the source-collector call site the reason is **blind**: the run exits non-zero and the baseline stays put, so nothing is silently skipped.
+
+**What to do:** re-run the nightly. The trigger is how verbosely the subagent transcribes each `body` and `description`, which varies run to run on identical input, so a re-run usually clears it. If it repeats, the per-field character budget in `agents/source-collector.md` (Steps 3 and 5) is too loose for the window and should be tightened.
 
 For deeper investigation — per-subagent prompt, stdout, stderr, and stream files — use the forensics artifact uploaded by the nightly workflow (see CCE-41). The step summary gives you the reason string; the forensics artifact gives you the full LLM exchange.
 

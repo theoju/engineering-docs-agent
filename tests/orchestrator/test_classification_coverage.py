@@ -160,10 +160,38 @@ def test_orchestrator_has_the_expected_call_site_population():
     all. Also explicitly NOT left bare, which would default to blind and turn
     every draining nightly red; and NOT added to `_MERGE_VETO_REASON_PREFIXES`,
     because a capped run is the healthy case and must merge or the cap
-    accomplishes nothing."""
+    accomplishes nothing.
+
+    47 -> 48, CCE-186: `held_back_no_advance_prefix_blocked` in `run`. Audited
+    degraded=True. This is a SPLIT of an existing site, not new behaviour: the
+    `cursor is None` arm reported one cause for two disjoint conditions, since
+    `_last_processed_merge_sha` returns None both for an empty cursor prefix
+    and for a prefix carrying no merge_sha. Production runs 36000442301 and
+    36007491599 (2026-09-24) therefore emitted "had no admitted PR with a
+    usable merge_sha" while `pr_summaries_reused: 10/10` in the same digest
+    proved the opposite — `cached_pr_summary` returns None unless the sha is
+    present AND matches. The false line cost a full diagnostic cycle and
+    produced a confident, wrong root cause blaming the CCE-169 window cap.
+
+    Classification copies the sibling arm exactly — degraded=True, same
+    `if/elif` chain, same `add_partial` shape — because the split changes only
+    which sentence is written, never whether the run is partial, whether the
+    cursor advances, or whether the merge gate opens. Explicitly NOT
+    info_only: it must keep flipping `partial`, for the same reason
+    `held_back_window_capped` above must. Explicitly NOT bare: the blind
+    default would turn a routine authoring backlog red. Not added to
+    `_MERGE_VETO_REASON_PREFIXES`, since the arm it split off was not there
+    either and the merge decision is unchanged by construction.
+
+    The gate is `_anchored_in_window` rather than `not cursor_prs`, and that
+    ordering is load-bearing: when no PR in the window carries a sha both
+    descriptions are true, and the original message keeps that case because a
+    missing sha is a collection problem while a blocked prefix is an authoring
+    backlog. `test_authoring_truncation_without_cursor_holds_baseline` pins
+    that boundary and passes unchanged."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 47, (
-        f"expected 47 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 48, (
+        f"expected 48 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
     # 42 -> 43: CCE-141 round 5 added `citation_diagnosis_truncated` in

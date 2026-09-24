@@ -198,3 +198,61 @@ def test_degraded_non_truncated_run_must_not_silently_consume_a_pr_invariant(
         "outside every future collection window and its content is "
         "unrecoverable without a hand-written baseline rewind."
     )
+
+
+def test_blocked_cursor_prefix_names_the_blocking_pr_not_a_missing_sha(
+    degraded_run,
+):
+    """CCE-186: the no-advance reason must name the cause that applies.
+
+    `_last_processed_merge_sha` returns None both for an EMPTY cursor prefix
+    and for a prefix whose members carry no merge_sha. A single `cursor is
+    None` arm reported the second for both, so production runs emitted
+    ``no_advance_no_cursor: ... had no admitted PR with a usable merge_sha``
+    while every admitted PR demonstrably had one — `pr_summaries_reused:
+    10/10` in the same digest is the disproof, since `cached_pr_summary`
+    returns None unless the sha is present AND matches.
+
+    Observed on 2026-09-24 runs 36000442301 and 36007491599. The false line
+    cost a full diagnostic cycle and produced a confident, entirely wrong root
+    cause blaming the CCE-169 window cap merged hours earlier.
+
+    This asserts on the NON-TRUNCATED (`held_back_`) branch deliberately.
+    Every pre-existing assertion of this reason family sits on the
+    `time_budget_` branch (test_time_budget.py:334,
+    test_authoring_truncation_advance.py:141,
+    test_pr_boundary_authoring_cut.py:178) — the branch production does NOT
+    take here. Asserting the value on the path production actually takes is
+    the CCE-175 lesson.
+    """
+    d = degraded_run
+    cr = d["current_run"]
+    reasons = cr["partial_reasons"]
+
+    blocked = [r for r in reasons if "_no_advance_prefix_blocked" in r]
+    assert blocked, (
+        "expected a prefix-blocked reason naming the PR that stops the cursor "
+        f"walk; got {reasons}"
+    )
+
+    assert any(r.startswith("held_back_no_advance_prefix_blocked") for r in blocked), (
+        "this run was never time-truncated, so the reason must carry the "
+        f"held_back_ prefix, not time_budget_: {blocked}"
+    )
+
+    assert any("#" in r for r in blocked), (
+        f"the reason must name the blocking PR number: {blocked}"
+    )
+
+    # The falsehood must be gone: this run's prefix is empty because the walk
+    # broke at a held-back PR, NOT because any sha was missing.
+    assert not any("_no_advance_no_cursor" in r for r in reasons), (
+        "a blocked prefix must no longer be reported as a missing merge_sha; "
+        f"reasons={reasons}"
+    )
+
+    # The fix is reporting-only: classification and the held cursor are
+    # unchanged, so CCE-151's contract still holds.
+    assert cr["partial"] is True
+    assert not cr.get("blind"), f"must stay degraded, not blind: {cr}"
+    assert d["state"]["last_successful_run"]["head_sha"] == SEEDED_BASELINE

@@ -3571,7 +3571,56 @@ def run(
             # strings, not paths.
             _rsn = "time_budget" if time_truncated else "held_back"
             _kind = "truncated run" if time_truncated else "degraded run"
-            if cursor is None:
+            _anchored_in_window = [p for p in prs if (p.get("merge_sha") or "").strip()]
+            if cursor is None and _anchored_in_window:
+                # CCE-186: `_last_processed_merge_sha` returns None for an
+                # EMPTY list and for a list whose members carry no sha alike —
+                # one return value, two disjoint causes — and a single arm
+                # here reported the second for both. In production it was
+                # always the first: `advance_cursor_list` breaks at the oldest
+                # held-back PR, so a blocked prefix is empty. The digest then
+                # said "no admitted PR with a usable merge_sha" on runs whose
+                # own `pr_summaries_reused: 10/10` was the disproof —
+                # `cached_pr_summary` returns None unless the sha is present
+                # AND matches, so a cache hit proves the sha is usable.
+                #
+                # That false line cost a full diagnostic cycle on 2026-09-24
+                # and produced a confident, entirely wrong root cause blaming
+                # the CCE-169 window cap merged hours earlier (a no-cap
+                # counterfactual returns the same empty prefix). This is the
+                # `_rsn` split above applied one level down: name the cause
+                # that actually applies.
+                #
+                # No `window_capped` fallback here deliberately: an anchored
+                # capped PR can never be the walk's blocker, because
+                # `window_capped` and the admitted list are disjoint by
+                # construction where the cap is applied.
+                #
+                # Gated on `_anchored_in_window` rather than on `not
+                # cursor_prs`, and that ordering is the whole correctness of
+                # this split. When NO PR in the window carries a merge_sha,
+                # both descriptions are true at once — the prefix is empty AND
+                # nothing could anchor an advance — but they call for
+                # different remediation: a missing sha is a COLLECTION
+                # problem, a blocked prefix is an AUTHORING BACKLOG. The
+                # original message is the right one for the first, so it keeps
+                # that case. `test_authoring_truncation_without_cursor_holds_
+                # baseline` is precisely that scenario and must keep passing
+                # unchanged; gating the other way silently stole it.
+                _blocked = next(
+                    (p.get("number") for p in prs if p.get("number") in held_back),
+                    None,
+                )
+                _owed = ", ".join(deferred_pages_by_pr.get(_blocked, []))
+                add_partial(
+                    state,
+                    f"{_rsn}_no_advance_prefix_blocked: oldest in-window PR "
+                    f"#{_blocked} is held back"
+                    + (f" (owes {_owed})" if _owed else "")
+                    + "; cursor prefix is empty; baseline unchanged",
+                    degraded=True,
+                )
+            elif cursor is None:
                 add_partial(
                     state,
                     f"{_rsn}_no_advance_no_cursor: {_kind} had no "

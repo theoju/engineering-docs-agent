@@ -85,17 +85,65 @@ construction; B is the deterministic backstop that names what happened.
 
 Add an explicit byte budget to `agents/source-collector.md`:
 
-- `prs[].body` — truncate to **2,000 characters**, append `…[truncated]`
-- `jira_issues[].description` — truncate to **2,000 characters**, append `…[truncated]`
+- `prs[].body` — emit **at most 1,000 characters in total**: cut the text at 988
+  and append `…[truncated]` (12 chars), so a cut value is exactly 1,000
+- `jira_issues[].description` — the same 1,000-character total, the same marker
+
+The budget is **inclusive of the marker**, and that is not a detail. An earlier
+draft said "cut at N characters, append `…[truncated]`", which makes a truncated
+value N+12 long, while the Step 6 checklist asked whether the value was "at most
+N characters, with `…[truncated]` appended" — a condition no correctly-truncated
+value can satisfy. Step 6 closes with "If any check fails, return to the missing
+step", so a model treating it as a gate would churn or re-cut. Steps 3, 5 and 6
+now all state the same total.
 
 This is an **instruction**, not a schema constraint. See "Rejected" below.
 
-Budget check with CCE-169's cap live (10 PRs): 10 x 2,000 + ~40 issues x 2,000
-= ~100,000 chars, roughly 25,000 tokens — comfortably under the 64,000 ceiling.
+#### Budget check — the first version of this paragraph was wrong twice
 
-**Residual risk, named:** CCE-169 caps PR count but _not_ Jira issue count, so a
-window with many linked issues remains the widest remaining path to the ceiling.
-B covers it.
+It read: _"Budget check with CCE-169's cap live (10 PRs): 10 x 2,000 + ~40
+issues x 2,000 = ~100,000 chars, roughly 25,000 tokens — comfortably under the
+64,000 ceiling."_ Both premises are false, and both errors bias the estimate the
+same way — too low — which is how a 2,000-char cap came to look comfortable.
+
+**(a) CCE-169's window cap does not bound what the agent emits.**
+`resolve_window_cap` (`scripts/orchestrator_runner.py:resolve_window_cap`) runs
+in `run` _after_ the `dispatch_validated`
+(`scripts/orchestrator_runner.py:dispatch_validated`) call that collects the
+sources. It discards PRs the agent has **already paid the output tokens to
+emit** — it trims the orchestrator's work list, never the agent's answer.
+Nothing bounds the PR count on the way in: `sc_inputs` carries no cap, and
+`agents/source-collector.md` states no PR-count bound. The worst case to budget
+against is therefore the real observed window — **20 PRs / 38 Jira issues**, the
+09-23 run — not 10.
+
+**(b) The chars-per-token rate is ~2.5, not ~4.** The three production cut
+points measure the ceiling directly rather than assuming it: the pre-resume half
+was 161,217 / 164,105 / 159,475 characters. So 64,000 output tokens is roughly
+**160,000 characters** of this payload shape, not the ~256,000 a
+4-chars-per-token rule of thumb implies. JSON-escaped prose is denser than
+English.
+
+**Corrected arithmetic.** Replaying the recovered 09-23 payload (20 PRs / 38
+issues, 247,174 chars uncapped) through each cap:
+
+| Cap                             | Payload    | Share of the measured ~160,000-char ceiling |
+| ------------------------------- | ---------- | ------------------------------------------- |
+| **1,000 chars total** (shipped) | **80,249** | **~50%**                                    |
+| 2,000 chars + marker (rejected) | 137,628    | ~86%                                        |
+
+The 2,000-char cap is recorded here deliberately: at 86% of the ceiling it left
+almost no headroom on a window that had already crossed it once, which is why it
+was lowered to 1,000 rather than kept.
+
+**Residual risk, named:** the cap bounds each value, not how many there are, and
+`jira_issues` is the unbounded dimension — CCE-169 caps PR count (too late to
+matter, per (a)), but nothing caps linked-issue count at any point. In the
+capped 09-23 replay the 38 issues account for 46,097 of the 80,249 chars against
+the 20 PRs' 34,126, so the unbounded dimension is already the larger one, and a
+window with several times that many linked issues would reach the ceiling on
+issue count alone. That is the widest remaining path, and B is what covers
+it.
 
 ### B — Detect the split; refuse the fragment
 
@@ -153,6 +201,54 @@ reports it where the stream is captured.
 
 Determining bare-host behaviour is follow-up work, not a blocker: B is strictly
 additive where it applies, and A covers both paths.
+
+#### Known limitation — B's reason does not say WHICH item hit the ceiling
+
+Surfaced in review, tracked rather than fixed here.
+
+`source-collector` is dispatched once per run, so its reason needs no item
+identity. The other three call sites — `pr-summarizer`, `page-author`,
+`gap-detector` — dispatch inside a loop, and each is shaped:
+
+```python
+_record_dispatch_reasons(state, reasons, ok=out is not None, degraded=True)
+if out is None:
+    if not reasons:
+        add_partial(state, f"page_author_invalid: {rel}", degraded=True)
+```
+
+The per-item identity — `pr=221`, the page path, `pr_id=...` — exists **only**
+in that `if not reasons:` fallback. It is the branch for a dispatch that failed
+without explaining itself, so the reason it writes has to supply the identity
+itself.
+
+B breaks that in two steps. `output_token_limit_truncated: <name>` makes
+`reasons` non-empty, so the fallback no longer fires and the identity-bearing
+string is never built. And `<name>` is the agent name — a constant per call site
+— so every item that hits the ceiling produces the same string, and `add_partial`
+is idempotent by design ("a reason already present is not appended again"). Ten
+pages truncated in one run collapse to a single digest line.
+
+The cost is real and it is a regression in triage signal: an operator reading
+the step summary learns that page-author hit the ceiling, but not on which page,
+nor how many. Nothing in the run record distinguishes one occurrence from ten.
+The per-call stderr emit does not rescue it either — `add_partial` writes a line
+on every call, but they are the same constant line, so the job log gains
+repetition without identity.
+
+This does not affect the failures that motivated CCE-177 (all three were
+source-collector, dispatched once) and it does not weaken the refusal: the work
+is still held back, still classified, still visible. It degrades diagnosis, not
+safety. That is why it is not being fixed inside this change — but it should not
+stand.
+
+**TODO:** open a follow-up ticket to carry the item identity into the reason at
+the three looping call sites, so `output_token_limit_truncated` is
+per-item-qualified the way `page_author_invalid: <rel>` already is. The fix is
+not simply moving the fallback: the reason is built in `dispatch_subagent`,
+which does not know the loop variable, so either the call sites qualify the
+reasons they receive before recording them, or the loop context is threaded into
+the dispatch. Choosing between those is the follow-up's first question.
 
 ### C — Remove the competing cause for B's signature
 
@@ -222,8 +318,12 @@ monkeypatched, per repo convention.
 
 Regression fixtures are synthetic and small. The production payloads that prove the
 root cause live in the per-run forensics artifacts and **expire 14 days after each
-run — 09-18's on ~2026-10-02**; a trimmed evidence record (the synthetic-turn
-events plus per-run sizes, not the 250KB payloads) is captured alongside this spec.
+run — 09-18's on ~2026-10-02**; the trimmed evidence record taken while they were
+still downloadable is committed at
+`docs/superpowers/specs/2026-09-23-cce177-evidence.md` — per-run event counts and
+sizes, the verbatim synthetic turn, the three cut points, the verbosity
+comparison, and the reassembly results, but none of the 160–250KB payloads
+themselves. After the expiry date that file is the only surviving record.
 
 ## Verification after merge
 
@@ -232,7 +332,8 @@ The failure is stochastic, so a single green nightly proves nothing. Watch for:
 - absence of `prose_contamination_rescued: source-collector` (the misleading pair)
 - if the ceiling is crossed anyway, `output_token_limit_truncated: source-collector`
   appears instead — that is B working, not a regression
-- `jira_issues[].description` values capped at 2,000 chars with the marker
+- `jira_issues[].description` and `prs[].body` values no longer than 1,000 chars
+  in total, a cut one ending in `…[truncated]`
 
 ## References
 

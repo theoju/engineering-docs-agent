@@ -397,4 +397,4 @@ object — no prose, no markdown fences, no commentary.
 
 - On Git API rate-limit, retry up to 3× with exponential backoff (2s, 4s, 8s); if still failing, return `{ "prs": [...partial...], "jira_issues": [...], "error": "git_rate_limit", "partial": true }`.
 - On Jira API failure for one issue, omit that issue and add a `partial: true` flag with `error: "jira_partial: <key>"`.
-- On unrecoverable Git failure, return `{ "error": "git_unrecoverable: <reason>" }` and exit.
+- On unrecoverable Git failure, return `{"prs": [], "jira_issues": [], "partial": true, "error": "git_unrecoverable: <reason>"}` and exit. Both arrays are `required`; an `error`-only object fails schema validation and the orchestrator cannot tell it apart from a truncated payload.

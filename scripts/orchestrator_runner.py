@@ -319,6 +319,8 @@ DEFAULT_TIME_BUDGET_SECONDS = 2700
 
 DEFAULT_DEFERRAL_SKIP_THRESHOLD = 3
 
+DEFAULT_WINDOW_PR_CAP = 10
+
 # CCE-152: how far past the soft budget the authoring loop may run in order to
 # finish the PR it is in the middle of. 1.15 puts a 2100s host at ~2415s, which
 # still leaves room for the merge poll (`merge.checks_timeout_seconds`, 900s)
@@ -463,6 +465,29 @@ def resolve_deferral_stall_days(config: dict) -> int:
     val = run_cfg.get("deferral_stall_days")
     if val is None:
         return threshold + 1
+    return int(val)
+
+
+def resolve_window_cap(config: dict) -> int:
+    """Resolve `run.window_pr_cap` (CCE-169). 0 = unlimited.
+
+    The maximum number of merged PRs a single run admits, oldest-first. PRs
+    beyond the cap are held for a later run: they enter `held_back`, so the
+    CCE-151 cursor stops at the cap boundary, but they do NOT accrue deferral
+    counts and are not exposed to the CCE-140 skip hatch, because the run never
+    attempted them.
+
+    Default-ON, unlike `citation_source_roots` and `lint.external_repos`. That
+    is deliberate: every CCE-169 incident happened on a host that had configured
+    nothing, and an opt-in guard against an unrecoverable failure is discovered
+    by having the failure. A cap set too tight is a visible nightly reason an
+    operator raises in one edit; a cap set too loose is a silent stall that cost
+    113 PRs of documentation on ADIS.
+    """
+    run_cfg = _run_cfg(config)
+    val = run_cfg.get("window_pr_cap")
+    if val is None:
+        return DEFAULT_WINDOW_PR_CAP
     return int(val)
 
 
@@ -863,9 +888,13 @@ def next_deferral_counts(
       an intermittently-slow PR never accumulates toward a skip.
     - not in this window at all → carried forward unchanged. A window can
       shrink transiently when the source-collector degrades, and absence is
-      not evidence a PR was processed. Growth is bounded because a PR leaves
-      the window only once the baseline passes it, which requires it to be in
-      the cursor prefix, which requires it not to be deferred.
+      not evidence a PR was processed. CCE-169: growth used to be justified by
+      "a PR leaves the window only once the baseline passes it, which requires
+      it to be in the cursor prefix, which requires it not to be deferred" —
+      false under a window cap, which removes a PR from the window without the
+      baseline passing it. The BEHAVIOUR is unchanged and still correct (carry
+      forward is exactly right for a PR that was never attempted); growth is now
+      bounded by `run.window_pr_cap` instead.
     """
     out = dict(counts)
     for n in window_pr_numbers:
@@ -2445,6 +2474,54 @@ def run(
             head_sha=head_sha,
             repo_root=repo_root,
         )
+        # CCE-169: bound the window BEFORE admission. The only pre-existing
+        # truncation is the time-based cut inside the admission loop below,
+        # which fires after the run has already begun failing to keep up — so a
+        # stalled baseline widened by a day every night and each run finished a
+        # smaller fraction of it. `window_capped` is a THIRD category, not a
+        # reuse of `admission_deferred`: those two have the same shape and
+        # different causes (`admission_deferred` means the run TRIED and ran out
+        # of time; `window_capped` means the run deliberately DID NOT TRY), and
+        # per CCE-144 classification follows the call site, never the
+        # resemblance. It enters `held_back` so the cursor stops at the cap
+        # boundary, and stays out of `window_prs` and `_deferred_all` so it
+        # accrues no deferral count and the skip hatch cannot abandon it.
+        _window_cap = resolve_window_cap(config)
+        window_capped: list[dict] = []
+        # `> 0`, not truthiness: a negative cap is truthy and would INVERT the
+        # slices, capping the NEWEST PR. Defence-in-depth only — no host can
+        # reach here with one, because `templates/config.schema.json` sets
+        # `minimum: 0` and `run()` loads through `load_config_validated`, which
+        # exits 2 first. It guards direct callers of the raw dict, tests among
+        # them, since `resolve_window_cap` ends in a bare `int(val)`.
+        if _window_cap > 0 and len(prs) > _window_cap:
+            _tail = prs[_window_cap:]
+            # The cap may only hold back a PR a LATER WINDOW CAN RE-ANCHOR. A
+            # PR with no merge_sha cannot be: it is held out of the cursor but
+            # reaches neither writer of `_deferred_all`, so the
+            # `_no_advance_unanchored_deferred` guard below never sees it and
+            # the baseline advances past its real merge commit, outside every
+            # future window. `_order_prs_oldest_first` keys such a PR last, so
+            # it is always in this tail — admit it instead, at a work bound of
+            # `cap + unanchored` rather than exactly `cap`.
+            window_capped = [p for p in _tail if (p.get("merge_sha") or "").strip()]
+            prs = prs[:_window_cap] + [
+                p for p in _tail if not (p.get("merge_sha") or "").strip()
+            ]
+        if window_capped:
+            # A plain literal, deliberately NOT routed through `_rsn` below:
+            # that helper only discriminates truncated-vs-degraded, so a cap
+            # reason passed through it renders as `time_budget_window_capped` on
+            # a truncated run — factually wrong, since the cap fires before any
+            # clock is consulted. degraded=True (CCE-144): the run HELD BACK
+            # what it did not process; it did not consume and lose it.
+            add_partial(
+                state,
+                f"held_back_window_capped: {len(window_capped)} of "
+                f"{len(prs) + len(window_capped)} PRs held for a later run "
+                f"(cap {_window_cap})",
+                degraded=True,
+            )
         jira_issues = sources.get("jira_issues", []) or []
         jira_lookup = {issue["key"]: issue for issue in jira_issues}
 
@@ -2467,8 +2544,12 @@ def run(
             except (KeyError, OSError):
                 available_sections_by_lens[_ln] = []
         time_truncated = False
-        # CCE-140: the full window, oldest-first, before admission truncation.
-        # Deferral counting is keyed to the window a run actually saw.
+        # CCE-140: the admitted window, oldest-first, before admission
+        # truncation. Deferral counting is keyed to the window a run actually
+        # saw — which since CCE-169 EXCLUDES PRs the cap held back, because
+        # `next_deferral_counts` pops the entry for any in-window PR that is not
+        # still deferred, and a capped PR can never be in that set. Leaving them
+        # here would erase their genuine history every night they wait.
         window_prs = list(prs)
         # PRs the admission gate never reached (oldest-first), and the pages
         # an admitted PR still owes because the authoring loop was cut.
@@ -3278,7 +3359,15 @@ def run(
         # prefix. On a run with no skips `skipped_numbers` is empty and
         # `held_back` is exactly "everything unfinished".
         held_back = (
-            set(deferred_pages_by_pr) | {p.get("number") for p in admission_deferred}
+            set(deferred_pages_by_pr)
+            | {p.get("number") for p in admission_deferred}
+            # CCE-169: capped PRs stop the cursor exactly like unfinished ones.
+            # They cannot intersect `skipped_numbers` — that set comes from
+            # `partition_deferrals(_deferred_all, ...)` and a capped PR is in
+            # neither of `_deferred_all`'s two writers — so the subtraction
+            # below is a no-op for them, which is row 3 of the routing table
+            # holding by construction rather than by a guard.
+            | {p.get("number") for p in window_capped}
         ) - skipped_numbers
         still_deferred = _still_deferred
         if _forgive:
@@ -3308,11 +3397,12 @@ def run(
         # emitted on every run including clean ones, so a future operator can
         # answer "which PR is blocking the cursor?" by reading the log.
         emit_log(
-            "cursor: admitted=[%s] deferred=[%s] held_back=[%s] skipped=[%s] "
-            "baseline_age=%s stall_window=%sd"
+            "cursor: admitted=[%s] deferred=[%s] capped=[%s] held_back=[%s] "
+            "skipped=[%s] baseline_age=%s stall_window=%sd"
             % (
                 ", ".join(str(p.get("number")) for p in prs) or "none",
                 ", ".join(str(p.get("number")) for p in _deferred_all) or "none",
+                ", ".join(str(p.get("number")) for p in window_capped) or "none",
                 ", ".join(str(n) for n in sorted(held_back, key=str)) or "none",
                 ", ".join(str(n) for n in sorted(skipped_numbers, key=str)) or "none",
                 "unknown" if _baseline_age is None else f"{_baseline_age:.1f}d",
@@ -3346,9 +3436,30 @@ def run(
             # never truncated reporting `time_budget_no_advance_*` would be a
             # false statement in the operator digest — and the digest is the
             # only place most of these are ever read. The `time_budget_` family
-            # is preserved verbatim on the truncated path: those exact strings
-            # are asserted by test_time_budget.py and test_deferral_skip.py,
-            # and are what the CCE-109/CCE-140 runbooks tell operators to grep.
+            # is preserved verbatim on the truncated path.
+            #
+            # CCE-169 retired the two reasons this comment used to give, both
+            # measurably false: `test_deferral_skip.py` asserts no
+            # `time_budget_*` reason string at all (its only matches are the
+            # `time_budget_seconds=` kwarg), and no runbook mentions
+            # `time_budget` — `grep -rl time_budget docs/runbooks/` is empty.
+            # The real guard is uneven and spans four files: test_time_budget.py
+            # positively pins all four members (`_exceeded` with counts,
+            # `_advance_out_of_window`, `_no_advance_no_cursor`,
+            # `_no_advance_unanchored_deferred`); test_time_budget_authoring.py
+            # pins `_exceeded` only; test_authoring_truncation_advance.py and
+            # test_pr_boundary_authoring_cut.py add the only further coverage
+            # of the non-`_exceeded` members. Some sites in the first two
+            # files instead assert the string's ABSENCE (`assert not any(...)`
+            # at test_time_budget.py:115,254,565 and
+            # test_time_budget_authoring.py:141) — those pass vacuously after
+            # a rename and guard nothing. test_fact_checker.py:398 supplies
+            # `_exceeded` only as an input fixture, not an assertion. The
+            # family is also quoted verbatim in five PUBLISHED pages
+            # (docs/site-src/architecture/orchestrator.md, whats-new.md, and
+            # three archive pages). A rename silently falsifies the published
+            # docs, which `citation_exists` cannot catch — these are prose
+            # strings, not paths.
             _rsn = "time_budget" if time_truncated else "held_back"
             _kind = "truncated run" if time_truncated else "degraded run"
             if cursor is None:

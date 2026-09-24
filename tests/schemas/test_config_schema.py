@@ -489,3 +489,23 @@ def test_deferral_skip_threshold_rejects_a_negative():
     cfg["run"] = {"deferral_skip_threshold": -1}
     with pytest.raises(ValidationError):
         validate(cfg, SCHEMA)
+
+
+def test_run_window_pr_cap_accepted():
+    """CCE-169. `run` is additionalProperties: false, so a key missing from the
+    schema is a hard load failure with exit 2, not an ignored field — and the
+    bare host is the one case that omission spares, which is what would keep the
+    gap invisible until the night an operator reaches for the opt-out.
+
+    Assert on a SUCCESSFUL load. A test that counts ValidationErrors passes
+    whether or not the property exists.
+    """
+    run = SCHEMA["properties"]["run"]
+    validate({"window_pr_cap": 10}, run)
+    validate({"window_pr_cap": 0}, run)
+
+
+def test_run_window_pr_cap_rejects_negative():
+    run = SCHEMA["properties"]["run"]
+    with pytest.raises(ValidationError):
+        validate({"window_pr_cap": -1}, run)

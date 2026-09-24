@@ -245,6 +245,82 @@ def _extract_final_assistant_text(events: list[dict]) -> str:
     )
 
 
+# CCE-177: the Claude CLI's resume marker. When a response crosses the
+# maxOutputTokens ceiling mid-answer the CLI injects a synthetic user turn
+# whose text opens with this phrase ("Output token limit hit. Resume
+# directly — no apology, no recap...") and the model finishes in a SECOND
+# assistant message. Matched as a case-insensitive prefix on the stripped
+# text so a wording change after the first clause does not blind the check.
+_OUTPUT_TOKEN_LIMIT_PREFIX = "output token limit hit"
+
+
+def _message_text(ev: dict) -> str:
+    """Concatenate the text of a stream event's message content.
+
+    ``content`` is normally a list of blocks; a plain string is tolerated
+    because the CLI has emitted both shapes for synthetic turns.
+    """
+    content = ev.get("message", {}).get("content", [])
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    return "".join(
+        b.get("text", "")
+        for b in content
+        if isinstance(b, dict) and b.get("type") == "text"
+    )
+
+
+def _has_text_block(ev: dict) -> bool:
+    """True when the event's message carries at least one text block.
+
+    Mirrors the predicate ``_extract_final_assistant_text`` uses to pick the
+    turn it returns, so "how many turns could have been the answer" is
+    counted the same way the answer is chosen.
+    """
+    content = ev.get("message", {}).get("content", [])
+    if isinstance(content, str):
+        return bool(content)
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(b, dict) and b.get("type") == "text" for b in content)
+
+
+def _detect_output_token_limit_split(events: list[dict]) -> bool:
+    """True when the stream shows an answer split by the output-token
+    ceiling (CCE-177).
+
+    Both conditions are required:
+
+    1. A synthetic ``user`` turn whose text starts with "Output token limit
+       hit" — the CLI's own resume prompt, never something the agent wrote.
+    2. MORE THAN ONE assistant turn carrying text. A single assistant
+       message whose text is split across several blocks around a
+       ``tool_use`` is the normal CCE-14 interleaved shape and must not trip
+       this; ``_extract_final_assistant_text`` already concatenates it.
+
+    Callers refuse the payload rather than parsing it. The tail is
+    known-incomplete, and a tail that happens to parse would be accepted as
+    the whole answer — advancing the watermark past PRs the run never
+    documented (the CCE-151 class).
+    """
+    saw_marker = False
+    assistants_with_text = 0
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        kind = ev.get("type")
+        if kind == "assistant":
+            if _has_text_block(ev):
+                assistants_with_text += 1
+        elif kind == "user" and ev.get("isSynthetic"):
+            text = _message_text(ev).strip().lower()
+            if text.startswith(_OUTPUT_TOKEN_LIMIT_PREFIX):
+                saw_marker = True
+    return saw_marker and assistants_with_text > 1
+
+
 def _summarize_tool_use(events: list[dict]) -> dict:
     """Walk a stream-json event list and produce a tool-use summary.
 
@@ -1279,6 +1355,7 @@ def dispatch_subagent(
     # the raw stdout.
     raw_stdout = r.stdout or ""
     tool_use_summary: dict | None = None
+    output_token_limit_split = False
     if debug_dir:
         events: list[dict] = []
         for line in raw_stdout.splitlines():
@@ -1292,6 +1369,7 @@ def dispatch_subagent(
                 continue
         canonical_text = _extract_final_assistant_text(events)
         tool_use_summary = _summarize_tool_use(events)
+        output_token_limit_split = _detect_output_token_limit_split(events)
     else:
         canonical_text = raw_stdout
 
@@ -1314,6 +1392,25 @@ def dispatch_subagent(
         if tool_use_summary is not None:
             meta_payload["tool_use"] = tool_use_summary
         base.with_suffix(".meta.json").write_text(json.dumps(meta_payload, indent=2))
+
+    # CCE-177: the answer crossed the CLI's output-token ceiling and finished
+    # in a second assistant turn, so `canonical_text` is only the tail half.
+    # Refuse it — do not parse, do not rescue. Placement is deliberate:
+    #   - AFTER the forensics block, so the run that most needs diagnosing
+    #     still leaves its .stream.jsonl on disk;
+    #   - BEFORE the parse, so a tail fragment that happens to be valid JSON
+    #     is never accepted as the whole answer (it would advance the
+    #     watermark past PRs the run never documented — the CCE-151 class);
+    #   - AHEAD of the returncode and empty-text guards, which return None
+    #     with no reason at all and would discard the one diagnosis the
+    #     event stream actually supports.
+    # No new classification code: the reason rides out_reasons ->
+    # dispatch_reasons -> _record_dispatch_reasons, inheriting each call
+    # site's CCE-144 classification (blind for source-collector).
+    if output_token_limit_split:
+        if out_reasons is not None:
+            out_reasons.append(f"output_token_limit_truncated: {name}")
+        return None
 
     if r.returncode != 0:
         return None

@@ -291,9 +291,18 @@ matches any `pr_branch_filter` glob.
 
 ### Step 3 (REQUIRED if Step 1 returned ≥1 PR) — Pull per-PR metadata
 
-For each remaining PR: pull `title`, `body`, `files` (truncate to 200 entries),
-`labels`, `merge_commit_sha`, `merged_at`, `author.login`, `html_url`. Use
-`gh api repos/<owner>/<name>/pulls/<number>` or `gh pr view <number> --json ...`.
+For each remaining PR: pull `title`, `body` (bounded to 1,000 characters),
+`files` (truncate to 200 entries), `labels`, `merge_commit_sha`, `merged_at`,
+`author.login`, `html_url`. Use `gh api repos/<owner>/<name>/pulls/<number>` or
+`gh pr view <number> --json ...`.
+
+**The `body` you emit must be at most 1,000 characters in total**, counting the
+truncation marker. When `body` is longer than that, cut the text at 988
+characters and append `…[truncated]` (12 characters), so the emitted value is
+exactly 1,000 characters. When it already fits, emit it unchanged and add no
+marker. The budget is not cosmetic: an over-long payload gets truncated
+mid-object by your own output ceiling, the orchestrator parses a fragment, and
+the entire run is lost. A bounded `body` is worth more than a complete one.
 
 If Step 1 returned 0 PRs, skip to Step 6 and emit `{"prs": [], "jira_issues": []}`.
 
@@ -352,7 +361,14 @@ on, rather than parsing Jira's deliberately-ambiguous "Issue does not exist
 or you do not have permission to see it" body as if it were valid data.
 
 Extract `summary`, `description`, `status.name`, and `labels` from each
-response and append to `jira_issues`. If a specific key 401s, 403s, or
+response and append to `jira_issues`. **The `description` you emit must be at
+most 1,000 characters in total**, counting the truncation marker: when it is
+longer, cut the text at 988 characters and append `…[truncated]` (12
+characters) so the emitted value is exactly 1,000 characters; when it already
+fits, emit it unchanged and add no marker. Same budget and same reason as Step
+3's `body`: an over-long payload gets truncated mid-object by your output
+ceiling and the run is lost. A long `description` is the cut point
+observed on every failure to date. If a specific key 401s, 403s, or
 404s, OMIT it from `jira_issues` (do NOT append a placeholder); other keys
 still succeed.
 
@@ -374,6 +390,13 @@ Before emitting, verify:
 - **For each PR you are about to return**: is its `merge_sha` in the output
   of `git rev-list last_sha..head_sha` from Step 1.5? Emitting a PR whose
   merge_sha is outside that range is a §7 contract violation.
+- **For every `prs[].body` and every `jira_issues[].description`**: is the
+  emitted value at most 1,000 characters in total? A value you cut ends in
+  `…[truncated]` and is exactly 1,000 characters (988 of text plus the
+  12-character marker); a value that already fitted is unchanged and carries no
+  marker. The marker counts toward the 1,000 — a cut value is never longer than
+  an uncut one. An unbounded payload gets truncated mid-object by your output
+  ceiling and the run is lost.
 
 If any check fails, return to the missing step or add the missing fields.
 Otherwise emit the final JSON per the Output schema. Return ONLY the JSON
@@ -383,4 +406,4 @@ object — no prose, no markdown fences, no commentary.
 
 - On Git API rate-limit, retry up to 3× with exponential backoff (2s, 4s, 8s); if still failing, return `{ "prs": [...partial...], "jira_issues": [...], "error": "git_rate_limit", "partial": true }`.
 - On Jira API failure for one issue, omit that issue and add a `partial: true` flag with `error: "jira_partial: <key>"`.
-- On unrecoverable Git failure, return `{ "error": "git_unrecoverable: <reason>" }` and exit.
+- On unrecoverable Git failure, return `{"prs": [], "jira_issues": [], "partial": true, "error": "git_unrecoverable: <reason>"}` and exit. Both arrays are `required`; an `error`-only object fails schema validation and the orchestrator cannot tell it apart from a truncated payload.

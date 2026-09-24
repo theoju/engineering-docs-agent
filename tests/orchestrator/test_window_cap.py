@@ -11,6 +11,7 @@ cap boundary (second half, added in Task 2).
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -77,10 +78,51 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def _seed_capped_host(tmp_path, init_host, base_config_yaml, *, cap, state_extra=None):
+_CURSOR_FIELDS = ("admitted", "deferred", "capped", "held_back", "skipped")
+
+
+def _cursor_line(capsys) -> dict[str, list[str]]:
+    """Parse the run's `cursor:` line into its five PR-number lists.
+
+    THE ONLY SIGNAL IN THE RUN THAT OBSERVES ADMISSION. Every other assertion
+    in this file measures downstream bookkeeping -- watermark sha, reason
+    literal, deferral counts, `pr_merge` -- and all of it is produced from
+    `window_capped`, which a post-admission cap populates identically to a
+    pre-admission one. Delete `prs = prs[:_window_cap]` while leaving
+    `window_capped` and the reason's saved pre-cut total intact and this whole
+    file stays green while `pr-summarizer` is dispatched for every PR in the
+    window: the run does all N PRs' work every night, which is the unbounded
+    work CCE-169 exists to stop.
+
+    Parsed rather than asserted as a substring so a test names the set it
+    expects, not a rendering of it.
+    """
+    err = capsys.readouterr().err
+    lines = [ln for ln in err.splitlines() if ln.startswith("cursor: admitted=[")]
+    assert lines, f"no `cursor:` line was emitted; stderr tail={err[-2000:]!r}"
+    line = lines[-1]
+    out: dict[str, list[str]] = {}
+    for field in _CURSOR_FIELDS:
+        m = re.search(rf"\b{field}=\[([^\]]*)\]", line)
+        assert m, f"`{field}=[...]` missing from cursor line: {line!r}"
+        body = m.group(1).strip()
+        out[field] = [] if body == "none" else [t.strip() for t in body.split(",")]
+    return out
+
+
+def _seed_capped_host(
+    tmp_path, init_host, base_config_yaml, *, cap, state_extra=None, unanchored=()
+):
     """Real git window of three PR merges plus a trailing non-PR commit.
 
     Returns (state_path, base, [c1, c2, c3], fakes).
+
+    `unanchored` is a set of PR numbers whose `merge_sha` key is REMOVED from
+    the source-collector payload after the shas are assigned -- the PR still
+    merged at its commit, the collector just did not report where.
+    `merge_sha` is not in `required` in `agents/schemas/source_collector.schema.json`,
+    and `_clip_prs_to_window` deliberately KEEPS such a PR, so this is a shape
+    production can hand the cut.
 
     c4 exists so the newest PR merge is never HEAD: without it `advance == c2`
     and `advance != head` stop being independent statements. Copied from
@@ -117,6 +159,9 @@ def _seed_capped_host(tmp_path, init_host, base_config_yaml, *, cap, state_extra
     sc = json.loads((FAKES_MULTI / "fake_source_collector.json").read_text())
     for pr, sha in zip(sc["prs"], shas[:3]):
         pr["merge_sha"] = sha
+    for pr in sc["prs"]:
+        if pr["number"] in set(unanchored):
+            pr.pop("merge_sha", None)
     (fakes / "fake_source_collector.json").write_text(json.dumps(sc))
     return state_path, base, shas[:3], fakes
 
@@ -259,6 +304,89 @@ def test_window_pr_cap_zero_is_a_true_no_op(
     assert written["last_successful_run"]["head_sha"] != c2, (
         "cap 0 must not stop at the cap-2 boundary"
     )
+
+
+# ---------------------------------------------------------------------------
+# the cap must only hold back PRs a later window can re-anchor
+# ---------------------------------------------------------------------------
+
+
+def test_an_unanchored_pr_is_never_capped(
+    tmp_path, init_host, base_config_yaml, capsys
+):
+    """A capped PR with no merge_sha is stranded permanently -- a REGRESSION
+    CCE-169 introduces, and the coupling is structural, not coincidental.
+
+    `_order_prs_oldest_first` keys a PR with a missing merge_sha as
+    `big = len(order) + 1`, so it sorts LAST; the cap takes the TAIL. Whenever
+    the cap fires, an unanchored PR is GUARANTEED to be in the capped slice.
+
+    From there it enters `held_back` but NEITHER writer of `_deferred_all`, so
+    it is absent from `still_deferred` and the
+    `..._no_advance_unanchored_deferred` guard -- whose entire purpose is to
+    refuse advancing past a PR that cannot be re-anchored -- never sees it. The
+    cursor walk covers only admitted PRs, yields a valid cursor,
+    `advance_cursor_backed=True`, and the baseline advances past the unanchored
+    PR's REAL merge commit. The next window is `cursor..HEAD`, so that PR is
+    never returned again: permanently undocumented, rc 0, and the run
+    auto-merges.
+
+    Pre-CCE-169 there was no such path. Uncapped, the PR was admitted and
+    documented; time-truncated, it entered `admission_deferred` ->
+    `still_deferred` and the guard froze the baseline.
+
+    Here PR 2 truly merged at c2 and is returned without a merge_sha, so the
+    window order is [1, 3, 2] and cap 2 puts it in the capped tail.
+    """
+    state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
+        tmp_path, init_host, base_config_yaml, cap=2, unanchored={2}
+    )
+    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0
+    cur = _cursor_line(capsys)
+    written = json.loads(state_path.read_text())
+    advance = written["last_successful_run"]["head_sha"]
+    next_window = set(_git(tmp_path, "rev-list", f"{advance}..HEAD").split())
+    # THE INVARIANT, stated as the harm rather than as the mechanism: a PR the
+    # run did not admit must still be inside the window the NEXT run reads.
+    assert "2" in cur["admitted"] or c2 in next_window, (
+        f"PR 2 merged at {c2[:8]} and was neither admitted nor left in the next "
+        f"window ({advance[:8]}..HEAD): it is outside every future window and "
+        f"is permanently undocumented. admitted={cur['admitted']} "
+        f"capped={cur['capped']} held_back={cur['held_back']}"
+    )
+    # And the mechanism, so a future reader sees WHICH of the two arms holds.
+    assert cur["capped"] == [], cur
+
+
+def test_the_cap_still_holds_back_an_anchored_pr_beside_an_unanchored_one(
+    tmp_path, init_host, base_config_yaml, read_current_run, capsys
+):
+    """The exemption is for unanchored PRs only, not a disabled cap.
+
+    Cap 1 against window order [1, 3, 2] puts BOTH 3 (anchored, at c3) and 2
+    (unanchored) in the capped tail. Only 2 is pulled back; 3 stays capped, so
+    the reason still fires and the cursor still stops at the cap boundary --
+    here c1, the newest admitted PR that carries a merge_sha, since
+    `_last_processed_merge_sha` scans from the end past PR 2.
+    """
+    state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
+        tmp_path, init_host, base_config_yaml, cap=1, unanchored={2}
+    )
+    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0
+    cur = _cursor_line(capsys)
+    assert sorted(cur["admitted"]) == ["1", "2"], cur
+    assert cur["capped"] == ["3"], cur
+    cr = read_current_run(state_path)
+    assert (
+        "held_back_window_capped: 1 of 3 PRs held for a later run (cap 1)"
+        in cr["partial_reasons"]
+    ), cr["partial_reasons"]
+    written = json.loads(state_path.read_text())
+    advance = written["last_successful_run"]["head_sha"]
+    assert advance == c1, written["last_successful_run"]
+    assert c3 in set(_git(tmp_path, "rev-list", f"{advance}..HEAD").split())
 
 
 def test_a_sub_cap_window_is_untouched(

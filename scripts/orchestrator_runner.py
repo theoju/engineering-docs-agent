@@ -2496,8 +2496,19 @@ def run(
         # is a quiet one on the wrong end of the window. `> 0` makes a negative
         # cap behave as the documented unlimited opt-out, exactly like 0.
         if _window_cap > 0 and len(prs) > _window_cap:
-            window_capped = prs[_window_cap:]
-            prs = prs[:_window_cap]
+            _tail = prs[_window_cap:]
+            # The cap may only hold back a PR a LATER WINDOW CAN RE-ANCHOR. A
+            # PR with no merge_sha cannot be: it is held out of the cursor but
+            # reaches neither writer of `_deferred_all`, so the
+            # `_no_advance_unanchored_deferred` guard below never sees it and
+            # the baseline advances past its real merge commit, outside every
+            # future window. `_order_prs_oldest_first` keys such a PR last, so
+            # it is always in this tail — admit it instead, at a work bound of
+            # `cap + unanchored` rather than exactly `cap`.
+            window_capped = [p for p in _tail if (p.get("merge_sha") or "").strip()]
+            prs = prs[:_window_cap] + [
+                p for p in _tail if not (p.get("merge_sha") or "").strip()
+            ]
         if window_capped:
             # A plain literal, deliberately NOT routed through `_rsn` below:
             # that helper only discriminates truncated-vs-degraded, so a cap

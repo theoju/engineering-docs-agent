@@ -278,10 +278,22 @@ def _has_text_block(ev: dict) -> bool:
     Mirrors the predicate ``_extract_final_assistant_text`` uses to pick the
     turn it returns, so "how many turns could have been the answer" is
     counted the same way the answer is chosen.
+
+    That mirroring is exact, and deliberately so. There is no ``str`` arm
+    here even though ``_message_text`` has one: the extractor's predicate is
+    a bare ``any(isinstance(b, dict) ...)`` over ``content``, which for a
+    plain string iterates *characters* and is therefore always False. An arm
+    returning ``bool(content)`` for a string would over-count turns the
+    extractor can never pick, and over-counting is the harmful direction —
+    it pushes ``_detect_output_token_limit_split`` toward firing, and a
+    wrong refusal is a blind run (CCE-144), the exact harm CCE-177 exists to
+    prevent. The ``isinstance(content, list)`` guard below is the opposite
+    kind of check: it is defensive, not permissive. It returns False for
+    shapes the extractor cannot even iterate (``None``, scalars) and so
+    raises ``TypeError`` on — it never turns one of the extractor's Trues
+    into a False.
     """
     content = ev.get("message", {}).get("content", [])
-    if isinstance(content, str):
-        return bool(content)
     if not isinstance(content, list):
         return False
     return any(isinstance(b, dict) and b.get("type") == "text" for b in content)

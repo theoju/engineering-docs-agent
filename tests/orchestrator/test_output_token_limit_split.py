@@ -21,6 +21,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
@@ -347,3 +349,86 @@ def test_a_truncated_source_collector_run_exits_1_and_freezes_the_watermark(
     assert "output_token_limit_truncated: source-collector" in cr["blind_reasons"], cr
     written = json.loads(state_path.read_text())
     assert written["last_successful_run"]["head_sha"] == base, written
+
+
+# --------------------------------------------------------------------------
+# `_has_text_block` mirrors `_extract_final_assistant_text` exactly
+# --------------------------------------------------------------------------
+#
+# `_has_text_block`'s docstring claims it mirrors the predicate the extractor
+# uses to pick the turn it returns. That claim was false: it carried an
+# `isinstance(content, str) -> bool(content)` arm and the extractor has none,
+# so a plain-string `content` counted as a candidate turn the extractor could
+# never pick. The disagreement ran in the harmful direction -- over-counting
+# pushes `_detect_output_token_limit_split` toward firing, and a wrong refusal
+# is a blind run, the exact harm CCE-177 exists to prevent.
+#
+# `iterable=False` marks shapes the extractor cannot iterate at all: its bare
+# `any(... for b in content)` raises TypeError rather than answering. Such a
+# shape can never yield a non-empty string, so the mirror's expected answer is
+# False, and the test asserts the raise rather than assuming it.
+
+_CONTENT_SHAPES = [
+    # (label, content, extractor can iterate it)
+    ("list_with_text_block", [{"type": "text", "text": "hi"}], True),
+    ("plain_string", "hi", True),  # <-- the shape that was wrong
+    ("empty_string", "", True),
+    ("dict", {"type": "text", "text": "hi"}, True),
+    ("empty_list", [], True),
+    ("tool_use_only", [{"type": "tool_use", "id": "t1"}], True),
+    ("list_of_bare_strings", ["hi", "there"], True),
+    ("none", None, False),
+    ("int_scalar", 7, False),
+]
+
+
+@pytest.mark.parametrize(
+    "label, content, iterable",
+    _CONTENT_SHAPES,
+    ids=[s[0] for s in _CONTENT_SHAPES],
+)
+def test_has_text_block_mirrors_the_extractors_answer(label, content, iterable):
+    """For every content shape, `_has_text_block` agrees with whether
+    `_extract_final_assistant_text` yields a non-empty string."""
+    ev = {"type": "assistant", "message": {"content": content}}
+
+    if iterable:
+        expected = bool(orun._extract_final_assistant_text([ev]))
+    else:
+        with pytest.raises(TypeError):
+            orun._extract_final_assistant_text([ev])
+        expected = False
+
+    assert orun._has_text_block(ev) is expected, (
+        f"{label}: _has_text_block disagrees with _extract_final_assistant_text"
+    )
+
+
+def test_a_plain_string_content_is_not_a_candidate_turn():
+    """The regression this pins, stated on its own.
+
+    A plain-string `content` is not a text block. The extractor iterates it
+    character by character, finds no dict, and never picks the turn -- so the
+    detector must not count it either. Guarded separately from the table
+    because a table entry is easy to delete by accident.
+    """
+    ev = {"type": "assistant", "message": {"content": "looks like text, is not"}}
+
+    assert orun._extract_final_assistant_text([ev]) == ""
+    assert orun._has_text_block(ev) is False
+
+
+def test_an_empty_text_block_is_a_candidate_turn_the_extractor_picks():
+    """The one place "picks the turn" and "returns a non-empty string" part.
+
+    A `text` block whose text is "" IS a text block: the extractor picks that
+    turn and then returns "". `_has_text_block` mirrors the *pick*, which is
+    what `_detect_output_token_limit_split` counts ("turns that could have
+    been the answer"), so True here is correct and consistent -- not a second
+    instance of the over-count above, where the extractor could not pick the
+    turn at all.
+    """
+    ev = {"type": "assistant", "message": {"content": [{"type": "text", "text": ""}]}}
+
+    assert orun._has_text_block(ev) is True
+    assert orun._extract_final_assistant_text([ev]) == ""

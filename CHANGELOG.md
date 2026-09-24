@@ -54,6 +54,27 @@
 
 ### Changed
 
+- **Behavior change (CCE-169):** a run now admits at most 10 merged PRs,
+  oldest-first. Every existing host starts capping on upgrade with no
+  config edit. Set `run.window_pr_cap` in
+  `.engineering-docs-agent/config.yml` to raise it, or `0` to restore the
+  pre-CCE-169 unbounded window. The window had no upper bound, so a
+  stalled baseline was self-reinforcing — it widened by a day every
+  night and each run finished a smaller fraction of it, while the only
+  pre-existing truncation fired inside the admission loop, after the run
+  had already begun failing to keep up. Capped PRs are a third category,
+  not a deferral: they stop the CCE-109 cursor at the cap boundary so
+  the baseline never walks past them, but they accrue no deferral count
+  and are never exposed to the `run.deferral_skip_threshold` hatch,
+  because the run did not attempt them. A capped run is partial with a
+  `held_back_window_capped: n of m PRs held for a later run (cap c)`
+  reason and still auto-merges, which is what lets the next run take the
+  next `c`. A PR returned without a `merge_sha` is admitted even past
+  the cap: the cap may only hold back a PR a later window can
+  re-anchor, and such a PR sorts last, so capping it would strand it
+  behind a baseline that advanced past its real merge commit. The work
+  bound is therefore `cap + unanchored`, not exactly `cap`.
+
 - **Behavior change (CCE-101):** docs-agent PRs now auto-merge by default
   when the run is non-partial with zero fact-checker warnings (squash +
   branch delete, host CI respected when it reports). Set

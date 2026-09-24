@@ -300,8 +300,14 @@ def test_hard_cap_cuts_inside_a_group_and_says_the_baseline_cannot_advance(
     assert "cut inside PR #1" in cut[0], cut[0]
     assert "the baseline cannot advance to it" in cut[0], cut[0]
     # PR #1 owes a page, so no prefix closes and the baseline must hold.
+    # CCE-186: this scenario's PRs all carry merge_shas, so the cursor prefix
+    # is empty because `advance_cursor_list` broke at the oldest held-back PR,
+    # NOT because any sha was missing. The old `_no_advance_no_cursor` string
+    # asserted here was a false description of this run; it is retained only
+    # for the genuine no-sha case (see
+    # test_authoring_truncation_without_cursor_holds_baseline).
     assert any(
-        "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]
+        "time_budget_no_advance_prefix_blocked" in r for r in cr["partial_reasons"]
     ), cr["partial_reasons"]
     written = json.loads(state_path.read_text())
     assert written["last_successful_run"]["head_sha"] == base, written[

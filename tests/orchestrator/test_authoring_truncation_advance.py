@@ -137,8 +137,14 @@ def test_authoring_truncation_holds_baseline_when_every_pr_owes_pages(
         "last_successful_run"
     ]
     cr = read_current_run(state_path)
+    # CCE-186: this scenario's PRs all carry merge_shas, so the cursor prefix
+    # is empty because `advance_cursor_list` broke at the oldest held-back PR,
+    # NOT because any sha was missing. The old `_no_advance_no_cursor` string
+    # asserted here was a false description of this run; it is retained only
+    # for the genuine no-sha case (see
+    # test_authoring_truncation_without_cursor_holds_baseline).
     assert any(
-        "time_budget_no_advance_no_cursor" in r for r in cr["partial_reasons"]
+        "time_budget_no_advance_prefix_blocked" in r for r in cr["partial_reasons"]
     ), cr["partial_reasons"]
 
 

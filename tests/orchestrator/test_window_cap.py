@@ -65,6 +65,38 @@ def test_window_cap_tolerates_a_malformed_run_block():
     assert orun.resolve_window_cap({"run": None}) == 10
 
 
+def test_window_cap_resolver_does_not_clamp_a_negative():
+    """The resolver ends in a bare `int(val)` -- no clamp, deliberately.
+
+    Pins WHERE the responsibility sits. The `> 0` at the cut is
+    defence-in-depth for direct callers of the raw dict (these tests among
+    them), NOT a guard against a reachable config: the test below is what
+    stops a host. Asserting the resolver clamps would be asserting behaviour
+    it does not have.
+    """
+    assert orun.resolve_window_cap({"run": {"window_pr_cap": -1}}) == -1
+
+
+def test_the_schema_is_what_rejects_a_negative_cap():
+    """`run()` loads through `load_config_validated`, which validates against
+    this file and returns 2 before the cut is reached -- so no host can hand
+    the cut a negative cap, and an end-to-end negative-cap test would be
+    asserting an unreachable state.
+
+    Pinned here because the cut's comment says so in prose: drop `minimum` and
+    that comment silently becomes false while the negative path becomes
+    reachable again.
+    """
+    schema = json.loads(
+        (
+            Path(__file__).resolve().parents[2] / "templates" / "config.schema.json"
+        ).read_text()
+    )
+    node = schema["properties"]["run"]["properties"]["window_pr_cap"]
+    assert node["type"] == "integer", node
+    assert node["minimum"] == 0, node
+
+
 # ---------------------------------------------------------------------------
 # the cut: third-category routing
 # ---------------------------------------------------------------------------

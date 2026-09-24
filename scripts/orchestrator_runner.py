@@ -2488,13 +2488,12 @@ def run(
         # accrues no deferral count and the skip hatch cannot abandon it.
         _window_cap = resolve_window_cap(config)
         window_capped: list[dict] = []
-        # `> 0`, not truthiness. `resolve_window_cap` ends in a bare `int(val)`
-        # with no clamp, so a host writing `window_pr_cap: -1` reaches here with
-        # a negative cap: it is truthy, `len(prs) > -1` is always true, and the
-        # slices INVERT — `prs[-1:]` caps the NEWEST PR and `prs[:-1]` admits
-        # every other one, reporting `(cap -1)`. That is not a loud failure, it
-        # is a quiet one on the wrong end of the window. `> 0` makes a negative
-        # cap behave as the documented unlimited opt-out, exactly like 0.
+        # `> 0`, not truthiness: a negative cap is truthy and would INVERT the
+        # slices, capping the NEWEST PR. Defence-in-depth only — no host can
+        # reach here with one, because `templates/config.schema.json` sets
+        # `minimum: 0` and `run()` loads through `load_config_validated`, which
+        # exits 2 first. It guards direct callers of the raw dict, tests among
+        # them, since `resolve_window_cap` ends in a bare `int(val)`.
         if _window_cap > 0 and len(prs) > _window_cap:
             _tail = prs[_window_cap:]
             # The cap may only hold back a PR a LATER WINDOW CAN RE-ANCHOR. A

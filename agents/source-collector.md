@@ -291,9 +291,15 @@ matches any `pr_branch_filter` glob.
 
 ### Step 3 (REQUIRED if Step 1 returned ≥1 PR) — Pull per-PR metadata
 
-For each remaining PR: pull `title`, `body`, `files` (truncate to 200 entries),
-`labels`, `merge_commit_sha`, `merged_at`, `author.login`, `html_url`. Use
-`gh api repos/<owner>/<name>/pulls/<number>` or `gh pr view <number> --json ...`.
+For each remaining PR: pull `title`, `body` (truncate to 2,000 characters),
+`files` (truncate to 200 entries), `labels`, `merge_commit_sha`, `merged_at`,
+`author.login`, `html_url`. Use `gh api repos/<owner>/<name>/pulls/<number>` or
+`gh pr view <number> --json ...`.
+
+Cut `body` at 2,000 characters and append `…[truncated]` to the value you
+emit. The budget is not cosmetic: an over-long payload gets truncated
+mid-object by your own output ceiling, the orchestrator parses a fragment, and
+the entire run is lost. A bounded `body` is worth more than a complete one.
 
 If Step 1 returned 0 PRs, skip to Step 6 and emit `{"prs": [], "jira_issues": []}`.
 
@@ -352,7 +358,11 @@ on, rather than parsing Jira's deliberately-ambiguous "Issue does not exist
 or you do not have permission to see it" body as if it were valid data.
 
 Extract `summary`, `description`, `status.name`, and `labels` from each
-response and append to `jira_issues`. If a specific key 401s, 403s, or
+response and append to `jira_issues`. Cut `description` at 2,000 characters
+and append `…[truncated]` to the value you emit — same budget and same reason
+as Step 3's `body`: an over-long payload gets truncated mid-object by your
+output ceiling and the run is lost. A long `description` is the cut point
+observed on every failure to date. If a specific key 401s, 403s, or
 404s, OMIT it from `jira_issues` (do NOT append a placeholder); other keys
 still succeed.
 
@@ -374,6 +384,10 @@ Before emitting, verify:
 - **For each PR you are about to return**: is its `merge_sha` in the output
   of `git rev-list last_sha..head_sha` from Step 1.5? Emitting a PR whose
   merge_sha is outside that range is a §7 contract violation.
+- **For every `prs[].body` and every `jira_issues[].description`**: is it at
+  most 2,000 characters, with `…[truncated]` appended where you cut it? An
+  unbounded payload gets truncated mid-object by your output ceiling and the
+  run is lost.
 
 If any check fails, return to the missing step or add the missing fields.
 Otherwise emit the final JSON per the Output schema. Return ONLY the JSON

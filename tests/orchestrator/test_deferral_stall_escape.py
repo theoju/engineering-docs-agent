@@ -370,3 +370,74 @@ def test_a_stalled_baseline_forgives_end_to_end_and_becomes_cursor_backed(
     )
     advance = json.loads(state_path.read_text())["last_successful_run"]["head_sha"]
     assert advance != base, "the baseline must finally move"
+
+
+# ---------------------------------------------------------------------------
+# CCE-185: the escape is inert when the budget admits nothing.
+# ---------------------------------------------------------------------------
+
+
+def test_the_admission_gate_never_truncates_at_index_zero(tmp_path, init_host):
+    """`i > 0` in the admission gate is what keeps CCE-178's scan safe.
+
+    CCE-178 selects the PR to forgive by scanning `prs`:
+
+        _blocker = next(
+            (p.get("number") for p in prs if p.get("number") in _deferred_numbers),
+            None,
+        )
+
+    `prs` has had the admission-deferred tail removed at `prs = prs[:i]`, while
+    `held_back` is built from
+    `set(deferred_pages_by_pr) | {p.number for p in admission_deferred}`. If
+    `prs` could ever be emptied by truncation, `_blocker` would be None, so
+    `_forgive` would be empty, so nothing would be forgiven, so `held_back`
+    would be the whole window and the cursor could not move — and because the
+    reason is guarded on `if _forgive:`, nothing would say so. A silent,
+    permanent freeze.
+
+    That cannot happen, and the reason is one clause:
+
+        if deadline is not None and i > 0 and clock() > deadline:
+
+    The gate refuses to truncate before admitting anything, so `prs` always
+    holds at least the oldest PR — which is exactly the prefix blocker the
+    scan needs to find.
+
+    This test pins that clause by behaviour. The clock here is exhausted at
+    the very first check; the run must still admit PR #1, still forgive it,
+    and still move the baseline. Delete the `i > 0` and this goes red.
+    """
+    repo = tmp_path
+    state_path = init_host({"version": "1", "last_successful_run": {}})
+    base, (c1, c2, c3, c4) = _seed_window4(repo, state_path, ANCIENT)
+    prs = [
+        {**_pr(1, c1), "files": [], "labels": [], "jira_keys": []},
+        {**_pr(2, c2), "files": [], "labels": [], "jira_keys": []},
+        {**_pr(3, c3), "files": [], "labels": [], "jira_keys": []},
+    ]
+    rc = orun.run(
+        repo,
+        dry_run_dir=_lint_blocked_fakes(tmp_path, prs),
+        no_pr=True,
+        time_budget_seconds=100,
+        # exhausted at the FIRST admission check: nothing is ever admitted
+        now_monotonic=_fake_clock([0, 150, 150, 150, 150, 150, 150]),
+    )
+    assert rc == 0
+    admitted = [
+        r
+        for r in _reasons(state_path)
+        if r.startswith("time_budget_exceeded: admitted")
+    ]
+    assert admitted and " 0/" not in admitted[0], (
+        "the gate must admit the oldest PR even with the budget already gone; "
+        f"got {admitted}"
+    )
+    escape = [r for r in _reasons(state_path) if "deferral_stall_escape" in r]
+    assert escape, (
+        "a maximally-truncated stalled run must still find a prefix blocker; "
+        f"got reasons={_reasons(state_path)}"
+    )
+    advance = json.loads(state_path.read_text())["last_successful_run"]["head_sha"]
+    assert advance != base, "the baseline must move, not freeze silently"

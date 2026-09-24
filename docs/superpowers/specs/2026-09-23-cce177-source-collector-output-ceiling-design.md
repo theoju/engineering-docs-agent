@@ -168,6 +168,93 @@ site's CCE-144 classification automatically: blind for source-collector
 (`ok=False`), degraded where the call site passes `degraded=True`. This reuses
 what is already there, in the spirit of CCE-127.
 
+#### Measured findings — what the two conditions actually do
+
+Measured across all seven runs in the 09-17…09-23 window, from their archived
+`source-collector.stream.jsonl` forensics. Trimmed captures of three of them
+are committed under `tests/fixtures/cce177/`.
+
+**1. Condition 2 is inert. It discriminates nothing.**
+
+`assistants_with_text > 1` is TRUE on all three failing runs **and** on all
+four passing ones:
+
+| run           | date  | outcome  | assistants with text | marker present | detector |
+| ------------- | ----- | -------- | -------------------- | -------------- | -------- |
+| `35221636293` | 09-17 | pass     | 10                   | no             | False    |
+| `35343242932` | 09-18 | **fail** | 9                    | **yes**        | **True** |
+| `35441305173` | 09-19 | pass     | 6                    | no             | False    |
+| `35509910089` | 09-20 | **fail** | 9                    | **yes**        | **True** |
+| `35608299979` | 09-21 | pass     | 7                    | no             | False    |
+| `35727627405` | 09-22 | pass     | 8                    | no             | False    |
+| `35862057776` | 09-23 | **fail** | 13                   | **yes**        | **True** |
+
+Condition 2 separates no pair in the sample, so the detector reduces in
+practice to "the marker is present".
+
+On this evidence that is **harmless, not dangerous**: the marker appears in
+exactly the three failing runs and in none of the four passing ones — 3 true
+positives, 0 false positives, 4 true negatives. Condition 2 costs nothing and
+is kept as **documentation of intent** — it records which shape is being
+looked for (one answer split across two turns, not the CCE-14 interleaved
+multi-block answer inside a single turn). It is not a working discriminator,
+and nothing should describe it as one. In particular it is not evidence that
+the detector is selective; the marker is doing all of the work.
+
+**2. A refinement was proposed and REJECTED on measurement.**
+
+Reviewers argued the detector should additionally require the marker to appear
+**after the last `tool_use`**, reasoning that a ceiling hit mid-conversation is
+benign: the agent resumes, keeps working, and still emits a complete answer at
+the end.
+
+Measured, that predicate fires on only **two of the three** failing runs:
+
+| run           | date  | marker at event | `tool_use` blocks after it     | refinement's verdict |
+| ------------- | ----- | --------------- | ------------------------------ | -------------------- |
+| `35343242932` | 09-18 | 157             | **4** (Bash, Bash, Read, Read) | **ACCEPT** — wrong   |
+| `35509910089` | 09-20 | 265             | 0                              | refuse               |
+| `35862057776` | 09-23 | 197             | 0                              | refuse               |
+
+The premise is falsified by the payloads themselves. Counting `prs[]` entries
+in each half of the split answer:
+
+| run           | date  | head half | tail half |
+| ------------- | ----- | --------- | --------- |
+| `35343242932` | 09-18 | 15        | **0**     |
+| `35509910089` | 09-20 | 15        | **0**     |
+| `35862057776` | 09-23 | 20        | **0**     |
+
+The `prs` array lives entirely in the head half every time. On 09-18 the
+ceiling was hit **while the final answer was already being emitted**; the agent
+then made four more tool calls and resumed the SAME truncated JSON. The tail is
+not a fresh complete answer written after an interruption — it is the second
+half of the interrupted one, and the four tool calls are the agent gathering
+what it needed to finish it. Accepting that night means advancing the watermark
+past 15 PRs the run never documented: exactly the CCE-151 harm this change
+exists to prevent.
+
+`tests/orchestrator/test_output_token_limit_real_streams.py` pins the 09-18
+shape against its real stream, so adding the refinement turns that test red.
+
+**Why the detector is allowed to be crude.** Its two failure modes are not
+symmetric, and it fails the safe way:
+
+- A **false positive** refuses a good answer. The run exits 1, the watermark
+  freezes, the same window is re-read tomorrow. Cost: one night — bounded,
+  recoverable, and loud.
+- A **false negative** accepts a tail fragment as the whole answer. If the
+  fragment parses and validates, the run advances the watermark past PRs it
+  never read. Cost: **permanent** — the cursor is consume-once (CCE-151), so
+  the skipped window is never re-read and that work is undocumented forever.
+
+Any refinement narrows the detector, and narrowing trades false positives for
+false negatives — the cheap failure for the expensive one. That is the standing
+answer to "should we tighten this?": tightening has to be justified by a
+false-positive rate, and the measured rate is zero. There is nothing to
+reduce. Re-propose only with evidence of a false positive in production, not
+with an argument about what the model _would_ do.
+
 #### B's scope is narrower than it reads — say so plainly
 
 The event stream only exists when `DOCS_AGENT_DEBUG_DIR` is set:
@@ -315,9 +402,31 @@ monkeypatched, per repo convention.
    call site and `degraded` where the call site passes `degraded=True`.
 6. **C is schema-valid** — the shape in `## Failure handling` bullet 3 validates
    against `source_collector.schema.json`.
+7. **A is stated, and stated consistently** — Step 3, Step 5 and the Step 6
+   pre-emit checklist each state the byte budget, all three state the same
+   total, and each states it marker-inclusive. Each number is extracted from
+   its own passage and compared against the others, never against a literal,
+   because the original defect was the passages disagreeing. Added after
+   mutation testing found that deleting all three of A's edits left the whole
+   suite green — A is the load-bearing half, and it had no coverage at all.
+8. **B is pinned to the real CLI event shape** — three trimmed production
+   streams, parsed the way `dispatch_subagent` parses one, assert the
+   detector's verdict on two failing runs and one passing one. Every other B
+   test builds its own `isSynthetic` dicts, which agree with each other about
+   a shape that had never been checked against the CLI's actual output.
+9. **B's refusal sits above the returncode guard** — a split stream whose CLI
+   also exited non-zero must still name the cause. Mutation testing moved the
+   refusal below `if r.returncode != 0` and all 19 tests stayed green; below
+   it, such a run returns `(None, [])` and the call site's `if not reasons:`
+   fallback emits `source_collector_invalid: returned None`, the cause-free
+   signature CCE-177 exists to eliminate. The mirror placement (refusal above
+   the forensics write) was already pinned; this was a one-sided omission.
 
-Regression fixtures are synthetic and small. The production payloads that prove the
-root cause live in the per-run forensics artifacts and **expire 14 days after each
+Most regression fixtures are synthetic and small. Three are **not**: trimmed
+captures of real production streams live under `tests/fixtures/cce177/`, with
+`tests/fixtures/cce177/README.md` recording what was dropped and truncated.
+Everything else — the production payloads that prove the
+root cause — lives in the per-run forensics artifacts and **expires 14 days after each
 run — 09-18's on ~2026-10-02**; the trimmed evidence record taken while they were
 still downloadable is committed at
 `docs/superpowers/specs/2026-09-23-cce177-evidence.md` — per-run event counts and

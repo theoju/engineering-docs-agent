@@ -167,7 +167,7 @@ def _seed_capped_host(
 
 
 def test_a_capped_run_advances_to_the_cap_boundary_and_says_so(
-    tmp_path, init_host, base_config_yaml, read_current_run
+    tmp_path, init_host, base_config_yaml, read_current_run, capsys
 ):
     """THE CCE-151 REGRESSION GUARD, and the most important test in this file.
 
@@ -185,12 +185,26 @@ def test_a_capped_run_advances_to_the_cap_boundary_and_says_so(
     takes its `if ok:` branch, which sets `advance_sha` and
     `advance_cursor_backed` WITHOUT calling `add_partial`, so this site is the
     run's only signal that any PR was held.
+
+    THE ADMISSION ASSERTION IS SEPARATE AND ALSO REQUIRED. Everything above
+    measures downstream bookkeeping, all of it produced from `window_capped` --
+    so a POST-admission cap (compute `window_capped`, keep it out of
+    `window_prs`, render the reason from a saved pre-cut total, but never
+    truncate `prs`) satisfies every one of them while `pr-summarizer` is
+    dispatched for all three PRs. The run would do all N PRs' work every night
+    and nothing would notice, which is the unbounded work CCE-169 exists to
+    stop. `_cursor_line` is the only observation of admission itself.
     """
     state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
         tmp_path, init_host, base_config_yaml, cap=2
     )
     rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
     assert rc == 0
+    # Admission itself. The ONLY assertion in this file that a post-admission
+    # cap cannot satisfy -- see the docstring.
+    cur = _cursor_line(capsys)
+    assert cur["admitted"] == ["1", "2"], cur
+    assert cur["capped"] == ["3"], cur
     written = json.loads(state_path.read_text())
     advance = written["last_successful_run"]["head_sha"]
     assert advance == c2, written["last_successful_run"]

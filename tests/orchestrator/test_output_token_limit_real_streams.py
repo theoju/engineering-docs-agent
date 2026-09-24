@@ -59,6 +59,23 @@ def _marker_index(events: list[dict]) -> int | None:
     return next((i for i, e in enumerate(events) if e.get("isSynthetic")), None)
 
 
+def _tool_use_names_after(events: list[dict], idx: int) -> list[str]:
+    """Names of every `tool_use` block in assistant turns after `idx`.
+
+    Shared by the two tests that record where the marker falls relative to
+    tool use, so the pair reads as one measurement taken twice — which is
+    what it is: the rejected "marker must follow the last tool_use"
+    refinement fires on 2 of the 3 failing runs, not 3.
+    """
+    return [
+        b.get("name")
+        for e in events[idx + 1 :]
+        if e.get("type") == "assistant"
+        for b in e["message"]["content"]
+        if b.get("type") == "tool_use"
+    ]
+
+
 # --------------------------------------------------------------------------
 # The verdict on each real run
 # --------------------------------------------------------------------------
@@ -197,14 +214,7 @@ def test_the_09_18_marker_is_followed_by_real_tool_use_blocks():
     "Measured findings" subsection says why.
     """
     events = _events(FAIL_MARKER_MIDSTREAM)
-    idx = _marker_index(events)
-    after = [
-        b.get("name")
-        for e in events[idx + 1 :]
-        if e.get("type") == "assistant"
-        for b in e["message"]["content"]
-        if b.get("type") == "tool_use"
-    ]
+    after = _tool_use_names_after(events, _marker_index(events))
     assert len(after) == 4, after
     assert set(after) == {"Bash", "Read"}
     assert orun._detect_output_token_limit_split(events) is True
@@ -215,14 +225,7 @@ def test_the_09_23_marker_has_no_tool_use_after_it():
     two text-carrying turns. Recorded so the pair reads as a measurement —
     the refinement fires on 2 of 3 failing runs, not 3."""
     events = _events(FAIL_MARKER_LAST)
-    idx = _marker_index(events)
-    after = [
-        b.get("name")
-        for e in events[idx + 1 :]
-        if e.get("type") == "assistant"
-        for b in e["message"]["content"]
-        if b.get("type") == "tool_use"
-    ]
+    after = _tool_use_names_after(events, _marker_index(events))
     assert after == []
 
 

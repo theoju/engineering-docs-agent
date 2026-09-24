@@ -120,6 +120,40 @@ site's CCE-144 classification automatically: blind for source-collector
 (`ok=False`), degraded where the call site passes `degraded=True`. This reuses
 what is already there, in the spirit of CCE-127.
 
+#### B's scope is narrower than it reads — say so plainly
+
+The event stream only exists when `DOCS_AGENT_DEBUG_DIR` is set:
+
+```python
+argv = base_argv + ["--output-format", "stream-json", "--verbose"] if debug_dir else base_argv
+...
+if debug_dir:
+    canonical_text = _extract_final_assistant_text(events)
+else:
+    canonical_text = raw_stdout          # simple --print mode, no events at all
+```
+
+`scripts/orchestrator_runner.py` documents _unset_ as the production default, and
+the dogfood host sets it — which is precisely why this incident has forensics at
+all. So:
+
+- **Where debug is on** (the dogfood host, any host that opts in): B detects and
+  refuses. This is the path on which the defect is proven.
+- **Where debug is off** (the documented bare-host default): there are no events,
+  so B never fires. Behaviour is unchanged from today. What simple `--print` mode
+  does with a token-limit split — whether it returns the concatenation or only the
+  final turn — is **not verified**, so we do not know whether bare hosts carry this
+  defect at all.
+
+This is graceful degradation in the plugin's usual sense (the capability is
+detection-driven and silently skips when its input is absent), but it also means
+**A is the more load-bearing of the two changes**: a byte budget prevents the
+ceiling being crossed on _every_ host regardless of output mode, whereas B only
+reports it where the stream is captured.
+
+Determining bare-host behaviour is follow-up work, not a blocker: B is strictly
+additive where it applies, and A covers both paths.
+
 ### C — Remove the competing cause for B's signature
 
 `agents/source-collector.md` `## Failure handling` bullet 3 currently reads:

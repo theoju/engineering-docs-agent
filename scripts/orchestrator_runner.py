@@ -255,12 +255,87 @@ def _strip_code_fence(text: str) -> str:
     return m.group(1).strip()
 
 
+# CCE-189: the only tokens that can legally follow a string's closing quote in
+# JSON. `:` is mandatory here — a key's terminator is always followed by it —
+# and it is also the reason the repair has a residual (see the docstring).
+_JSON_TOKENS_AFTER_STRING = frozenset(",}]:")
+_JSON_INTERSTITIAL_WS = frozenset(" \t\r\n")
+
+
+def _repair_unescaped_quotes(text: str) -> str | None:
+    """Escape quote characters that cannot be a string terminator. CCE-189.
+
+    Returns the repaired text, or None when nothing was changed.
+
+    In valid JSON a string's closing quote is always followed — past
+    whitespace — by one of ``, } ] :`` or end-of-input. A quote inside a
+    string followed by anything else therefore CANNOT be a terminator: there
+    is no reading of the document under which it is one. Escaping exactly
+    those quotes is not a guess between two valid parses, it is the only
+    candidate parse.
+
+    This overturns a narrower claim made when the control-character tier
+    landed — that repairing quotes "can silently change content". That is
+    true of a repair that rebalances or deletes quotes. This one only ever
+    INSERTS a backslash before an existing quote, so every character of the
+    original survives into the parsed value; the fixture assertion in
+    ``tests/orchestrator/test_dispatch_quote_repair.py`` checks the
+    round-trip on real production bytes rather than taking it on trust.
+
+    Residual, deliberately not handled: an interior quote that happens to be
+    followed by a structural token, e.g. ``"he said "hi", bye"``. The quote
+    after ``hi`` is indistinguishable from a terminator by this rule, so the
+    walk desynchronises and the repaired text still fails to parse. That is a
+    clean failure — the caller gets None and the run stays blind, exactly as
+    before this tier existed. What it must never do is return a WRONG dict,
+    and the pathological case is pinned by a test for that reason.
+    """
+    out: list[str] = []
+    in_string = False
+    changed = False
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if not in_string:
+            out.append(c)
+            if c == '"':
+                in_string = True
+            i += 1
+            continue
+        if c == "\\":
+            # Copy the escape pair verbatim: an already-escaped `\"` is not a
+            # candidate and must not be double-escaped.
+            out.append(c)
+            if i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+            else:
+                i += 1
+            continue
+        if c == '"':
+            j = i + 1
+            while j < n and text[j] in _JSON_INTERSTITIAL_WS:
+                j += 1
+            if j >= n or text[j] in _JSON_TOKENS_AFTER_STRING:
+                out.append(c)
+                in_string = False
+            else:
+                out.append('\\"')
+                changed = True
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out) if changed else None
+
+
 def _parse_agent_payload(
     canonical_text: str, name: str, out_reasons: list[str] | None
 ) -> dict | None:
     """Parse a subagent's canonical stdout into a dict, or None.
 
-    Three tiers, strictest first. Each records its own reason on
+    Four tiers, strictest first. Each records its own reason on
     ``out_reasons`` so the digest names the contamination class that
     actually applied:
 
@@ -270,6 +345,8 @@ def _parse_agent_payload(
        ``control_chars_tolerated: <name>``.
     3. **Prose rescue** (CCE-15) against the ORIGINAL text. Reason
        ``prose_contamination_rescued: <name>``.
+    4. **Unescaped-quote repair** (CCE-189), then a retry of tiers 1-3 on the
+       repaired text. Reason ``unescaped_quotes_repaired: <name>``.
 
     Tier 2 exists because run 36080301431 went blind on a payload that was
     otherwise complete: the agent had emitted six real newlines inside one
@@ -280,16 +357,21 @@ def _parse_agent_payload(
     previous run on the same window escaped correctly), so no pre-flight
     instruction the agent checks against itself can close it.
 
-    Tier 2 deliberately does NOT repair an unescaped quote, which is the
-    other half of the class and the reason the 36080301431 payload is still
-    unparseable: rebalancing quotes inside string values can silently change
-    content, and ``_rescue_json_object``'s brace-walk desynchronises on a
-    stray quote anyway. That residual is tracked separately and pinned by
-    ``tests/orchestrator/test_dispatch_control_char_tolerance.py``.
+    Tier 4 closes the other half of that class, the unescaped quote that left
+    the 36080301431 payload unparseable even with tier 2 applied. When tier 2
+    landed this was ruled out on the grounds that "rebalancing quotes inside
+    string values can silently change content" — true of a repair that
+    rebalances, but ``_repair_unescaped_quotes`` only inserts a backslash
+    before a quote that no valid JSON reading could treat as a terminator, so
+    no character is lost. See its docstring for the rule and its residual.
 
-    Ordering is load-bearing. Tier 2 sits AFTER strict so a clean payload
-    records nothing, and BEFORE the rescue so a prose preamble is still
-    reported as prose rather than mislabelled as an escaping fault.
+    Ordering is load-bearing, and tier 4 is last for two reasons. A clean
+    payload must record nothing, so tier 1 leads; a prose preamble must be
+    reported as prose rather than mislabelled as an escaping fault, so the
+    rescue precedes the repair; and the repair is the only tier that rewrites
+    the bytes, so it runs when every non-destructive reading has failed. Its
+    retry re-enters tiers 1-3 on the repaired text, which is what handles a
+    payload carrying prose AND a stray quote together.
     """
     parse_text = _strip_code_fence(canonical_text)
     try:
@@ -315,6 +397,35 @@ def _parse_agent_payload(
         if out_reasons is not None:
             out_reasons.append(f"prose_contamination_rescued: {name}")
         return rescued
+
+    # CCE-189, tier 4. Last because it is the only tier that rewrites bytes.
+    # The retry re-enters the earlier tiers on the repaired text so a payload
+    # carrying prose AND a stray quote is still recovered, and so a repaired
+    # payload that also has raw control characters is tolerated.
+    repaired = _repair_unescaped_quotes(canonical_text)
+    if repaired is not None:
+        repaired_parse_text = _strip_code_fence(repaired)
+        for loader in (
+            lambda t: json.loads(t),
+            lambda t: json.loads(t, strict=False),
+        ):
+            try:
+                parsed = loader(repaired_parse_text)
+            except json.JSONDecodeError:
+                continue
+            if out_reasons is not None:
+                out_reasons.append(f"unescaped_quotes_repaired: {name}")
+            return parsed
+        regressed = _rescue_json_object(repaired)
+        if regressed is not None:
+            if out_reasons is not None:
+                # Both classes are real on this branch and the operator should
+                # see both: the repair fixed the escaping, and the payload ALSO
+                # carried a prose preamble that only the brace-walk could get
+                # past. Reporting just the repair would hide half the fault.
+                out_reasons.append(f"unescaped_quotes_repaired: {name}")
+                out_reasons.append(f"prose_contamination_rescued: {name}")
+            return regressed
     return None
 
 

@@ -30,13 +30,13 @@ no information, so the tolerance tier converts a control-character-only
 corruption from **blind** to **clean** — for every field of every agent, not
 just Jira.
 
-The tier is deliberately narrow. It does **not** attempt to repair an unescaped
-quote: ``_rescue_json_object``'s brace-walk desynchronises on a stray quote
-(``scripts/orchestrator_runner.py:151-168``), and rebalancing quotes inside
-string values can silently alter content. That half of the class stays open for
-``prs[].body``/``title`` and is tracked separately — see
-``test_the_two_fault_production_payload_still_fails`` below, which pins the
-residual so it cannot be mistaken for fixed.
+The tier is deliberately narrow: it tolerates the control character and nothing
+else. The quote half of the class is closed separately by CCE-189's tier 4, and
+the two are kept apart on purpose — a control-character-only payload must still
+report ``control_chars_tolerated`` and must NOT be rewritten, because tier 2 is
+non-destructive and tier 4 is not. ``test_the_two_fault_production_payload_...``
+below tracks that boundary; see ``test_dispatch_quote_repair.py`` for the repair
+itself.
 
 Ordering matters and is asserted: the lenient tier runs **after** a strict parse
 and **before** the prose rescue, so a prose-contaminated payload still reports
@@ -114,20 +114,33 @@ def test_control_char_only_payload_parses_and_reports_the_tolerance():
     )
 
 
-def test_the_two_fault_production_payload_still_fails():
-    """The documented residual. If this ever passes, the quote half was fixed
-    too — which is a real change in scope and must be a deliberate one, not a
-    side effect. Re-read the design's §0.2 before touching this assertion.
+def test_the_two_fault_production_payload_is_now_recovered_by_tier_4_not_tier_2():
+    """This assertion was inverted, deliberately, by CCE-189.
+
+    It previously pinned the residual: the two-fault payload returned None and
+    recorded nothing. Its docstring said that if it ever passed, the quote half
+    had been fixed and that had to be a deliberate scope change rather than a
+    side effect. CCE-189 is that deliberate change, so the test now pins the
+    new contract instead of being deleted — the point it guards is unchanged.
+
+    What still matters, and is what this now asserts: the payload is recovered
+    by the QUOTE REPAIR, not by the control-character tolerance. Tier 2 is
+    non-destructive and must not be credited with a byte rewrite. If this
+    reason ever reads ``control_chars_tolerated``, the tiers have been
+    reordered and tier 2 has silently become destructive.
     """
     reasons: list[str] = []
-    assert (
-        runner._parse_agent_payload(_two_fault_payload(), "source-collector", reasons)
-        is None
-    ), (
-        "an unescaped quote inside a string value is NOT in scope for the "
-        "tolerance tier; repairing it can silently alter content"
+    parsed = runner._parse_agent_payload(
+        _two_fault_payload(), "source-collector", reasons
     )
-    assert reasons == [], "a total parse failure records no tolerance reason"
+
+    assert parsed is not None, "CCE-189 tier 4 must recover the two-fault payload"
+    assert reasons == ["unescaped_quotes_repaired: source-collector"], (
+        "the repair tier owns this recovery; tier 2 alone cannot parse an "
+        f"unescaped quote, got {reasons!r}"
+    )
+    # The whole point of collecting it: the Jira record survives intact.
+    assert [i["key"] for i in parsed["jira_issues"]] == ["CCE-75"]
 
 
 def test_clean_payload_records_no_reason():

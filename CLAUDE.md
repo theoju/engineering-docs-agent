@@ -13,6 +13,17 @@ Design every capability (S/D/API/M/C and the orchestrator) **generic-first, conv
 - **Markedly better on Claude Code / superpowers repos** that carry `docs/superpowers/{specs,plans}`, but **nothing hard-requires that convention.**
 - **Tests use fixtures that represent arbitrary hosts**, not this repo's tree. A capability that only works because it found this repo's own directories is a bug.
 
+## This checkout is an ordinary development clone — the write fence is gone on purpose
+
+Until 2026-09-25, `~/Projects/engineering-docs-agent` was write-fenced against other Claude Code sessions. The fence is gone deliberately. Do not restore it.
+
+- **Why the fence existed.** This checkout was registered as a plugin marketplace `directory` source. Every project on the machine loaded the plugin live from this working tree, so a stray write in any session changed a plugin that every other session loaded.
+- **Why it is gone.** The marketplace now resolves to a managed clone of `theoju/engineering-docs-agent` at `~/.claude/plugins/marketplaces/engineering-docs-agent-marketplace` (`known_marketplaces.json` source `github`; `~/.claude` commit `ebc5495`). Nothing loads from this checkout. A change here reaches other projects only through commit → push → `/plugin marketplace update`. Normal review and CI now protect other projects, which the fence only approximated.
+- **What was removed.** Two layers were removed: the `sandbox-exec -f ~/.claude/fence-sandbox.sb` wrapper around `claude` in `~/.zshrc` (the profile is kept and tracked, but nothing uses it), and the user-tier `Edit(//Users/theo/Projects/engineering-docs-agent/**)` deny rule in `~/.claude/settings.json` (removed in `~/.claude` commit `34aeb1b`). The Edit/Write guard hooks in the `advanced-data-importer` project tier bind only sessions rooted there.
+- **Never re-add this checkout as a marketplace `directory` source.** That brings back the hazard that required the fence. Use the managed clone.
+- **The sibling clone `~/Projects/eda-cce181` was a workaround.** While this checkout was unwritable, work from CCE-176/177/181/186/189 was done there over SSH. As of 2026-09-25 all of its branch work is on `origin/main` or pushed. Its only local-only content was gitignored SDD scratch (`.superpowers/sdd/2026-09-23-cce169-window-cap/`). New work belongs in this checkout.
+- **If writes fail here again**, look for a leftover fence layer (`~/.zshrc`, `~/.claude/settings.json` `permissions.deny`) and remove it. Do not add a new one.
+
 ## Jira context
 
 All Jira work for this project lives in:

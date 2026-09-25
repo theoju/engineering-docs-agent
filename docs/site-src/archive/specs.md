@@ -1,6 +1,15 @@
 # Specs archive
 
-_Auto-generated; 71 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 75 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+
+## 2026-09
+
+| Title | Status | Summary |
+|---|---|---|
+| [CCE-177 — source-collector output ceiling: detect the split, bound the cause](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-09-23-cce177-source-collector-output-ceiling-design.md) | — | **Status:** approved |
+| [CCE-177 — forensic evidence record: source-collector output truncation](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-09-23-cce177-evidence.md) | — | **Captured:** 2026-09-23 · **Repo:** `theoju/engineering-docs-agent` · **Workflow:** `docs-agent-nightly` |
+| [CCE-169 — bound the review window so a stall drains instead of compounding](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-09-23-cce169-window-cap-design.md) | — | **Status:** design approved, not yet implemented |
+| [CCE-181 — cross-repo citations: declared external repos, rendered before lint](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/specs/2026-09-21-cce181-cross-repo-citations-design.md) | — | **Status:** implemented — Revision 2 (2026-09-21), see Revision history |
 
 ## 2026-08
 

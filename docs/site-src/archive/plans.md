@@ -1,6 +1,13 @@
 # Plans archive
 
-_Auto-generated; 77 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 79 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+
+## 2026-09
+
+| Title | Status | Summary |
+|---|---|---|
+| [CCE-169 Window Cap Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-09-23-cce169-window-cap.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
+| [Cross-Repo Citations Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-09-21-cce181-cross-repo-citations.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 
 ## 2026-08
 

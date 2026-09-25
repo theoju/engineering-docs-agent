@@ -233,6 +233,60 @@ def test_load_voice_samples_does_not_duplicate_claude_md(tmp_path):
     assert [s["path"] for s in samples] == ["CLAUDE.md"]
 
 
+def test_load_voice_samples_empty_override_does_not_suppress_claude_md(tmp_path):
+    """CCE-176: a 0-byte override must not abandon the sources behind it.
+
+    The override leads the source list, so before the fix a single
+    `touch docs-agent-voice.md` made this return [] — every voice sample gone,
+    including a populated CLAUDE.md, with nothing logged. The empty-snippet arm
+    was `break`; it is now `continue`.
+    """
+    from state_io import load_voice_samples
+
+    (tmp_path / "docs-agent-voice.md").write_text("")
+    (tmp_path / "CLAUDE.md").write_text("Host CLAUDE")
+
+    samples = load_voice_samples(tmp_path, {})
+
+    assert [s["path"] for s in samples] == ["CLAUDE.md"]
+
+
+def test_load_voice_samples_empty_configured_sample_does_not_suppress_the_rest(
+    tmp_path,
+):
+    """CCE-176: an empty sample_paths entry skips itself, not its successors."""
+    from state_io import load_voice_samples
+
+    (tmp_path / "first.md").write_text("First voice.")
+    (tmp_path / "blank.md").write_text("")
+    (tmp_path / "CLAUDE.md").write_text("Host CLAUDE")
+    cfg = {"voice": {"sample_paths": ["first.md", "blank.md"]}}
+
+    samples = load_voice_samples(tmp_path, cfg)
+
+    assert [s["path"] for s in samples] == ["first.md", "CLAUDE.md"]
+
+
+def test_load_voice_samples_still_stops_once_the_cap_is_reached(tmp_path):
+    """The 20KB budget must keep terminating the walk after CCE-176.
+
+    `continue` only weakens the loop if the cap stopped being enforced. It is
+    enforced in two places the fix does not touch: the slice, and the
+    `total >= cap` break. A source behind an already-exhausting one is
+    excluded entirely rather than appended empty.
+    """
+    from state_io import load_voice_samples
+
+    (tmp_path / "huge.md").write_text("x" * 25_000)
+    (tmp_path / "later.md").write_text("Never reached.")
+    cfg = {"voice": {"sample_paths": ["huge.md", "later.md"]}}
+
+    samples = load_voice_samples(tmp_path, cfg)
+
+    assert [s["path"] for s in samples] == ["huge.md"]
+    assert len(samples[0]["content"]) == 20_000
+
+
 def test_resolve_lens_string_form():
     from state_io import resolve_lens
 

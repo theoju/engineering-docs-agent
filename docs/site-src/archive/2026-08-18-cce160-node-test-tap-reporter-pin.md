@@ -20,6 +20,8 @@ The result: a genuinely green JS suite was reported to `pytest` as unparseable, 
 
 The failure mode has an unusually bad visibility profile: it is deterministic for every agent-run invocation and invisible to both CI and a human terminal, because neither of those sets `FORCE_COLOR`. A fix that merely tolerates both the coloured and plain formats would let a later removal of whatever pins the format regress silently — green in CI, red only for agents.
 
+`NO_COLOR=1` does not fix it — node gives `FORCE_COLOR` precedence over it — so the obvious-looking patch here is a dead end: it would pass review and change nothing, leaving the same reader to misdiagnose the failure twice in one session before finding the actual cause.
+
 ## The fix
 
 Pin the reporter explicitly rather than rely on node's default selection: `node --test --test-reporter=tap`. TAP's summary lines are a machine-readable contract (`# pass 53`, `# fail 0`), not human-facing prose, so they carry no colour regardless of `FORCE_COLOR`. `tests/templates/test_sdd_fidelity_gate_node.py` now builds its `node --test` invocation with `--test-reporter=tap` and matches the summary with the `#` prefix instead of the reporter-dependent `[ℹ#]` alternation.
@@ -29,3 +31,5 @@ The suite also gained a regression test that sets `FORCE_COLOR` explicitly rathe
 ## Why this matters beyond the one test
 
 No production code changed — only `CHANGELOG.md` and `tests/templates/test_sdd_fidelity_gate_node.py`. But the underlying gotcha generalizes: any stdout-parsing test or script that pattern-matches CLI output line-anchored, without pinning a machine-readable output mode, is exposed to the same `FORCE_COLOR`-shaped blind spot in agent sessions. If you're writing a parser against `node:test`, `npm`, or any other Node-ecosystem tool's default output, prefer its explicit machine-readable mode (TAP, `--json`, etc.) over the human-facing default, and test the coloured path deliberately rather than trusting session inheritance to exercise it for you.
+
+Scope was established, not assumed: this repo's other stdout-parsing call sites in `scripts/` all shell out to `git` (`rev-parse`, `ls-files`, `ls-remote`, `remote get-url`, `branch --show-current`) plus `gh --json` via `gh_client._run_json`. `git` ignores `FORCE_COLOR` entirely — it's a Node-ecosystem convention, not a general one — and defaults `color.ui=auto`, which is off whenever stdout isn't a TTY, so none of those sites carry this exposure today. The blind spot is specific to Node-ecosystem tooling parsed by agent-run code, not a property of stdout-parsing in general.

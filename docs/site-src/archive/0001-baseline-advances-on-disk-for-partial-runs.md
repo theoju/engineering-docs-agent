@@ -87,6 +87,11 @@ promotion, not at computation.
 
 - `docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md` — the source
   ADR this page publishes.
+- [Glossary](../architecture/glossary.md) — definitions for the terms this
+  record relies on without re-explaining: baseline, cursor, promotion,
+  ephemeral advance, deferral, and partial run. This page is about why the
+  advance is written and refused the way it is; the glossary is about what
+  those words mean.
 - CCE-40 §7 row 4 — the original state-advancement invariant this record
   reaffirms.
 - CCE-140 — introduced deferral tracking and the time-budget-scoped clamp.

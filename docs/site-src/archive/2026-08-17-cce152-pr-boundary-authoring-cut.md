@@ -47,7 +47,9 @@ time_budget_exceeded: authored 2/5 page batches (budget 2100s); deferring the re
 time_budget_exceeded: authored 2/5 page batches (hard cap 2415s over budget 2100s); cut inside PR #646, whose pages are now incomplete, so the baseline cannot advance to it
 ```
 
-An explicit `authoring_hard_cap_seconds` at or below the resolved budget is rejected as a config error (exit 2) rather than silently clamped up — equal collapses the hard deadline onto the soft one and quietly restores the pre-fix mid-group cut in exactly the place an operator was trying to configure it away.
+An explicit `authoring_hard_cap_seconds` at or below the resolved budget is rejected as a config error (exit 2) rather than silently clamped up — equal collapses the hard deadline onto the soft one and quietly restores the pre-fix mid-group cut in exactly the place an operator was trying to configure it away. The new key lives under `run`, which the schema (`templates/config.schema.json`) declares with `additionalProperties: false`, so a typo like `authoring_hardcap_seconds` is rejected at config load instead of being silently ignored and falling back to the ratio default. That rejection can't be expressed as a JSON Schema constraint between two sibling properties, so the schema only bounds the field to a positive integer and `resolve_authoring_hard_cap` (`scripts/orchestrator_runner.py:resolve_authoring_hard_cap`) enforces the "greater than `time_budget_seconds`" rule itself at startup.
+
+The token-TTL ceiling the cap clamps against also drops the merge-poll term entirely on a `merge.policy: manual` host: that host never calls `_maybe_auto_merge`'s poll loop, so reserving time for it would shrink the authoring window for no reason — the ceiling is `GITHUB_APP_TOKEN_TTL_SECONDS` minus the post-run tail alone in that case, one more way the clamp tracks what a given host actually spends rather than a fixed worst case.
 
 ## Verification
 

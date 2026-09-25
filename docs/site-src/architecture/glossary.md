@@ -3,7 +3,7 @@ description: 'Documents architecture glossary: Adds two net-new documentation fi
 source_files:
   - CONTEXT.md
   - docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md
-last_reviewed: '2026-08-22'
+last_reviewed: '2026-09-25'
 status: draft
 ---
 # Glossary
@@ -15,7 +15,10 @@ place. It mirrors `CONTEXT.md`, the repo's own domain-vocabulary reference:
 definitions only, no implementation detail and no design rationale. Where a
 term's rationale matters, it is recorded separately as an architecture
 decision record — this page tells you what a word means, not why the system
-was built that way.
+was built that way. For example, the choice between refusing an advance at
+**computation** versus at **promotion** — which is why promotion and
+ephemeral advance are two different terms below — is recorded in
+`docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md`, not here.
 
 ## Run window
 

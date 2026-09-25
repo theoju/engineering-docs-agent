@@ -171,8 +171,18 @@ def _rescue_json_object(text: str) -> dict | None:
         elif ch == "}":
             depth -= 1
             if depth == 0:
+                candidate = text[start : i + 1]
                 try:
-                    return json.loads(text[start : i + 1])
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    pass
+                # CCE-187: the balanced slice is structurally right but
+                # carries a raw control character inside a string value.
+                # Tolerate it here too, or prose contamination AND a stray
+                # newline together stay blind even though each alone is
+                # handled. See _parse_agent_payload for why this is safe.
+                try:
+                    return json.loads(candidate, strict=False)
                 except json.JSONDecodeError:
                     return None
     return None
@@ -210,6 +220,69 @@ def _strip_code_fence(text: str) -> str:
     # a final newline when the model emits a blank line before the closing
     # fence (e.g. {"a":1}\n\n```); strip normalizes that out.
     return m.group(1).strip()
+
+
+def _parse_agent_payload(
+    canonical_text: str, name: str, out_reasons: list[str] | None
+) -> dict | None:
+    """Parse a subagent's canonical stdout into a dict, or None.
+
+    Three tiers, strictest first. Each records its own reason on
+    ``out_reasons`` so the digest names the contamination class that
+    actually applied:
+
+    1. **Strict** ``json.loads`` on the fence-stripped text. Silent.
+    2. **Control-character tolerant** (CCE-187). A raw ``U+000A`` inside a
+       string value where ``\n`` was meant. Reason
+       ``control_chars_tolerated: <name>``.
+    3. **Prose rescue** (CCE-15) against the ORIGINAL text. Reason
+       ``prose_contamination_rescued: <name>``.
+
+    Tier 2 exists because run 36080301431 went blind on a payload that was
+    otherwise complete: the agent had emitted six real newlines inside one
+    Jira description. JSON's ban on raw control characters in strings is a
+    wire-format rule, not a semantic one — accepting the newline loses
+    nothing, and the alternative is discarding a whole night's collection
+    over a byte the model failed to escape. The failure is stochastic (the
+    previous run on the same window escaped correctly), so no pre-flight
+    instruction the agent checks against itself can close it.
+
+    Tier 2 deliberately does NOT repair an unescaped quote, which is the
+    other half of the class and the reason the 36080301431 payload is still
+    unparseable: rebalancing quotes inside string values can silently change
+    content, and ``_rescue_json_object``'s brace-walk desynchronises on a
+    stray quote anyway. That residual is tracked separately and pinned by
+    ``tests/orchestrator/test_dispatch_control_char_tolerance.py``.
+
+    Ordering is load-bearing. Tier 2 sits AFTER strict so a clean payload
+    records nothing, and BEFORE the rescue so a prose preamble is still
+    reported as prose rather than mislabelled as an escaping fault.
+    """
+    parse_text = _strip_code_fence(canonical_text)
+    try:
+        return json.loads(parse_text)
+    except json.JSONDecodeError:
+        pass
+
+    try:
+        tolerated = json.loads(parse_text, strict=False)
+    except json.JSONDecodeError:
+        tolerated = None
+    if tolerated is not None:
+        if out_reasons is not None:
+            out_reasons.append(f"control_chars_tolerated: {name}")
+        return tolerated
+
+    # CCE-15: rescue against the ORIGINAL canonical_text, not the strip
+    # output — if the strip changed nothing the two are identical, and if it
+    # did, the rescue should still see the full text in case the
+    # contamination is more complex than a simple fence wrap.
+    rescued = _rescue_json_object(canonical_text)
+    if rescued is not None:
+        if out_reasons is not None:
+            out_reasons.append(f"prose_contamination_rescued: {name}")
+        return rescued
+    return None
 
 
 def _extract_final_assistant_text(events: list[dict]) -> str:
@@ -1429,26 +1502,10 @@ def dispatch_subagent(
     canonical_text = canonical_text.strip()
     if not canonical_text:
         return None
-    # CCE-55: strip the markdown code-fence wrap if present. This is a
-    # whole-string match — fence-only inputs strip to clean JSON and
-    # parse without firing the rescue partial banner. Anything that
-    # isn't a pure fence wrap passes through unchanged so the existing
-    # _rescue_json_object path still handles anomalous contamination.
-    parse_text = _strip_code_fence(canonical_text)
-    try:
-        return json.loads(parse_text)
-    except json.JSONDecodeError:
-        # CCE-15: strict parse failed. Try prose-tolerant rescue against
-        # the ORIGINAL canonical_text (not the strip output) — if the
-        # strip didn't change anything, both are identical; if it did,
-        # we still want the rescue to see the full text in case the
-        # contamination is more complex than a simple fence wrap.
-        rescued = _rescue_json_object(canonical_text)
-        if rescued is not None:
-            if out_reasons is not None:
-                out_reasons.append(f"prose_contamination_rescued: {name}")
-            return rescued
-        return None
+    # CCE-55 fence strip, CCE-187 control-character tolerance and CCE-15
+    # prose rescue all live in _parse_agent_payload, which records the
+    # reason for whichever tier applied.
+    return _parse_agent_payload(canonical_text, name, out_reasons)
 
 
 def dispatch_validated(

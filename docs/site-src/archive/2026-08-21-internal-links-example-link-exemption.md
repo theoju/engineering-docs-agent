@@ -89,3 +89,13 @@ exemption from day one, rather than waiting for its own incident.
 
 Incident: 2026-08-21, `theoju/claude-code-self-assessment` runs `32460602658`
 and `32495019606`. Fix: PR #239.
+
+Test coverage lives in `tests/lint/test_internal_links.py`: fenced, single-tick,
+and double-tick-span examples all pass (`test_fenced_example_link_is_not_a_broken_link`,
+`test_inline_code_span_example_link_is_not_a_broken_link`,
+`test_double_backtick_span_example_link_is_not_a_broken_link`), a genuine
+broken link next to an exempted example still blocks
+(`test_real_broken_link_beside_an_example_still_blocks`), a broken link after
+a closed fence still blocks (`test_broken_link_after_a_closed_fence_still_blocks`),
+and an unterminated fence still fails closed rather than swallowing the rest
+of the file (`test_unterminated_fence_fails_closed`).

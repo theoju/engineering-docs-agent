@@ -1,19 +1,13 @@
 {
   "version": "1",
   "last_successful_run": {
-    "head_sha": "ab2a1e827975685fd23501d29e828e76d2009fee",
-    "completed_at": "2026-09-25T06:55:09.506790+00:00"
+    "head_sha": "1718883fa52e7d291a5e78266e26304a8634a0ec",
+    "completed_at": "2026-09-25T12:41:26.809470+00:00"
   },
   "deferral_counts": {
-    "theoju/engineering-docs-agent#263": 1,
-    "theoju/engineering-docs-agent#264": 1,
-    "theoju/engineering-docs-agent#265": 1,
-    "theoju/engineering-docs-agent#274": 1,
-    "theoju/engineering-docs-agent#276": 1,
-    "theoju/engineering-docs-agent#277": 1,
+    "theoju/engineering-docs-agent#263": 2,
     "theoju/engineering-docs-agent#278": 1,
-    "theoju/engineering-docs-agent#237": 2,
-    "theoju/engineering-docs-agent#241": 1
+    "theoju/engineering-docs-agent#241": 2
   },
   "pr_summaries": {
     "theoju/engineering-docs-agent#221": {
@@ -229,7 +223,7 @@
     "theoju/engineering-docs-agent#237": {
       "merge_sha": "ff470c0ad02219361b77600165ad542c53ad0f05",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T07:30:26.608377+00:00",
+      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
       "summary": {
         "pr_number": 237,
         "what_changed": "Fixes the citation_exists Tier-1 lint check so it resolves Python symbol citations (`path:symbol`) against any definition site \u2014 methods, nested functions, class attributes \u2014 not just top-level module definitions. Previously the linter only recognized symbols defined at the top level of a Python file, so citations to real, correctly-defined symbols nested inside a class or function were incorrectly reported as nonexistent, causing the authored page to be dropped by content-validator. Because a dropped page is not retried and the collection window still advances, this silently and permanently stranded documentation for legitimately-cited code.",
@@ -258,7 +252,7 @@
     "theoju/engineering-docs-agent#238": {
       "merge_sha": "c19b9cacae59f73a8ae33ccd199c6ea136d35c79",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T07:30:26.608377+00:00",
+      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
       "summary": {
         "pr_number": 238,
         "what_changed": "The nightly orchestrator's watermark-advance logic is now cursor-backed on every code path, not just the time-truncated one. `deferred_pages_by_pr` and the `held_back` set are now computed unconditionally, and the cursor walk that limits the advance to the last fully-documented PR is entered whenever `time_truncated OR held_back` is true (previously it was nested only inside the `if time_truncated:` branch). A clean run's behavior is unchanged (full window-HEAD advance when nothing is held back); a run that is partial for a non-time reason (lint block, `page_author_invalid`, etc.) now advances only as far as the last PR whose pages all landed, instead of jumping to full window HEAD and silently discarding the undocumented window. Reason strings are now cause-dependent (`time_budget_*` vs `held_back_*`) to preserve existing operator-facing grep patterns and test assertions for the time-truncated family.",
@@ -286,7 +280,7 @@
     "theoju/engineering-docs-agent#239": {
       "merge_sha": "1718883fa52e7d291a5e78266e26304a8634a0ec",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T07:30:26.608377+00:00",
+      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
       "summary": {
         "pr_number": 239,
         "what_changed": "Fixed the internal_links Tier-1 lint rule so it no longer treats markdown links that are being documented as examples (verbatim link text quoted inside prose explaining a link-parsing function) as if they were real navigation links. The rule was blocking pages that legitimately quoted link syntax as illustrative content, most visibly a page documenting extractDocRefs \u2014 a function whose entire purpose is parsing markdown links out of CLAUDE.md \u2014 which was blocked twice for containing the exact example links it was explaining.",
@@ -309,7 +303,7 @@
     "theoju/engineering-docs-agent#241": {
       "merge_sha": "c5dbe98162a575e360507e752a6eec5beae16563",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-22T13:09:24.689767+00:00",
+      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
       "summary": {
         "pr_number": 241,
         "what_changed": "The docs-agent now detects citations that page-author shortened into an unresolvable form (e.g. dropping a directory prefix) and reports them as an info-only digest line, instead of attempting to repair them. A prior repair capability (scripts/citation_repair.py rewriting the page text) was built, reviewed across four rounds, and withdrawn: each round moved the shortened citation into a region citation_exists does not verify, turning a correct BLOCK into a silent PASS even after the cited file was deleted. Detection now runs via _diagnose_citation_paths in orchestrator_runner.py, after the authoring loop and before the lint-block revert, so it inspects the same finished tree citation_exists checks. Findings are bounded per-page and per-run and classified into four confidence labels (candidate_in_run_inputs, suffix_match_only, ambiguous, no_candidate), with only the first three surfaced in the digest.",
@@ -339,7 +333,7 @@
     "theoju/engineering-docs-agent#263": {
       "merge_sha": "5f6ecc426dc246b0255ac58d082b53f612b7de36",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-22T13:09:24.689767+00:00",
+      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
       "summary": {
         "pr_number": 263,
         "what_changed": "Fixes three defects in the citation extraction/relativization layer of the Tier-1 `citation_exists` block rule in `scripts/lint/citation_exists.py`: an unguarded `OSError` in the blocking-loop existence check (the diagnostic loop already had a guard, per CCE-141 round 6), bare filenames that were never actually checked for existence, and relative paths that were used unnormalized before comparison/lookup.",
@@ -360,7 +354,7 @@
     "theoju/engineering-docs-agent#264": {
       "merge_sha": "64d56b1b319eb238aa3d348e532b8d2351db12f2",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-22T13:09:24.689767+00:00",
+      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
       "summary": {
         "pr_number": 264,
         "what_changed": "Fixes the citation run cap in `_diagnose_citation_paths` so it recovers how many citation-shortening findings the run has already emitted by counting actual recorded data rather than string-matching the literal prefix (`\"citation_shortening_suspected: \"`) that its own writer formats. Previously the cap's recovery logic and its writer shared an implicit string contract, so renaming the digest-line prefix would silently disable the run-level bound (`_CITATION_RUN_FINDINGS_CAP`) without any test failing.",
@@ -381,7 +375,7 @@
     "theoju/engineering-docs-agent#265": {
       "merge_sha": "f1232562be8ec03314f12e035fd89b60d28ae6d8",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-22T13:09:24.689767+00:00",
+      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
       "summary": {
         "pr_number": 265,
         "what_changed": "Onboarding scaffolding (`scripts/site_structure.py`) now writes a `.gitignore` entry for the per-run state sibling (the `current_run.json`-style file alongside `state.json`) when setting up a host repo, and `state_io.save_current_run`'s docstring is corrected to stop asserting that sibling is always gitignored \u2014 that was only true in the engineering-docs-agent repo itself, not on hosts that adopt the plugin.",
@@ -410,7 +404,7 @@
     "theoju/engineering-docs-agent#274": {
       "merge_sha": "c5dc23b2d9deb337f25c28924c1ee4144876ef88",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-22T13:09:24.689767+00:00",
+      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
       "summary": {
         "pr_number": 274,
         "what_changed": "Fixes a deadlock in the docs-agent nightly orchestrator where the deferral-skip escape hatch (from CCE-140) could never open. The consecutive-deferral counter lives in state.json, which is only updated on merge to main \u2014 but the run stays partial and unmerged precisely while the hatch is needed, so the counter never persists and the escape can never arm. The fix introduces a wall-clock-based stall detector: baseline_stall_days reads last_successful_run.completed_at (a durable, external signal unaffected by merge status), and resolve_deferral_stall_days derives a stall window as the deferral threshold plus one, guaranteeing the clock is strictly slower than the counter. When the baseline is older than the stall window, the run forgives the single oldest deferred PR (the cursor 'prefix blocker'), allowing the advance to proceed. The escape is classified info_only and only fires when a prefix blocker actually exists, never on staleness alone.",
@@ -437,7 +431,7 @@
     "theoju/engineering-docs-agent#276": {
       "merge_sha": "129a41148d9629bd5b012a82e7c8b0bfd81a24b5",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-22T13:09:24.689767+00:00",
+      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
       "summary": {
         "pr_number": 276,
         "what_changed": "Fixes two bugs in the CCE-175 deferral-skip stall clock discovered on its first production run. First, a run that forgives a stalled PR still reported `advance_cursor_backed = False` in the non-truncated (`else`) advance path, so CCE-140's merge gate (`partial and not advance_cursor_backed`) kept skipping the merge even after the escape fired \u2014 the flag is now `bool(skipped_numbers)` so a forgiven run is recognized as cursor-backed. Second, the escape was forgiving every deferred PR in the window rather than only the prefix blocker, which meant first-time deferrals on unrelated PRs got abandoned after 0 consecutive deferrals whenever an earlier PR had stalled the baseline \u2014 recreating the deadlock the escape exists to break. The fix narrows forgiveness to the single oldest deferred PR (the actual cursor blocker) per stalled run.",
@@ -467,7 +461,7 @@
     "theoju/engineering-docs-agent#277": {
       "merge_sha": "77c6894195fc5082c440c7dd3fc1467cbb2e7e28",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-22T13:09:24.689767+00:00",
+      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
       "summary": {
         "pr_number": 277,
         "what_changed": "Appends two new entries to the plugin-conventions list in CLAUDE.md documenting lessons from the CCE-175/178 stall-clock work: (1) the deferral-skip hatch must escape on a wall clock rather than its own counter, since the counter only persists on merge and can never arm during a stall, and (2) a test that reaches its assertion via a different code path than production isn't real coverage, and a design-time prototype that models code instead of running it can confirm a wrong design.",

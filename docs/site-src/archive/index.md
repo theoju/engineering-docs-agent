@@ -10,6 +10,10 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **CCE-170: the per-run state gitignore invariant was host-local, not universal** — `state_io.save_current_run` writes a sibling file next to `state.json` —
+- **CCE-175 / CCE-178: the deferral-skip stall clock** — CCE-140 gave the orchestrator an escape hatch: a PR that keeps blocking the
+- **CCE-178: A Forgiven Run Still Wasn't Merging** — **Date:** 2026-09-22
+- **CCE-141: automatic citation repair was built, then withdrawn** — `page-author` sometimes shortens an already-resolvable citation. The
 - **CCE-145: `citation_exists` Symbol Resolution Widened to Any Definition Site** — `citation_exists` is the Tier-1 **block** rule that verifies a `path:symbol`
 - **CCE-151: Watermark Advance Is Cursor-Backed on Every Path (2026-08-21)** — CCE-140 built the cursor-backed advance: a PR list of PRs the run either processed or deferred, walked in window order by `advance_cursor_list`, that stops at the oldest PR the run did not finish. CCE-144 built the writer that decides which PRs those are — `deferred_pages_by_pr` — and the `held_back` set derived from it.
 - **internal_links now exempts example links quoted in prose (CCE-131 pattern, recurring)** — The `internal_links` Tier-1 lint rule (`scripts/lint/internal_links.py`) checks
@@ -65,5 +69,5 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
 - **Specs archive** — _Auto-generated; 77 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_54 pages · regenerated nightly_
+_58 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

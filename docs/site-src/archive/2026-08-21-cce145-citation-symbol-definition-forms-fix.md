@@ -119,15 +119,25 @@ Run against the real consumer, not `test -f`:
   defined in another module → still blocks, all three reported.
 - Full plugin suite: 1449 passed, 4 skipped.
 
-`tests/lint/test_citation_exists.py` pins the new forms directly: parametrized
-cases for every JS/TS declaration shape (`export const`, `export function`,
-`export default function`, `export type`/`interface`/`enum`, and more), the
-`export { name }` re-export form, a class-method shorthand, and the Python
-indented-class-attribute case that mirrors the JS object-literal defect. A
-matching set of strictness regressions — a name in a comment, in a string, in
-a bare `import`, in a call with no trailing `{`, and as a quoted object key —
-pins that none of the widened forms starts resolving a name that is merely
-*mentioned* rather than *defined*.
+`tests/lint/test_citation_exists.py` pins the new forms directly.
+`test_symbol_nested_in_exported_object_literal_resolves` is the live repro
+itself — `memory` inside `EXECUTION_SCORERS`. `test_js_declaration_forms_resolve`
+parametrizes every JS/TS declaration shape (`export const`, `export function`,
+`export async function`, `export function*`, `export class`,
+`export default function`, plain `function`/`const`/`let`/`var`, and
+`export type`/`interface`/`enum`). `test_js_re_export_resolves` covers the
+`export { name }` passthrough form, `test_js_class_method_shorthand_resolves`
+the method-shorthand-with-body case, and
+`test_python_indented_class_attribute_resolves` the Python-side twin of the
+object-literal defect. A matching set of strictness regressions —
+`test_confabulated_symbol_in_js_module_still_blocks` and the parametrized
+`test_symbol_only_mentioned_not_defined_still_blocks` (a name in a comment, in
+a string, in a bare `import`, in a call with no trailing `{`, and as a quoted
+object key) — pins that none of the widened forms starts resolving a name
+that is merely *mentioned* rather than *defined*. On the gitignored-path side,
+`test_gitignored_path_absent_from_checkout_does_not_block` and
+`test_untracked_path_that_is_not_gitignored_still_blocks` pin the downgrade
+and its strictness boundary respectively.
 
 ## Deliberately out of scope
 

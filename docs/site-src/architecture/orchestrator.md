@@ -45,7 +45,15 @@ doc_kind: architecture
 7. **gap-detector loop** — one dispatch per admitted PR (`scripts/orchestrator_runner.py`).
 8. What's New composition and `last_successful_run.head_sha` promotion.
 
-Each stage that dispatches a subagent accumulates `partial_reasons` on failure via `add_partial`; a run with any non-`info_only` reason is marked `partial: true` and — per CCE-101 — never auto-merges.
+Each stage that dispatches a subagent accumulates `partial_reasons` on failure via `add_partial`; a run with any non-`info_only` reason is marked `partial: true`.
+
+`partial: true` does **not** by itself stop the auto-merge. CCE-101's original gate did block unconditionally, and CCE-140 removed that: every run this pipeline has ever produced is partial, so an unconditional block meant the auto-merge path never fired once and ten PRs were merged by hand. `_maybe_auto_merge` (`scripts/orchestrator_runner.py`) now refuses in three ordered steps:
+
+1. `merge_veto_reason(partial_reasons)` — a reason matching `_MERGE_VETO_REASON_PREFIXES` vetoes outright.
+2. `blind` (CCE-144) — an unconditional skip, placed ahead of the carve-out below on purpose: a cursor-backed advance is evidence about what a run *saw*, and a blind run did not see.
+3. `partial and not advance_cursor_backed` (CCE-140) — the carve-out. A partial run whose advance came from the CCE-109 cursor has advanced only past PRs whose pages all landed, so merging it is honest; a partial run that would advance to full HEAD has not.
+
+So the common shape in production is a run that is partial **and** merges: run `36105049654` (2026-09-25) carried a window cap, two `time_budget_exceeded` cuts and a `lint_block`, and `engineering-docs-agent-bot` merged its PR #292 thirteen seconds before the run ended, because the advance was cursor-backed. Reading `partial` as a merge blocker is the single easiest way to mis-diagnose this pipeline.
 
 ## Blind vs. degraded: classifying a blocking failure
 

@@ -117,7 +117,17 @@ Run against the real consumer, not `test -f`:
   disk) → `ok: True` with `unverifiable (gitignored)` notes, not a block.
 - The same clone with a confabulated symbol, a missing file, and a symbol
   defined in another module → still blocks, all three reported.
-- Full plugin suite green.
+- Full plugin suite: 1449 passed, 4 skipped.
+
+`tests/lint/test_citation_exists.py` pins the new forms directly: parametrized
+cases for every JS/TS declaration shape (`export const`, `export function`,
+`export default function`, `export type`/`interface`/`enum`, and more), the
+`export { name }` re-export form, a class-method shorthand, and the Python
+indented-class-attribute case that mirrors the JS object-literal defect. A
+matching set of strictness regressions — a name in a comment, in a string, in
+a bare `import`, in a call with no trailing `{`, and as a quoted object key —
+pins that none of the widened forms starts resolving a name that is merely
+*mentioned* rather than *defined*.
 
 ## Deliberately out of scope
 

@@ -47,8 +47,12 @@ holds rather than to guess when it might not:
 `cached_pr_summary` in `scripts/orchestrator_runner.py` is the read side: it
 serves an entry only when both checks pass, and returns `None` — a clean
 cache miss, never a crash — on a missing key, a malformed entry, or a bad
-merge_sha/fingerprint. `next_pr_summaries` is the write side that computes
-the following run's cache from this run's window and dispatch results.
+merge_sha/fingerprint. On a hit, the caller re-stamps `pr_number` onto the
+returned summary from the PR itself rather than trusting the stored echo —
+the same thing it does for a fresh dispatch, so a fixture-static (or
+otherwise stale) `pr_number` inside a stored entry can never leak through.
+`next_pr_summaries` is the write side that computes the following run's
+cache from this run's window and dispatch results.
 
 ## What survives between runs
 
@@ -92,14 +96,22 @@ degrade gracefully, it aborts the host's nightly at config validation.
 
 ## Reporting
 
-A run that served entries from cache records an `info_only`
-`pr_summaries_reused: n/m` reason. This is deliberately non-blocking: the
-saving describes work the run did *not* have to do, the opposite of a
-degradation, and flipping `partial` on a successful optimization would cost
-auto-merge every night through CCE-140's `partial and not
-advance_cursor_backed` gate — turning the optimization itself into an
-outage. It's recorded at all only because a saving nobody can see is
-indistinguishable from a feature that silently stopped working.
+A run that served entries from cache records an `info_only` reason of the
+form `pr_summaries_reused: n/m PRs served from cache, n pr-summarizer
+dispatches skipped` (`m` is `len(window_prs)` — this run's admitted window
+before the CCE-109 time-budget cut, not just the PRs actually summarized).
+This is deliberately non-blocking: the saving describes work the run did
+*not* have to do, the opposite of a degradation, and flipping `partial` on a
+successful optimization would cost auto-merge every night through CCE-140's
+`partial and not advance_cursor_backed` gate — turning the optimization
+itself into an outage. It's recorded at all only because a saving nobody can
+see is indistinguishable from a feature that silently stopped working.
+
+A `pr_summaries_reused: n/n` line is also useful evidence in its own right:
+since `cached_pr_summary` only returns a hit when a PR's `merge_sha` is both
+present and matching, a full-window cache hit proves every admitted PR
+carried a usable merge_sha that run — worth checking before blaming an
+empty cursor prefix on a collection problem.
 
 ## Related
 

@@ -27,8 +27,8 @@ Everything PR #223 asserted about the design being unimplemented was true only f
 
 PR #223 is now only a historical artifact: a record of a call that got made and then unmade almost immediately. Anyone who finds PR #223 or ticket CCE-150 by searching history, without also finding PR #224, would reasonably conclude that blind-run detection was never built. It was — under CCE-144, on `main`, since 2026-08-14.
 
-This page exists to close that gap for future readers. It does not add architecture or operations content of its own: the CCE-144 behavior it would otherwise describe is already covered by the CLAUDE.md CCE-144 entry and by `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`, both of which are current.
+This page exists to close that gap for future readers. It does not add architecture or operations content of its own: the CCE-144 behavior it would otherwise describe is already covered by the CLAUDE.md CCE-144 entry, by `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`, and by `docs/superpowers/plans/2026-08-13-cce144-blind-run-detection.md` — all three current, and each carrying its own banner disclaiming the CCE-150 abandon call.
 
 ## What to do if you land here
 
-Don't treat PR #223's body, or the archived plan/spec it points at, as authoritative for what the docs-agent runner does. Go to the CCE-144 spec and the CLAUDE.md entry instead — those describe the shipped `blind` vs. `degraded` split, the three consumers that read the flag, and the incident that motivated it. Treat CCE-150 as closed-in-error: the ticket is done, but not for the reason its closure said.
+Don't treat PR #223's body, or the archived plan/spec it points at, as authoritative for what the docs-agent runner does. Go to the CCE-144 spec and plan and the CLAUDE.md entry instead — those describe the shipped `blind` vs. `degraded` split, the three consumers that read the flag, and the incident that motivated it. Treat CCE-150 as closed-in-error: the ticket is done, but not for the reason its closure said.

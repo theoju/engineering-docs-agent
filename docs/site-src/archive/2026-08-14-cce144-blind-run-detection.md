@@ -31,7 +31,7 @@ Two consecutive nightlies, runs `31472240064` (2026-08-11) and `31579090583` (20
 | | **Blind** | **Degraded** |
 |---|---|---|
 | Meaning | the pipeline was prevented from judging | the pipeline judged, and rejected work |
-| Examples | `source_collector_invalid`, `content_validator_invalid`, `app_token_unavailable` | `lint_block`, `unsafe_page_path`, `time_budget_exceeded` |
+| Examples | `source_collector_invalid`, `pr_summarizer_invalid`, `content_validator_invalid`, `notifier_invalid`, `app_token_unavailable` | `lint_block`, `unsafe_page_path`, `time_budget_exceeded` |
 | Recovery | needs a human or a quota reset | self-healing — the next run retries |
 | Signal | red | green |
 
@@ -50,7 +50,7 @@ That is why `page_author_invalid` classifies degraded (an unlanded batch keeps i
 - `degraded=True` — flips `partial` only. Today's behavior for content rejection.
 - **neither** — flips `partial` *and* `blind`, and records the reason in the new `blind_reasons` list.
 
-The default is deliberately the loud one: an unclassified blocking failure turns the run red instead of passing silently. `_record_dispatch_reasons`, the single path every one of the seven agent dispatches takes, gained the same passthrough — `page-author` and `gap-detector` are the two callsites that pass `degraded=True`, because their dispatch failures hold work back rather than consuming it; the other five keep the fail-safe blind default.
+The default is deliberately the loud one: an unclassified blocking failure turns the run red instead of passing silently. `_record_dispatch_reasons`, the single path every one of the seven agent dispatches takes, gained the same passthrough — `page-author` and `gap-detector` are the two callsites that pass `degraded=True`, because their dispatch failures hold work back rather than consuming it. Of the five stages in the blocking pipeline (`source-collector`, `pr-summarizer`, `page-author`, `content-validator`, `notifier`), only `page-author` is degraded; the other four — `source-collector`, `pr-summarizer`, `content-validator`, `notifier` — keep the fail-safe blind default, since an unanswered dispatch there consumes input the run can never re-read.
 
 Three consumers read the resulting `current_run.blind` flag, all classified by call site rather than by matching reason strings:
 

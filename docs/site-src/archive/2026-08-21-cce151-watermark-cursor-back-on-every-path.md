@@ -74,3 +74,18 @@ If a nightly is green, `current_run.partial` is `true`, and the baseline still m
 - `scripts/orchestrator_runner.py`: `run`, `advance_cursor_list`, `partition_deferrals`, `_should_advance_watermark`.
 - `tests/orchestrator/fakes_mixed_block/README.md`: the per-PR fixture override this incident's regression coverage depends on.
 - `docs/superpowers/specs/2026-08-13-cce144-blind-run-detection-design.md`: the spec whose known residual this ticket closes.
+
+## Later amendments
+
+This page documents CCE-151 as shipped. Two follow-on tickets touched the same
+cursor walk and are recorded on their own pages rather than folded in here,
+so this page stays an accurate snapshot of what CCE-151 itself changed:
+
+- CCE-175 / CCE-178 gave the walk a wall-clock escape hatch
+  (`baseline_stall_days`, `partition_deferrals`'s `forgive` parameter) for the
+  case where the deferral counter in `state.json` can never ratchet because
+  the PR that would promote it never merges.
+- CCE-186 fixed a misleading reason string on the branch this page adds
+  (`held_back_no_advance_prefix_blocked` vs `held_back_no_advance_no_cursor`)
+  so the digest names the blocking PR instead of falsely claiming no admitted
+  PR had a usable `merge_sha`.

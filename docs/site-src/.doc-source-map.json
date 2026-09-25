@@ -1799,6 +1799,9 @@
     "tests/orchestrator/test_deferral_skip.py": [
       "architecture/orchestrator.md"
     ],
+    "tests/orchestrator/test_deferral_stall_escape.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_degraded_advance_non_truncated.py": [
       "architecture/orchestrator.md"
     ],
@@ -1830,6 +1833,9 @@
       "archive/2026-07-13-cce120-gap-detector-prid-injection.md"
     ],
     "tests/orchestrator/test_enforce_agent_frontmatter.py": [
+      "architecture/orchestrator.md"
+    ],
+    "tests/orchestrator/test_forgiven_run_merge_gate.py": [
       "architecture/orchestrator.md"
     ],
     "tests/orchestrator/test_gap_detector_prid_injection.py": [
@@ -2025,6 +2031,8 @@
       "tests/orchestrator/test_authoring_hard_cap_bounds.py",
       "tests/orchestrator/test_dispatch_reasons_classification.py",
       "tests/orchestrator/test_deferral_skip.py",
+      "tests/orchestrator/test_deferral_stall_escape.py",
+      "tests/orchestrator/test_forgiven_run_merge_gate.py",
       "tests/orchestrator/test_schema_invalid_soft_fail.py",
       "tests/state_io/test_add_partial_blind.py",
       "tests/templates/test_workflow_run_parity.py"

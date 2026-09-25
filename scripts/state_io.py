@@ -413,7 +413,17 @@ def load_voice_samples(repo_root: Path, config: dict) -> list[dict]:
             continue
         snippet = text[: max(0, cap - total)]
         if not snippet:
-            break
+            # CCE-176: this was `break`, which abandoned every remaining
+            # source. The budget arm it appears to implement is unreachable:
+            # the loop already breaks at `total >= cap` below, so `cap - total`
+            # is strictly positive whenever this slice is taken, and an empty
+            # snippet therefore means an EMPTY FILE, never an exhausted budget.
+            # Measured before the fix: a 0-byte `docs-agent-voice.md` — which
+            # leads the source list — made this return [] with a populated
+            # CLAUDE.md present, silently disabling every voice sample. The
+            # 20KB cap is still enforced, by the slice above and the break
+            # below; this arm only skips a file that contributes nothing.
+            continue
         samples.append({"path": str(src.relative_to(repo_root)), "content": snippet})
         total += len(snippet)
         if total >= cap:

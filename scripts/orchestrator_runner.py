@@ -71,6 +71,39 @@ _AGENTS_DIR: Path = Path(__file__).resolve().parent.parent / "agents"
 _AGENT_TOOLS_CACHE: dict[str, tuple[str, ...] | None] = {}
 
 
+def _plugin_dir_shadows_worktree(cwd: Path | None) -> bool:
+    """True when ``--plugin-dir`` covers the files the agent must write.
+
+    CCE-188. Every dispatch passes ``--plugin-dir _PLUGIN_ROOT`` so agents
+    resolve, and Claude Code protects plugin-owned files from agent writes —
+    correct on its own, since an agent should not rewrite its own definition.
+
+    On a host repo the plugin is installed to ``<host>/.docs-agent-plugin/``,
+    a SUBDIRECTORY of the worktree, so docs are siblings of the plugin dir and
+    writable. But this repo IS the plugin: ``.claude-plugin/plugin.json`` sits
+    at the root beside ``agents/``. When the docs-agent documents ITSELF,
+    ``_PLUGIN_ROOT == cwd`` and the whole worktree becomes plugin-owned, so
+    every page-author write is refused as "a sensitive file".
+
+    Measured on run 36007491599: 17 of 17 Edit/Write attempts denied, 0 pages
+    written, and — because the caller never inspected ``ok`` — 0 partial
+    reasons. The run exited 0 and read as healthy for weeks while the baseline
+    froze and the stall escape abandoned one PR's documentation every 4 days.
+
+    Returns True for ``cwd == _PLUGIN_ROOT`` and for ``_PLUGIN_ROOT`` being an
+    ancestor of ``cwd``; False for the host shape (plugin nested inside the
+    worktree) so host runs keep today's stricter default posture.
+    """
+    if cwd is None:
+        return False
+    try:
+        target = cwd.resolve()
+    except OSError:
+        # An unresolvable cwd is not a case to relax permissions for.
+        return False
+    return target == _PLUGIN_ROOT or _PLUGIN_ROOT in target.parents
+
+
 def _load_agent_allowed_tools(name: str) -> tuple[str, ...] | None:
     """Parse `tools:` YAML frontmatter from agents/<name>.md.
 
@@ -1415,6 +1448,15 @@ def dispatch_subagent(
     agent_tools = _load_agent_allowed_tools(name)
     if agent_tools is not None:
         base_argv.extend(["--allowedTools", " ".join(agent_tools)])
+    if _plugin_dir_shadows_worktree(cwd):
+        # CCE-188: the worktree is inside --plugin-dir, so every write would be
+        # refused as "a sensitive file". `auto` is the NARROWEST mode that
+        # clears the plugin-dir gate — measured: `acceptEdits` does NOT (it is
+        # in the CLI's bypass set yet the check still fires), and
+        # `bypassPermissions` works but disables every check, which is not
+        # something to hand an agent that carries Bash. --allowedTools still
+        # bounds each agent to its declared tools.
+        base_argv.extend(["--permission-mode", "auto"])
     debug_dir = os.environ.get("DOCS_AGENT_DEBUG_DIR")
     argv = (
         base_argv + ["--output-format", "stream-json", "--verbose"]
@@ -3068,6 +3110,26 @@ def run(
                     # above wrote it). Runs on both paths; a no-op when the write
                     # already matches.
                     _enforce_agent_frontmatter(target_path, agent_fields)
+            else:
+                # CCE-188: this `else` did not exist. A page-author that
+                # answered with a schema-valid `ok: false` fell straight
+                # through — no reason, no banner, nothing. That is how 17
+                # consecutive denied writes produced a digest reporting only a
+                # window cap, and why the failure survived weeks of green runs.
+                #
+                # Mirrors the wording already used on the manifest path
+                # (`page_author_error: <path>: <err>`), so the two authoring
+                # paths report a refusal identically.
+                #
+                # degraded, not blind: the page is unlanded, so the complement
+                # writer folds it into `deferred_pages_by_pr` and holds its PR
+                # out of the advance cursor. The work is held back, not
+                # consumed — the CCE-144 definition of degraded, and the same
+                # classification the `out is None` arm above already uses.
+                _err = out.get("error") or "page-author returned ok=false"
+                add_partial(
+                    state, f"page_author_error: {rel}: {_err}", degraded=True
+                )
 
         # CCE-141: DIAGNOSE shortened citations, over the FINISHED tree.
         #

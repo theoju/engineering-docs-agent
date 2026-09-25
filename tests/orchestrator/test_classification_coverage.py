@@ -188,10 +188,45 @@ def test_orchestrator_has_the_expected_call_site_population():
     descriptions are true, and the original message keeps that case because a
     missing sha is a collection problem while a blocked prefix is an authoring
     backlog. `test_authoring_truncation_without_cursor_holds_baseline` pins
-    that boundary and passes unchanged."""
+    that boundary and passes unchanged.
+
+    48 -> 49, CCE-188: `page_author_error` in `run`'s authoring loop. Audited
+    degraded=True. This site is the whole point of the ticket: the `if
+    out.get("ok"):` it now completes had NO else, so a page-author that
+    answered with a schema-valid `ok: false` fell through recording nothing.
+
+    That is not a hypothetical. Run 36007491599 — the last *successful*
+    nightly, exit 0 — made 17 Edit/Write attempts across 13 page-author
+    dispatches and had all 17 refused as "a sensitive file", because
+    `--plugin-dir _PLUGIN_ROOT` covers the whole worktree when this repo
+    documents itself. **Zero pages were written and zero reasons were
+    recorded.** The digest named only a window cap and a summary-cache line.
+    The run read as a healthy partial for weeks while the baseline froze and
+    the CCE-175/178 stall escape abandoned one PR's documentation every four
+    days; `#221` was lost that way before anyone looked.
+
+    Classification matches the `out is None` arm three lines above — the
+    established precedent for this loop — and the CCE-144 definition: an
+    unlanded page is folded into `deferred_pages_by_pr` by the complement
+    writer, which holds its PR out of the advance cursor, so the work is HELD
+    BACK rather than consumed. Explicitly NOT blind: a refused write is the
+    self-healing case, and blinding it would turn every such night red while
+    also freezing the cursor, which is the CCE-109 doom loop CCE-140 exists to
+    prevent. Explicitly NOT info_only: it must flip `partial`, because a run
+    that documented nothing is not a clean run and must not take the
+    non-cursor-backed advance. Not added to `_MERGE_VETO_REASON_PREFIXES` —
+    CCE-140's `partial and not advance_cursor_backed` gate already withholds
+    auto-merge here, and a veto would additionally block the nights where
+    other pages did land.
+
+    The wording deliberately copies the manifest path's existing reason
+    (`page_author_error: <path>: <err>` at the `else` near
+    `orchestrator_runner.py:4150`) so the two authoring paths report a refusal
+    identically, and it interpolates the agent's own `error` text because that
+    string is the only clue an operator gets about why the write failed."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 48, (
-        f"expected 48 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 49, (
+        f"expected 49 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
     # 42 -> 43: CCE-141 round 5 added `citation_diagnosis_truncated` in

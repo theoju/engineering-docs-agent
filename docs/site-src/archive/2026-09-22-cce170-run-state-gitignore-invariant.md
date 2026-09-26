@@ -100,7 +100,7 @@ degrade-gracefully mandate.
 
 ## Reference
 
-CCE-170 (2026-09-22). Test coverage:
+CCE-170 (2026-09-22), closed by PR #265. Test coverage:
 `tests/site/test_gitignore_run_state.py`. Implementation:
 `scripts/site_structure.py:ensure_run_state_gitignored`,
 wired into `scripts/site_structure.py:apply_scaffold`. Docstring fix:

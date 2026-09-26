@@ -74,6 +74,19 @@ lint:
   # page documenting that rule necessarily names a file that cannot exist.
   citation_exempt_tokens:
     - tests/scripts/__init__.py
+    # CCE-194: the CCE-141 shortening story is documented in this repo, and
+    # its evidence IS three paths that must not resolve here. The full path is
+    # a file in the ADIS host repo; `references/checklist.md` is the shortened
+    # form whose non-resolution is the whole finding; `erences/checklist.md`
+    # is the over-shortened form pinned by
+    # tests/orchestrator/test_citation_repair.py as the case the boundary rule
+    # must REJECT. A page explaining that cannot be written without naming all
+    # three. Blocked core/architecture/citation-shortening-detection.md —
+    # PR #241's last owed page — on nightly 36245832365, which held the cursor
+    # and kept 13 authored pages from merging.
+    - .claude/skills/connector-builder/references/checklist.md
+    - references/checklist.md
+    - erences/checklist.md
 
 publishing:
   base_url: https://theoju.github.io/engineering-docs-agent/

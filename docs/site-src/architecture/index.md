@@ -15,9 +15,11 @@ _Architecture: component design, agent contracts, data flows, and system interna
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **External citations** — `page-author`'s grounding rule (CCE-110) requires a backticked path to assert that the artifact exists in the **host** repo. Until CCE-181, that left no legal way to cite something that is real, current, and simply lives somewhere else. A page documenting plugin work on a downstream host repo would write the plugin's own path:
+- **Orchestrator** — `run()` in `scripts/orchestrator_runner.py:run` is the nightly pipeline entry point. It runs as a straight-line sequence of stages against one window of merged PRs (`last_successful_run.head_sha` to the current `HEAD`):
+- **Subagent contracts** — Every subagent's output shape exists in three places, and all three must agree:
 - **Glossary** — The orchestrator has accumulated overlapping terms — baseline, cursor, window
 - **Linting: citation existence** — Every page a `page-author` subagent writes cites code — a file, a test, or a
-- **Orchestrator** — `run()` in `scripts/orchestrator_runner.py:run` is the nightly pipeline entry point. It runs as a straight-line sequence of stages against one window of merged PRs (`last_successful_run.head_sha` to the current `HEAD`):
 - **Engineering Docs Agent** — A Claude Code plugin that turns merged PRs, Jira issues, and commits into a nightly docs-update PR — with voice-matched authoring, tiered linting, gap detection, and post-merge publish verification.
 - **Capability C — Canonical Core Citations** — Capability C keeps documentation honest about the code it describes. **C1**
 - **Capability C2: Canonical Core Authoring** — Capability C2 is the part of the engineering-docs-agent pipeline responsible for writing and maintaining canonical core documentation pages. It runs as the `page-author` subagent and produces files under the `agent-authored` site section. Every page C2 touches carries a machine-verifiable frontmatter contract that downstream lint, source-map, and publish-verification stages depend on.
@@ -35,5 +37,5 @@ _Architecture: component design, agent contracts, data flows, and system interna
 - **Decision Archive Index Generator (CCE-23)** — The archive-index generator (`scripts/archive_indexes.py`) turns directories of date-prefixed Markdown files into navigable index pages. It is capability D of the docs-agent: a pure read-then-write step that runs on every nightly pass and always overwrites its output.
 - **Source Map and Drift Detection (CCE-23)** — The source map (`scripts/source_map.py`) and drift detector (`scripts/source_drift.py`) together answer: when source code changes, which docs pages need a human review?
 
-_19 pages · regenerated nightly_
+_21 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

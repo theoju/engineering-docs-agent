@@ -1,9 +1,10 @@
 ---
-description: "Documents architecture orchestrator: CCE-144 splits a blocking failure into blind (the run was prevented from judging — source-collector/pr-summarizer/content-validator/notifier failure) vs degraded (the run judged and withheld work — a lint block, a time-budget cut, an unlanded page batch), where only blind exits non-zero, freezes the watermark, and vetoes auto-merge; CCE-151 makes the cursor-backed watermark advance run on every code path, not only the time-truncated one; CCE-175 adds a wall-clock stall backstop (baseline_stall_days / resolve_deferral_stall_days) so the CCE-140 deferral-skip hatch can forgive the oldest deferred PR even though its own consecutive-deferral counter can never ratchet while state.json stays unmerged; CCE-178 fixes the two defects that surfaced on that escape's first production run — a forgiven run reporting advance_cursor_backed=False and blocking its own merge, and over-broad forgiveness abandoning first-time deferrals — by scoping forgiveness to the single prefix-blocking PR and keying advance_cursor_backed off skipped_numbers; CCE-159 caches a merged PR's summary by merge SHA across nightly runs; the CCE-109/CCE-114 soft time-budget check bounds every expensive loop and, since CCE-152, cuts page authoring at a PR boundary rather than an arbitrary batch index; CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages; CCE-125 makes a gap-detector 'couldn't judge' verdict an info-only advisory outcome; and CCE-127 degrades a failed GitHub App token mint to a blocking partial reason instead of killing the job."
+description: "Documents architecture orchestrator: CCE-144 splits a blocking failure into blind (the run was prevented from judging — source-collector/pr-summarizer/content-validator/notifier failure) vs degraded (the run judged and withheld work — a lint block, a time-budget cut, an unlanded page batch), where only blind exits non-zero, freezes the watermark, and vetoes auto-merge; CCE-151 makes the cursor-backed watermark advance run on every code path, not only the time-truncated one; CCE-175 adds a wall-clock stall backstop (baseline_stall_days / resolve_deferral_stall_days) so the CCE-140 deferral-skip hatch can forgive the oldest deferred PR even though its own consecutive-deferral counter can never ratchet while state.json stays unmerged; CCE-178 fixes the two defects that surfaced on that escape's first production run — a forgiven run reporting advance_cursor_backed=False and blocking its own merge, and over-broad forgiveness abandoning first-time deferrals — by scoping forgiveness to the single prefix-blocking PR and keying advance_cursor_backed off skipped_numbers; CCE-173 fixes the CCE-141 citation-diagnosis run cap so it recovers how many findings it already emitted from a state counter (current_run.citation_findings_emitted) instead of string-matching the literal prefix its own digest formatter writes; CCE-159 caches a merged PR's summary by merge SHA across nightly runs; the CCE-109/CCE-114 soft time-budget check bounds every expensive loop and, since CCE-152, cuts page authoring at a PR boundary rather than an arbitrary batch index; CCE-119 makes the orchestrator (not the page-author LLM) the authority over frontmatter on agent-authored create pages; CCE-125 makes a gap-detector 'couldn't judge' verdict an info-only advisory outcome; and CCE-127 degrades a failed GitHub App token mint to a blocking partial reason instead of killing the job."
 source_files:
   - CHANGELOG.md
   - scripts/orchestrator_runner.py
   - scripts/state_io.py
+  - scripts/citation_repair.py
   - agents/page-author.md
   - agents/gap-detector.md
   - agents/schemas/gap_detector.schema.json
@@ -24,10 +25,11 @@ source_files:
   - tests/orchestrator/test_deferral_skip.py
   - tests/orchestrator/test_deferral_stall_escape.py
   - tests/orchestrator/test_forgiven_run_merge_gate.py
+  - tests/orchestrator/test_citation_repair_wiring.py
   - tests/orchestrator/test_schema_invalid_soft_fail.py
   - tests/state_io/test_add_partial_blind.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-09-25"
+last_reviewed: "2026-09-26"
 status: draft
 doc_kind: architecture
 ---
@@ -227,6 +229,16 @@ The fix narrows what `advance_cursor_backed` means on the `else` branch: it is n
 **Why the original end-to-end test passed anyway:** CCE-175's own end-to-end case asserted `orun._LAST_ADVANCE_CURSOR_BACKED is True` and went green, because it used a time-truncating clock — which routes the run through the cursor-walk branch (where the flag was already `True`), not the `else` branch production actually takes. A stock nightly against a small window never time-truncates. The assertion, the expected value, and the fixture were all individually correct, and the defect shipped anyway, because the test reached its assertion by a different code path than production runs. Every end-to-end case added for this fix (`tests/orchestrator/test_forgiven_run_merge_gate.py`) therefore runs with `time_budget_seconds=0` — the shape that actually ran in production — and its docstring says so.
 
 **Diagnostic reflex:** the escape fired, the run is green, and the PR body still reads `auto_merge_skipped: partial_run` → check `advance_cursor_backed` in the `else` branch, not whether the escape itself ran.
+
+## Citation-diagnosis run cap: bound the counter, not the counter's own prose (CCE-173)
+
+`_diagnose_citation_paths` (`scripts/orchestrator_runner.py:_diagnose_citation_paths`) is the CCE-141 detection-only diagnostic: after the authoring loop finishes and before the content-validator dispatch, it reads the finished page, asks `citation_repair.diagnose` which tracked file a citation `citation_exists` is about to block was probably shortened from, and reports the suggestion as an info-only `citation_shortening_suspected: ...` reason — it never rewrites the page, and `citation_repair.py` has no `write_text` to call. What it reports is bounded twice: `_CITATION_FINDINGS_CAP` per page, and `_CITATION_RUN_FINDINGS_CAP` across the whole run, because the per-page cap alone still lets N pages' findings clear GitHub's PR-body limit.
+
+The run-wide cap used to recover how many findings the run had already shown by counting `partial_reasons` entries that start with the literal `"citation_shortening_suspected: "` — the exact string its own formatter writes twenty lines further down in the same function. That coupled the cap to the digest's rendered prose through an untyped literal in two places with nothing linking them: renaming the prefix at the writer, with nothing else changed, makes the recovered count `0` forever, so `room` stays pinned at the cap, the `room == 0` branch can never fire, and the digest grows without bound while nothing fails. `add_partial`'s own string-dedupe compounded it — the old count measured distinct *rendered* strings, not findings emitted, and two pages producing the same finding text are not the same finding.
+
+CCE-173 moves the counter off the prose entirely. `current["citation_findings_emitted"]` — set via `state.setdefault("current_run", ...)` before the read, so a missing key can never silently look like "cap already reached" — is now the run's only record of how many findings it has shown, incremented by exactly `len(shown)` on every call. `test_the_cap_fires_on_the_counter_with_no_matching_prose_present` pins exactly the case the old recovery logic could not see — no matching `citation_shortening_suspected` prose in `partial_reasons` at all, but the counter already at `_CITATION_RUN_FINDINGS_CAP` — and `test_the_counter_survives_a_renamed_digest_prefix` rewrites every already-emitted line to a different prefix mid-run and asserts the cap still holds, both in `tests/orchestrator/test_citation_repair_wiring.py`.
+
+**Diagnostic reflex:** if a run's citation-diagnosis digest keeps growing across pages past where `_CITATION_RUN_FINDINGS_CAP` should have stopped it, read `current_run.citation_findings_emitted` against the cap before suspecting the cap logic itself — the counter is state now, not a scan of its own output.
 
 ## Advisory agents: a "couldn't judge" verdict must not degrade the run
 

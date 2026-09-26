@@ -5,6 +5,9 @@
     "CHANGELOG.md": [
       "architecture/orchestrator.md"
     ],
+    "CLAUDE.md": [
+      "architecture/external-citations.md"
+    ],
     "CONTEXT.md": [
       "architecture/glossary.md"
     ],
@@ -28,7 +31,9 @@
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/cce4-schema-enforcement.md",
-      "architecture/orchestrator.md"
+      "architecture/external-citations.md",
+      "architecture/orchestrator.md",
+      "architecture/subagent-contracts.md"
     ],
     "agents/pr-summarizer.md": [
       "architecture/cce4-schema-enforcement.md"
@@ -61,7 +66,8 @@
     "agents/schemas/page_author.schema.json": [
       "architecture/cce23-source-map-drift.md",
       "architecture/cce4-schema-enforcement.md",
-      "architecture/structured-docs-site-generation.md"
+      "architecture/structured-docs-site-generation.md",
+      "architecture/subagent-contracts.md"
     ],
     "agents/schemas/pr_summarizer.schema.json": [
       "architecture/cce23-source-map-drift.md",
@@ -89,6 +95,9 @@
     ],
     "docs/site-src/.doc-source-map.json": [
       "architecture/engineering-docs-agent.md"
+    ],
+    "docs/site-src/api/contracts/page_author.schema.md": [
+      "architecture/subagent-contracts.md"
     ],
     "docs/site-src/index.md": [
       "architecture/engineering-docs-agent.md"
@@ -1172,6 +1181,7 @@
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/cce32-github-pages-publish-target.md",
+      "architecture/external-citations.md",
       "architecture/structured-docs-site-generation.md"
     ],
     "docs/superpowers/plans/2026-09-23-cce169-window-cap.md": [
@@ -1540,6 +1550,7 @@
     "docs/superpowers/specs/2026-09-21-cce181-cross-repo-citations-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/external-citations.md",
       "architecture/structured-docs-site-generation.md"
     ],
     "docs/superpowers/specs/2026-09-23-cce169-window-cap-design.md": [
@@ -1582,6 +1593,9 @@
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "requirements-dev.txt": [
+      "architecture/external-citations.md"
+    ],
     "scripts/archive_indexes.py": [
       "architecture/cce23-decision-archive.md",
       "architecture/structured-docs-site-generation.md",
@@ -1590,12 +1604,18 @@
     "scripts/build_poller.py": [
       "architecture/publish-verifier.md"
     ],
+    "scripts/citation_repair.py": [
+      "architecture/orchestrator.md"
+    ],
     "scripts/contracts.py": [
       "architecture/cce23-source-map-drift.md",
       "archive/v0-1-1-hardening.md"
     ],
     "scripts/contracts_doc.py": [
       "architecture/cce23-api-reference.md"
+    ],
+    "scripts/external_refs.py": [
+      "architecture/external-citations.md"
     ],
     "scripts/frontmatter_contract.py": [
       "architecture/index.md"
@@ -1651,6 +1671,7 @@
       "architecture/cce23-source-map-drift.md",
       "architecture/cce4-schema-enforcement.md",
       "architecture/cce6-7-8-batch.md",
+      "architecture/external-citations.md",
       "architecture/index.md",
       "architecture/orchestrator.md",
       "archive/2026-07-13-cce120-gap-detector-prid-injection.md",
@@ -1680,6 +1701,7 @@
     "scripts/state_io.py": [
       "architecture/cce23-api-reference.md",
       "architecture/cce23-decision-archive.md",
+      "architecture/external-citations.md",
       "architecture/orchestrator.md",
       "archive/cce5-9-batch-prep-roadmap.md",
       "archive/v0-1-1-hardening.md"
@@ -1702,6 +1724,7 @@
     ],
     "templates/config.schema.json": [
       "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/external-citations.md",
       "architecture/publish-verifier.md",
       "archive/v0-1-1-hardening.md"
     ],
@@ -1721,6 +1744,9 @@
     ],
     "templates/workflow-verify.yml": [
       "architecture/cce32-github-pages-publish-target.md"
+    ],
+    "tests/agents/test_page_author_failure_payload.py": [
+      "architecture/subagent-contracts.md"
     ],
     "tests/agents/test_schema_md_sync.py": [
       "architecture/cce10-source-collector-canonical-shape.md",
@@ -1757,6 +1783,24 @@
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/linting.md"
     ],
+    "tests/orchestrator/fakes_external_repo/fake_content_validator.json": [
+      "architecture/external-citations.md"
+    ],
+    "tests/orchestrator/fakes_external_repo/fake_gap_detector.json": [
+      "architecture/external-citations.md"
+    ],
+    "tests/orchestrator/fakes_external_repo/fake_notifier.json": [
+      "architecture/external-citations.md"
+    ],
+    "tests/orchestrator/fakes_external_repo/fake_page_author.json": [
+      "architecture/external-citations.md"
+    ],
+    "tests/orchestrator/fakes_external_repo/fake_pr_summarizer.json": [
+      "architecture/external-citations.md"
+    ],
+    "tests/orchestrator/fakes_external_repo/fake_source_collector.json": [
+      "architecture/external-citations.md"
+    ],
     "tests/orchestrator/fakes_schema_invalid/fake_content_validator.json": [
       "architecture/cce4-schema-enforcement.md"
     ],
@@ -1790,7 +1834,11 @@
     "tests/orchestrator/test_build_poller.py": [
       "architecture/publish-verifier.md"
     ],
+    "tests/orchestrator/test_citation_repair_wiring.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_classification_coverage.py": [
+      "architecture/external-citations.md",
       "architecture/orchestrator.md"
     ],
     "tests/orchestrator/test_cursor_backed_merge.py": [
@@ -1835,6 +1883,12 @@
     "tests/orchestrator/test_enforce_agent_frontmatter.py": [
       "architecture/orchestrator.md"
     ],
+    "tests/orchestrator/test_external_refs_e2e.py": [
+      "architecture/external-citations.md"
+    ],
+    "tests/orchestrator/test_external_refs_wiring.py": [
+      "architecture/external-citations.md"
+    ],
     "tests/orchestrator/test_forgiven_run_merge_gate.py": [
       "architecture/orchestrator.md"
     ],
@@ -1868,6 +1922,15 @@
     ],
     "tests/schemas/test_source_collector_schema.py": [
       "archive/cce15-source-collector-root-cause-sweep.md"
+    ],
+    "tests/scripts/test_external_refs_config.py": [
+      "architecture/external-citations.md"
+    ],
+    "tests/scripts/test_external_refs_render.py": [
+      "architecture/external-citations.md"
+    ],
+    "tests/scripts/test_state_io_external_repos.py": [
+      "architecture/external-citations.md"
     ],
     "tests/setup/test_setup_discover.py": [
       "archive/v0-1-1-hardening.md"
@@ -1993,6 +2056,29 @@
       "scripts/lint/lint_runner.py",
       "scripts/lint/stub_redirect.py"
     ],
+    "architecture/external-citations.md": [
+      "CLAUDE.md",
+      "agents/page-author.md",
+      "docs/superpowers/plans/2026-09-21-cce181-cross-repo-citations.md",
+      "docs/superpowers/specs/2026-09-21-cce181-cross-repo-citations-design.md",
+      "requirements-dev.txt",
+      "scripts/external_refs.py",
+      "scripts/orchestrator_runner.py",
+      "scripts/state_io.py",
+      "templates/config.schema.json",
+      "tests/orchestrator/fakes_external_repo/fake_content_validator.json",
+      "tests/orchestrator/fakes_external_repo/fake_gap_detector.json",
+      "tests/orchestrator/fakes_external_repo/fake_notifier.json",
+      "tests/orchestrator/fakes_external_repo/fake_page_author.json",
+      "tests/orchestrator/fakes_external_repo/fake_pr_summarizer.json",
+      "tests/orchestrator/fakes_external_repo/fake_source_collector.json",
+      "tests/orchestrator/test_classification_coverage.py",
+      "tests/orchestrator/test_external_refs_e2e.py",
+      "tests/orchestrator/test_external_refs_wiring.py",
+      "tests/scripts/test_external_refs_config.py",
+      "tests/scripts/test_external_refs_render.py",
+      "tests/scripts/test_state_io_external_repos.py"
+    ],
     "architecture/glossary.md": [
       "CONTEXT.md",
       "docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md"
@@ -2013,6 +2099,7 @@
       "CHANGELOG.md",
       "scripts/orchestrator_runner.py",
       "scripts/state_io.py",
+      "scripts/citation_repair.py",
       "agents/page-author.md",
       "agents/gap-detector.md",
       "agents/schemas/gap_detector.schema.json",
@@ -2033,6 +2120,7 @@
       "tests/orchestrator/test_deferral_skip.py",
       "tests/orchestrator/test_deferral_stall_escape.py",
       "tests/orchestrator/test_forgiven_run_merge_gate.py",
+      "tests/orchestrator/test_citation_repair_wiring.py",
       "tests/orchestrator/test_schema_invalid_soft_fail.py",
       "tests/state_io/test_add_partial_blind.py",
       "tests/templates/test_workflow_run_parity.py"
@@ -2057,6 +2145,12 @@
       "scripts/source_map.py",
       "scripts/archive_indexes.py",
       "scripts/verify_diagrams.py"
+    ],
+    "architecture/subagent-contracts.md": [
+      "agents/page-author.md",
+      "agents/schemas/page_author.schema.json",
+      "docs/site-src/api/contracts/page_author.schema.md",
+      "tests/agents/test_page_author_failure_payload.py"
     ],
     "archive/2026-07-13-cce120-gap-detector-prid-injection.md": [
       "scripts/orchestrator_runner.py",

@@ -58,6 +58,16 @@ won't stop it from being staged — you still need the one-time
 `run_state_gitignore`, so the setup skill's JSON output tells you when that
 manual step remains.
 
+The check itself asks git, via `_git_rc`, rather than shelling out and
+letting an exception propagate: `git check-ignore` and `git ls-files` both
+report through a return code, and anything that isn't a normal git process
+(no repo, no git on `PATH`) comes back as git's own "not a repository" code,
+128, treated the same as "not already ignored." Scaffolding a directory
+that isn't a git repo yet still gets a `.gitignore` file and never raises —
+generic-first applies here too, not just to hosts with an existing
+convention. See `tests/site/test_gitignore_run_state.py`, which pins both
+that degrade path and the tracked-path and idempotency cases above.
+
 ## What this doesn't fix
 
 This closes the gap for hosts scaffolded from now on, and it's a no-op

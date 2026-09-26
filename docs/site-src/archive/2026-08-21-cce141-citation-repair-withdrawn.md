@@ -149,4 +149,14 @@ classification (`info_only`, never flips `partial`) is asserted in
 
 Full design history, including each round's reproduction steps, is in
 `docs/superpowers/specs/2026-08-21-cce141-citation-path-repair-design.md`.
+
+Both implementation plans that preceded the withdrawal —
+`docs/superpowers/plans/2026-08-21-cce141-citation-path-repair.md` (the
+original suffix-match repair) and
+`docs/superpowers/plans/2026-08-21-cce141-corroborated-repair.md` (the
+round-2 fix that made corroboration an entry condition) — are kept in the
+repo, but every unchecked step in each is marked superseded: do not execute
+either. They stay only as the record of what was tried before detection-only
+shipped.
+
 Reference: CCE-141 (2026-08-21).

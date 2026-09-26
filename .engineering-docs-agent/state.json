@@ -2,12 +2,19 @@
   "version": "1",
   "last_successful_run": {
     "head_sha": "1718883fa52e7d291a5e78266e26304a8634a0ec",
-    "completed_at": "2026-09-25T12:41:26.809470+00:00"
+    "completed_at": "2026-09-26T12:09:40.958930+00:00"
   },
   "deferral_counts": {
-    "theoju/engineering-docs-agent#263": 2,
-    "theoju/engineering-docs-agent#278": 1,
-    "theoju/engineering-docs-agent#241": 2
+    "theoju/engineering-docs-agent#263": 3,
+    "theoju/engineering-docs-agent#278": 2,
+    "theoju/engineering-docs-agent#241": 3,
+    "theoju/engineering-docs-agent#264": 1,
+    "theoju/engineering-docs-agent#265": 1,
+    "theoju/engineering-docs-agent#274": 1,
+    "theoju/engineering-docs-agent#276": 1,
+    "theoju/engineering-docs-agent#277": 1,
+    "theoju/engineering-docs-agent#279": 1,
+    "theoju/engineering-docs-agent#281": 1
   },
   "pr_summaries": {
     "theoju/engineering-docs-agent#221": {
@@ -303,7 +310,7 @@
     "theoju/engineering-docs-agent#241": {
       "merge_sha": "c5dbe98162a575e360507e752a6eec5beae16563",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
+      "last_seen_at": "2026-09-26T12:44:47.750642+00:00",
       "summary": {
         "pr_number": 241,
         "what_changed": "The docs-agent now detects citations that page-author shortened into an unresolvable form (e.g. dropping a directory prefix) and reports them as an info-only digest line, instead of attempting to repair them. A prior repair capability (scripts/citation_repair.py rewriting the page text) was built, reviewed across four rounds, and withdrawn: each round moved the shortened citation into a region citation_exists does not verify, turning a correct BLOCK into a silent PASS even after the cited file was deleted. Detection now runs via _diagnose_citation_paths in orchestrator_runner.py, after the authoring loop and before the lint-block revert, so it inspects the same finished tree citation_exists checks. Findings are bounded per-page and per-run and classified into four confidence labels (candidate_in_run_inputs, suffix_match_only, ambiguous, no_candidate), with only the first three surfaced in the digest.",
@@ -333,7 +340,7 @@
     "theoju/engineering-docs-agent#263": {
       "merge_sha": "5f6ecc426dc246b0255ac58d082b53f612b7de36",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
+      "last_seen_at": "2026-09-26T12:44:47.750642+00:00",
       "summary": {
         "pr_number": 263,
         "what_changed": "Fixes three defects in the citation extraction/relativization layer of the Tier-1 `citation_exists` block rule in `scripts/lint/citation_exists.py`: an unguarded `OSError` in the blocking-loop existence check (the diagnostic loop already had a guard, per CCE-141 round 6), bare filenames that were never actually checked for existence, and relative paths that were used unnormalized before comparison/lookup.",
@@ -354,7 +361,7 @@
     "theoju/engineering-docs-agent#264": {
       "merge_sha": "64d56b1b319eb238aa3d348e532b8d2351db12f2",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
+      "last_seen_at": "2026-09-26T12:44:47.750642+00:00",
       "summary": {
         "pr_number": 264,
         "what_changed": "Fixes the citation run cap in `_diagnose_citation_paths` so it recovers how many citation-shortening findings the run has already emitted by counting actual recorded data rather than string-matching the literal prefix (`\"citation_shortening_suspected: \"`) that its own writer formats. Previously the cap's recovery logic and its writer shared an implicit string contract, so renaming the digest-line prefix would silently disable the run-level bound (`_CITATION_RUN_FINDINGS_CAP`) without any test failing.",
@@ -375,7 +382,7 @@
     "theoju/engineering-docs-agent#265": {
       "merge_sha": "f1232562be8ec03314f12e035fd89b60d28ae6d8",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
+      "last_seen_at": "2026-09-26T12:44:47.750642+00:00",
       "summary": {
         "pr_number": 265,
         "what_changed": "Onboarding scaffolding (`scripts/site_structure.py`) now writes a `.gitignore` entry for the per-run state sibling (the `current_run.json`-style file alongside `state.json`) when setting up a host repo, and `state_io.save_current_run`'s docstring is corrected to stop asserting that sibling is always gitignored \u2014 that was only true in the engineering-docs-agent repo itself, not on hosts that adopt the plugin.",
@@ -404,7 +411,7 @@
     "theoju/engineering-docs-agent#274": {
       "merge_sha": "c5dc23b2d9deb337f25c28924c1ee4144876ef88",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
+      "last_seen_at": "2026-09-26T12:44:47.750642+00:00",
       "summary": {
         "pr_number": 274,
         "what_changed": "Fixes a deadlock in the docs-agent nightly orchestrator where the deferral-skip escape hatch (from CCE-140) could never open. The consecutive-deferral counter lives in state.json, which is only updated on merge to main \u2014 but the run stays partial and unmerged precisely while the hatch is needed, so the counter never persists and the escape can never arm. The fix introduces a wall-clock-based stall detector: baseline_stall_days reads last_successful_run.completed_at (a durable, external signal unaffected by merge status), and resolve_deferral_stall_days derives a stall window as the deferral threshold plus one, guaranteeing the clock is strictly slower than the counter. When the baseline is older than the stall window, the run forgives the single oldest deferred PR (the cursor 'prefix blocker'), allowing the advance to proceed. The escape is classified info_only and only fires when a prefix blocker actually exists, never on staleness alone.",
@@ -431,7 +438,7 @@
     "theoju/engineering-docs-agent#276": {
       "merge_sha": "129a41148d9629bd5b012a82e7c8b0bfd81a24b5",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
+      "last_seen_at": "2026-09-26T12:44:47.750642+00:00",
       "summary": {
         "pr_number": 276,
         "what_changed": "Fixes two bugs in the CCE-175 deferral-skip stall clock discovered on its first production run. First, a run that forgives a stalled PR still reported `advance_cursor_backed = False` in the non-truncated (`else`) advance path, so CCE-140's merge gate (`partial and not advance_cursor_backed`) kept skipping the merge even after the escape fired \u2014 the flag is now `bool(skipped_numbers)` so a forgiven run is recognized as cursor-backed. Second, the escape was forgiving every deferred PR in the window rather than only the prefix blocker, which meant first-time deferrals on unrelated PRs got abandoned after 0 consecutive deferrals whenever an earlier PR had stalled the baseline \u2014 recreating the deadlock the escape exists to break. The fix narrows forgiveness to the single oldest deferred PR (the actual cursor blocker) per stalled run.",
@@ -461,7 +468,7 @@
     "theoju/engineering-docs-agent#277": {
       "merge_sha": "77c6894195fc5082c440c7dd3fc1467cbb2e7e28",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
+      "last_seen_at": "2026-09-26T12:44:47.750642+00:00",
       "summary": {
         "pr_number": 277,
         "what_changed": "Appends two new entries to the plugin-conventions list in CLAUDE.md documenting lessons from the CCE-175/178 stall-clock work: (1) the deferral-skip hatch must escape on a wall clock rather than its own counter, since the counter only persists on merge and can never arm during a stall, and (2) a test that reaches its assertion via a different code path than production isn't real coverage, and a design-time prototype that models code instead of running it can confirm a wrong design.",
@@ -482,7 +489,7 @@
     "theoju/engineering-docs-agent#278": {
       "merge_sha": "7bf84b2add36523acb6fcc7b5d95233767986ab6",
       "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-22T13:09:24.689767+00:00",
+      "last_seen_at": "2026-09-26T12:44:47.750642+00:00",
       "summary": {
         "pr_number": 278,
         "what_changed": "page-author's JSON schema now accepts the failure-shape payload it emits when a page can't be authored (null content/page_hint fields) instead of rejecting that payload as schema_invalid. The fix updates agents/schemas/page_author.schema.json and the canonical fenced schema block in agents/page-author.md in lockstep, adds a regression test (tests/agents/test_page_author_failure_payload.py) pinning the documented failure shape as valid, and regenerates the published contract doc.",
@@ -506,6 +513,62 @@
         "notes": "available_sections for lens 'core' lists directories only, not existing filenames, so the architecture edit target is a best-guess path; the orchestrator should fall back to 'create' if no matching page is found. The auto-generated contract doc (docs/site-src/api/contracts/page_author.schema.md) is excluded from doc_targets per CLAUDE.md's explicit prohibition on hand-editing it.",
         "error": null,
         "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#279": {
+      "merge_sha": "6e6be21e4db3a85b5d3f93bc5f76531ad4809417",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-09-26T12:44:47.750642+00:00",
+      "summary": {
+        "pr_number": 279,
+        "what_changed": "Adds support for citing files in other repositories from docs pages. Hosts declare neighbouring repos under a new `lint.external_repos` config block; `page-author` emits a prefixed token (`<prefix>/<path>`) for such citations, and a new orchestrator step (`scripts/external_refs.py`, wired via `_render_external_refs_for_pages`) rewrites that token into a GitHub blob link (for a public neighbour) or a bare artifact name (for a private one) before the Tier-1 linter runs. `citation_exists` itself is unchanged \u2014 it never sees the prefixed form. The renderer is careful to skip any token whose backticks abut existing code-span delimiters, so it never mutates markdown-escaped content and only ever downgrades a corrupting rewrite to a safe block.",
+        "why": "Post-CCE-140, a page blocked by `citation_exists` is not just a stall \u2014 the deferral-skip hatch abandons the PR and the page is silently never written (the CCE-141 mechanism). CCE-181 was filed because `page-author` legitimately needs to cite a file that lives in a different repository (e.g. plugin-repo paths cited from a host's docs), which `citation_exists` correctly rejects since the path genuinely doesn't exist on the host. Rendering the citation into a real link/reference before the linter sees it lets that content ship instead of being dropped.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "doc_kind": "architecture",
+            "notes": "Document the new external-citation rendering step (_render_external_refs_for_pages) in the authoring/linting pipeline: it runs after page-author, before citation_exists, is config-gated on lint.external_repos (no-op otherwise), and renders public-repo tokens to GitHub blob links / private-repo tokens to bare basenames."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-09-26-cce181-cross-repo-citations.md",
+            "doc_kind": "decision",
+            "notes": "Record the CCE-181 design decision: declare-a-prefix-then-render rather than teach citation_exists cross-repo resolution, why detection-only rewrite is safe by construction (operator-declared literal, no inference over an open population, unlike the CCE-141 repair that was withdrawn), and the CommonMark code-span backtick-run hazard discovered and guarded against during implementation."
+          }
+        ],
+        "notes": "available_sections did not enumerate existing page filenames, only section directories; architecture/orchestrator.md is assumed to exist based on repeated references to a published 'docs/site-src/architecture/orchestrator.md' page in CLAUDE.md's incident history. If no such page exists in this lens, treat that target as action=create instead."
+      }
+    },
+    "theoju/engineering-docs-agent#281": {
+      "merge_sha": "13511b6cf0436f35ca0b1e9c77f24bf31757defd",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-09-26T12:44:47.750642+00:00",
+      "summary": {
+        "pr_number": 281,
+        "what_changed": "Updates CLAUDE.md with three session learnings from the CCE-181 investigation, each folded into its relevant existing entry rather than added as new sections: (1) the SDD pre-flight scan's budget should focus on grepping a plan's references to existing artifacts (functions, fixtures, signatures, counts) against the tree, not reviewing its designs, since a measured sample showed all five plan defects in the CCE-181 run were in references to existing artifacts while zero were in newly-invented files; (2) prune_merged_branches.py is blind to a branch still held by a live worktree, so the worktree must be removed first (git worktree remove, then git branch -D); (3) a skipped test still reports the job green, so a test-dependency's purpose (proving something is present) must be verified by a count that would move if it were absent, not by the pass/fail exit code alone. This is a docs-only change to CLAUDE.md.",
+        "why": "Captures operational learnings from the CCE-181 cross-repo-citation session (and related CCE-90/CCE-127/CCE-176/CCE-182 threads) before they are lost, so future SDD runs, branch-cleanup sweeps, and CI-dependent tests benefit from the same hard-won lessons rather than repeating the investigations.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "doc_kind": "architecture",
+            "notes": "If the orchestrator architecture page documents the SDD verification-ladder / pre-flight-scan guidance, reflect the new 'references over designs' budget guidance from CCE-182."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "2026-09-26-cce182-session-learnings.md",
+            "doc_kind": "decision",
+            "notes": "Digest-style capture of the three CCE-181/CCE-182 session learnings (plan-defect concentration in references, prune-helper worktree blind spot, skipped-test-reports-green) if no better-fitting existing page is found."
+          }
+        ],
+        "notes": "PR is a pure CLAUDE.md prose update; no source files changed. doc_targets are best-effort mappings since the actual engineering-docs-agent published site structure (architecture/orchestrator.md) is inferred from CLAUDE.md's own description of what that page covers, not confirmed against site contents."
       }
     }
   },

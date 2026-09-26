@@ -46,7 +46,7 @@ mode                                 wrote    sensitive denials
 ``acceptEdits`` is in the CLI's bypass set yet the plugin-dir check still
 fires, so it is **not** a fix.
 
-## CCE-192 superseded the remedy, not the diagnosis
+## CCE-193 superseded the remedy, not the diagnosis
 
 The table above is still an accurate measurement, and ``auto`` was picked from
 it as the narrowest mode that cleared the gate. It held for two runs. On
@@ -57,7 +57,7 @@ failure. All ten page-author writes failed, zero pages were authored, and the
 freeze came back. Re-measured the same day: ``auto`` → no verdict, file not
 created; ``bypassPermissions`` → written.
 
-So the permission axis was the wrong axis. CCE-192 removes the gate instead of
+So the permission axis was the wrong axis. CCE-193 removes the gate instead of
 negotiating with it: ``--plugin-dir`` now points at a copy of the plugin
 OUTSIDE the worktree (``_vendored_plugin_dir``), which restores the property
 the host shape already has, and **no** ``--permission-mode`` is passed on any
@@ -70,7 +70,7 @@ The host shape is unaffected and must stay that way. On a host repo the plugin
 installs to ``<host>/.docs-agent-plugin/`` — a SUBDIRECTORY — so docs are
 siblings of the plugin dir and already writable with no permission mode at all
 (verified). ``test_host_shape_gets_no_permission_mode`` is the regression guard
-that keeps host runs on the stricter default — and after CCE-192 the shadowed
+that keeps host runs on the stricter default — and after CCE-193 the shadowed
 path is on that same default, so the guard now covers both.
 """
 
@@ -155,7 +155,7 @@ def _capture(captured: dict, stdout: str = '{"ok": true}'):
 def test_shadowed_dispatch_vendors_plugin_dir_and_passes_no_permission_mode(
     tmp_path, monkeypatch
 ):
-    """CCE-192 inverted this test's original assertion, deliberately.
+    """CCE-193 inverted this test's original assertion, deliberately.
 
     It used to require ``--permission-mode auto`` on a shadowed worktree. That
     remedy was measured to fail in production when the server-side classifier
@@ -181,7 +181,7 @@ def test_shadowed_dispatch_vendors_plugin_dir_and_passes_no_permission_mode(
 
     cmd = captured["cmd"]
     assert "--permission-mode" not in cmd, (
-        "CCE-192: vendoring removes the plugin-dir gate, so no permission "
+        "CCE-193: vendoring removes the plugin-dir gate, so no permission "
         f"override is needed on any path; argv={cmd}"
     )
     plugin_dir = Path(cmd[cmd.index("--plugin-dir") + 1]).resolve()
@@ -230,7 +230,7 @@ def test_host_shape_gets_no_permission_mode(tmp_path, monkeypatch):
         "writes already succeed on the host shape with no permission mode; "
         f"adding one here lowers posture on every host for no benefit. argv={cmd}"
     )
-    # CCE-192: hosts must NOT pay for the vendoring either. Their plugin dir is
+    # CCE-193: hosts must NOT pay for the vendoring either. Their plugin dir is
     # already a subdirectory, so copying it would be pure cost and would move
     # the lint scripts away from where `plugin_root` says they are.
     assert Path(cmd[cmd.index("--plugin-dir") + 1]) == plugin.resolve(), (

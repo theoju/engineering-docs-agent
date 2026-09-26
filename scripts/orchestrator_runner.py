@@ -104,7 +104,7 @@ def _plugin_dir_shadows_worktree(cwd: Path | None) -> bool:
     return target == _PLUGIN_ROOT or _PLUGIN_ROOT in target.parents
 
 
-# CCE-192: the plugin components `--plugin-dir` resolves. `.claude-plugin` is
+# CCE-193: the plugin components `--plugin-dir` resolves. `.claude-plugin` is
 # mandatory (it holds plugin.json); the rest are copied when present. A new
 # plugin component directory must be added here or agents will stop resolving
 # in the self-documenting case only, which is the hardest place to notice.
@@ -115,7 +115,10 @@ _VENDORED_PLUGIN_DIR: Path | None = None
 def _vendored_plugin_dir() -> Path:
     """A copy of this plugin OUTSIDE the worktree, for `--plugin-dir`.
 
-    CCE-192. On a host repo the plugin is vendored to a SUBDIRECTORY of the
+    CCE-193 (the squash-merged commit 847ae914 says CCE-192 — that key was
+    already taken by an unrelated source-collector payload-size bug filed
+    from another session, and the commit message cannot be rewritten).
+    On a host repo the plugin is vendored to a SUBDIRECTORY of the
     worktree (`.docs-agent-plugin/`), so the docs an agent writes are siblings
     of `--plugin-dir`, not descendants of it, and ordinary writes are ordinary.
     Only when the docs-agent documents itself does `--plugin-dir` become the
@@ -1612,7 +1615,7 @@ def dispatch_subagent(
         "--agent",
         name,
         "--plugin-dir",
-        # CCE-192: when _PLUGIN_ROOT IS the worktree (the docs-agent
+        # CCE-193: when _PLUGIN_ROOT IS the worktree (the docs-agent
         # documenting itself), point at a vendored copy outside it so the docs
         # being written are not plugin-owned files. `plugin_root` in the agent
         # INPUTS stays _PLUGIN_ROOT — that one locates scripts/lint, a separate
@@ -1622,7 +1625,7 @@ def dispatch_subagent(
     agent_tools = _load_agent_allowed_tools(name)
     if agent_tools is not None:
         base_argv.extend(["--allowedTools", " ".join(agent_tools)])
-    # CCE-192: no --permission-mode override. CCE-188 added `auto` here to get
+    # CCE-193: no --permission-mode override. CCE-188 added `auto` here to get
     # past the plugin-dir gate; vendoring removes the gate instead, so the
     # dispatch runs at the CLI's default posture and does not depend on a
     # server-side classifier ruling on every write.

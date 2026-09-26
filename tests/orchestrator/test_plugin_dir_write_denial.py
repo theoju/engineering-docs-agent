@@ -44,10 +44,25 @@ mode                                 wrote    sensitive denials
 ===================================  =======  =================
 
 ``acceptEdits`` is in the CLI's bypass set yet the plugin-dir check still
-fires, so it is **not** a fix. ``bypassPermissions`` works but disables every
-check, which is not something to hand ``source-collector`` — it carries
-``Bash``. ``auto`` is the narrowest mode that clears the gate, and
-``--allowedTools`` still bounds each agent to its declared tools.
+fires, so it is **not** a fix.
+
+## CCE-192 superseded the remedy, not the diagnosis
+
+The table above is still an accurate measurement, and ``auto`` was picked from
+it as the narrowest mode that cleared the gate. It held for two runs. On
+nightly ``36241035222`` (2026-09-26) it stopped: ``auto`` clears the gate by
+asking a SERVER-SIDE classifier to approve each write, and the classifier
+returned **no verdict** — which the CLI treats as a hard, non-retryable
+failure. All ten page-author writes failed, zero pages were authored, and the
+freeze came back. Re-measured the same day: ``auto`` → no verdict, file not
+created; ``bypassPermissions`` → written.
+
+So the permission axis was the wrong axis. CCE-192 removes the gate instead of
+negotiating with it: ``--plugin-dir`` now points at a copy of the plugin
+OUTSIDE the worktree (``_vendored_plugin_dir``), which restores the property
+the host shape already has, and **no** ``--permission-mode`` is passed on any
+path. Measured: the write succeeds and ``--agent page-author`` still resolves
+from the vendored copy.
 
 ## Scope
 
@@ -55,7 +70,8 @@ The host shape is unaffected and must stay that way. On a host repo the plugin
 installs to ``<host>/.docs-agent-plugin/`` — a SUBDIRECTORY — so docs are
 siblings of the plugin dir and already writable with no permission mode at all
 (verified). ``test_host_shape_gets_no_permission_mode`` is the regression guard
-that keeps host runs on today's stricter default.
+that keeps host runs on the stricter default — and after CCE-192 the shadowed
+path is on that same default, so the guard now covers both.
 """
 
 from __future__ import annotations
@@ -136,9 +152,27 @@ def _capture(captured: dict, stdout: str = '{"ok": true}'):
     return fake_run
 
 
-def test_shadowed_dispatch_gets_permission_mode_auto(tmp_path, monkeypatch):
+def test_shadowed_dispatch_vendors_plugin_dir_and_passes_no_permission_mode(
+    tmp_path, monkeypatch
+):
+    """CCE-192 inverted this test's original assertion, deliberately.
+
+    It used to require ``--permission-mode auto`` on a shadowed worktree. That
+    remedy was measured to fail in production when the server-side classifier
+    abstained. The fix now removes the condition instead of relaxing the check,
+    so the correct assertion is the opposite: ``--plugin-dir`` must point
+    OUTSIDE the worktree, and NO permission mode may be passed.
+
+    Asserting the absence matters as much as the vendoring. If a future change
+    re-adds a mode here "to be safe", it silently reintroduces a dependency on
+    a third party ruling on every write, which is the defect this closes.
+    """
     captured: dict = {}
+    (tmp_path / ".claude-plugin").mkdir()
+    (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"name": "x"}')
+    (tmp_path / "agents").mkdir()
     monkeypatch.setattr(runner, "_PLUGIN_ROOT", tmp_path.resolve())
+    monkeypatch.setattr(runner, "_VENDORED_PLUGIN_DIR", None)
     monkeypatch.setattr(subprocess, "run", _capture(captured))
 
     runner.dispatch_subagent(
@@ -146,17 +180,37 @@ def test_shadowed_dispatch_gets_permission_mode_auto(tmp_path, monkeypatch):
     )
 
     cmd = captured["cmd"]
-    assert "--permission-mode" in cmd, (
-        "a shadowed worktree must relax the mode or every write is refused as "
-        f"a sensitive file; argv={cmd}"
+    assert "--permission-mode" not in cmd, (
+        "CCE-192: vendoring removes the plugin-dir gate, so no permission "
+        f"override is needed on any path; argv={cmd}"
     )
-    assert cmd[cmd.index("--permission-mode") + 1] == "auto", (
-        "must be `auto`: `acceptEdits` was measured NOT to clear the "
-        "plugin-dir gate, and `bypassPermissions` disables every check for "
-        f"agents that carry Bash. argv={cmd}"
+    plugin_dir = Path(cmd[cmd.index("--plugin-dir") + 1]).resolve()
+    assert plugin_dir != tmp_path.resolve(), "--plugin-dir must not be the worktree"
+    assert tmp_path.resolve() not in plugin_dir.parents, (
+        f"vendored dir must live outside the worktree; got {plugin_dir}"
     )
-    # The tool allow-list is the remaining bound and must survive.
+    assert (plugin_dir / ".claude-plugin" / "plugin.json").is_file(), (
+        "the vendored copy must carry the manifest or agents stop resolving"
+    )
+    assert (plugin_dir / "agents").is_dir()
+    # The tool allow-list is the security boundary and must survive.
     assert "--allowedTools" in cmd
+
+
+def test_vendoring_fails_loud_when_the_manifest_is_missing(tmp_path, monkeypatch):
+    """A silent fallback to _PLUGIN_ROOT would reintroduce the shadowing."""
+    monkeypatch.setattr(runner, "_PLUGIN_ROOT", tmp_path.resolve())
+    monkeypatch.setattr(runner, "_VENDORED_PLUGIN_DIR", None)
+    with pytest.raises(RuntimeError, match="cannot vendor plugin"):
+        runner._vendored_plugin_dir()
+
+
+def test_vendored_dir_is_cached_per_process(tmp_path, monkeypatch):
+    """One copy per run, not one per dispatch."""
+    (tmp_path / ".claude-plugin").mkdir()
+    monkeypatch.setattr(runner, "_PLUGIN_ROOT", tmp_path.resolve())
+    monkeypatch.setattr(runner, "_VENDORED_PLUGIN_DIR", None)
+    assert runner._vendored_plugin_dir() == runner._vendored_plugin_dir()
 
 
 def test_host_shape_gets_no_permission_mode(tmp_path, monkeypatch):
@@ -171,10 +225,16 @@ def test_host_shape_gets_no_permission_mode(tmp_path, monkeypatch):
         "page-author", {"x": 1}, dry_run_dir=None, cwd=tmp_path
     )
 
-    assert "--permission-mode" not in captured["cmd"], (
+    cmd = captured["cmd"]
+    assert "--permission-mode" not in cmd, (
         "writes already succeed on the host shape with no permission mode; "
-        "adding one here lowers posture on every host for no benefit. "
-        f"argv={captured['cmd']}"
+        f"adding one here lowers posture on every host for no benefit. argv={cmd}"
+    )
+    # CCE-192: hosts must NOT pay for the vendoring either. Their plugin dir is
+    # already a subdirectory, so copying it would be pure cost and would move
+    # the lint scripts away from where `plugin_root` says they are.
+    assert Path(cmd[cmd.index("--plugin-dir") + 1]) == plugin.resolve(), (
+        f"host dispatch must use the installed plugin dir unchanged; argv={cmd}"
     )
 
 

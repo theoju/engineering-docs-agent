@@ -6,7 +6,7 @@ instead of invoking Claude.
 """
 
 from __future__ import annotations
-import argparse, fnmatch, hashlib, json, os, re, subprocess, sys, time
+import argparse, atexit, fnmatch, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -102,6 +102,64 @@ def _plugin_dir_shadows_worktree(cwd: Path | None) -> bool:
         # An unresolvable cwd is not a case to relax permissions for.
         return False
     return target == _PLUGIN_ROOT or _PLUGIN_ROOT in target.parents
+
+
+# CCE-192: the plugin components `--plugin-dir` resolves. `.claude-plugin` is
+# mandatory (it holds plugin.json); the rest are copied when present. A new
+# plugin component directory must be added here or agents will stop resolving
+# in the self-documenting case only, which is the hardest place to notice.
+_PLUGIN_COMPONENT_DIRS = ("agents", "skills", "commands", "hooks")
+_VENDORED_PLUGIN_DIR: Path | None = None
+
+
+def _vendored_plugin_dir() -> Path:
+    """A copy of this plugin OUTSIDE the worktree, for `--plugin-dir`.
+
+    CCE-192. On a host repo the plugin is vendored to a SUBDIRECTORY of the
+    worktree (`.docs-agent-plugin/`), so the docs an agent writes are siblings
+    of `--plugin-dir`, not descendants of it, and ordinary writes are ordinary.
+    Only when the docs-agent documents itself does `--plugin-dir` become the
+    worktree root, making every docs page a plugin-owned file that the CLI
+    refuses to write as "a sensitive file".
+
+    CCE-188 treated that as a permission problem and cleared it with
+    `--permission-mode auto`. That worked for two runs and then stopped: `auto`
+    defers to a server-side classifier, and on nightly 36241035222 the
+    classifier returned NO VERDICT for all ten page-author writes, which the
+    CLI treats as a hard non-retryable failure. Zero pages were authored and
+    the freeze CCE-188 had broken came back.
+
+    Vendoring is the structural fix rather than a wider permission: it restores
+    the invariant the host case already has, so no override is needed at all
+    and authoring no longer depends on a third party being available and
+    willing to rule on each write. Measured 2026-09-26 — with `--plugin-dir`
+    pointed at a vendored copy and NO `--permission-mode` flag, the write
+    succeeds and `--agent page-author` still resolves.
+
+    Cached per process: one copy per run, not per dispatch.
+    """
+    global _VENDORED_PLUGIN_DIR
+    if _VENDORED_PLUGIN_DIR is not None:
+        return _VENDORED_PLUGIN_DIR
+
+    manifest = _PLUGIN_ROOT / ".claude-plugin"
+    if not manifest.is_dir():
+        # Fail loud. A silent fallback to _PLUGIN_ROOT would reintroduce the
+        # shadowing this function exists to remove.
+        raise RuntimeError(
+            f"cannot vendor plugin: {manifest} is missing, so --plugin-dir "
+            "cannot be moved outside the worktree"
+        )
+
+    dest = Path(tempfile.mkdtemp(prefix="eda-plugin-vendor."))
+    shutil.copytree(manifest, dest / ".claude-plugin")
+    for component in _PLUGIN_COMPONENT_DIRS:
+        source = _PLUGIN_ROOT / component
+        if source.is_dir():
+            shutil.copytree(source, dest / component)
+    atexit.register(shutil.rmtree, dest, True)
+    _VENDORED_PLUGIN_DIR = dest
+    return dest
 
 
 def _load_agent_allowed_tools(name: str) -> tuple[str, ...] | None:
@@ -1554,20 +1612,20 @@ def dispatch_subagent(
         "--agent",
         name,
         "--plugin-dir",
-        str(_PLUGIN_ROOT),
+        # CCE-192: when _PLUGIN_ROOT IS the worktree (the docs-agent
+        # documenting itself), point at a vendored copy outside it so the docs
+        # being written are not plugin-owned files. `plugin_root` in the agent
+        # INPUTS stays _PLUGIN_ROOT — that one locates scripts/lint, a separate
+        # concern, and must keep resolving against the real checkout.
+        str(_vendored_plugin_dir() if _plugin_dir_shadows_worktree(cwd) else _PLUGIN_ROOT),
     ]
     agent_tools = _load_agent_allowed_tools(name)
     if agent_tools is not None:
         base_argv.extend(["--allowedTools", " ".join(agent_tools)])
-    if _plugin_dir_shadows_worktree(cwd):
-        # CCE-188: the worktree is inside --plugin-dir, so every write would be
-        # refused as "a sensitive file". `auto` is the NARROWEST mode that
-        # clears the plugin-dir gate — measured: `acceptEdits` does NOT (it is
-        # in the CLI's bypass set yet the check still fires), and
-        # `bypassPermissions` works but disables every check, which is not
-        # something to hand an agent that carries Bash. --allowedTools still
-        # bounds each agent to its declared tools.
-        base_argv.extend(["--permission-mode", "auto"])
+    # CCE-192: no --permission-mode override. CCE-188 added `auto` here to get
+    # past the plugin-dir gate; vendoring removes the gate instead, so the
+    # dispatch runs at the CLI's default posture and does not depend on a
+    # server-side classifier ruling on every write.
     debug_dir = os.environ.get("DOCS_AGENT_DEBUG_DIR")
     argv = (
         base_argv + ["--output-format", "stream-json", "--verbose"]

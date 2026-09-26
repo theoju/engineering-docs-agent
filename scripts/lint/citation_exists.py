@@ -79,7 +79,22 @@ DEFAULT_EXAMPLE_PREFIXES = ("example/",)
 # exempt branch also reports drift ("stale exemption") once the token starts
 # resolving, and exempt_tokens() unions with host config where
 # example_prefixes() replaces it.
-DEFAULT_EXEMPT_TOKENS = ("test_snake_case", "path/to/file.py")
+#
+# CCE-194: the same argument as CCE-134, for this module's OWN grammar
+# placeholders. `dir/file.ext` is how the docstring above spells the shape
+# `_REPO_PATH_RE` matches; `scripts/x.py` and `docs/../scripts/x.py` are the
+# normalization examples. All three live in plugin source, so any page that
+# documents this rule quotes them, on any host. Blocked
+# `docs/site-src/architecture/citation-linting.md` on nightly 36245832365.
+# Exact tokens, deliberately not an `x/` example prefix: a confabulated
+# `scripts/y.py` must still block.
+DEFAULT_EXEMPT_TOKENS = (
+    "test_snake_case",
+    "path/to/file.py",
+    "dir/file.ext",
+    "scripts/x.py",
+    "docs/../scripts/x.py",
+)
 
 
 def strip_fenced_blocks(text: str) -> str:

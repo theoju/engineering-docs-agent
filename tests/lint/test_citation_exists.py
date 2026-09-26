@@ -837,6 +837,76 @@ def test_grammar_placeholder_suffix_variants_are_exempt(tmp_path):
     assert ok is True, msg
 
 
+def test_plugin_defaults_exempt_this_rules_own_normalization_examples(tmp_path):
+    """CCE-194: the exact tokens that blocked a real page on nightly 36245832365.
+
+    `docs/site-src/architecture/citation-linting.md` documents this rule, so it
+    quotes the shape `_REPO_PATH_RE` matches (`dir/file.ext`) and the two
+    normalization examples. All three live in THIS module's source, so every
+    host that documents the rule hits them — the CCE-134 argument, applied to
+    the rest of the grammar.
+    """
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text(
+        "Paths are matched as `dir/file.ext`. A citation like `scripts/x.py` "
+        "resolves, and `docs/../scripts/x.py` normalizes to the same file.\n"
+    )
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is True, msg
+
+
+def test_the_exemptions_are_exact_not_a_prefix_hole(tmp_path):
+    """The whole risk of an exemption is turning a BLOCK into a silent PASS.
+
+    Each new token is an exact string, so a confabulated NEIGHBOUR of it must
+    still block. If this ever passes, the exemption has become a namespace and
+    the rule has a hole the size of `scripts/`.
+    """
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text(
+        "Invented: `scripts/y.py`, `dir/file2.ext`, `references/checklists.md`.\n"
+    )
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    ok, msg = citation_exists.check_path(page, repo, files, {})
+    assert ok is False, "confabulated neighbours of an exempt token must block"
+    for token in ("scripts/y.py", "dir/file2.ext", "references/checklists.md"):
+        assert token in msg, f"{token} missing from the block message: {msg}"
+
+
+def test_host_config_exempts_the_cce141_shortening_evidence(tmp_path):
+    """CCE-194: the three paths PR #241's page cannot be written without.
+
+    The shortening story's evidence IS a path that must not resolve. Blocking
+    the page that explains it held the cursor at #241 and kept 13 authored
+    pages from merging on nightly 36245832365.
+    """
+    repo = _tmp_git_repo(tmp_path)
+    page = repo / "page.md"
+    page.write_text(
+        "The page cited `.claude/skills/connector-builder/references/checklist.md` "
+        "and the rewrite emitted bare `references/checklist.md`. The boundary "
+        "rule must reject `erences/checklist.md`.\n"
+    )
+    _commit_all(repo)
+    files = citation_exists.tracked_files(repo)
+    config = {
+        "lint": {
+            "citation_exempt_tokens": [
+                ".claude/skills/connector-builder/references/checklist.md",
+                "references/checklist.md",
+                "erences/checklist.md",
+            ]
+        }
+    }
+    ok, msg = citation_exists.check_path(page, repo, files, config)
+    assert ok is True, msg
+
+
 def test_grammar_placeholder_survives_a_host_example_prefix_override(tmp_path):
     """Durability across hosts: example_prefixes() REPLACES on host override, so
     a prefix-based fix would break every host that renamed its example

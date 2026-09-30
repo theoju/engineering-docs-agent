@@ -838,7 +838,7 @@ def test_grammar_placeholder_suffix_variants_are_exempt(tmp_path):
 
 
 def test_plugin_defaults_exempt_this_rules_own_normalization_examples(tmp_path):
-    """CCE-194: the exact tokens that blocked a real page on nightly 36245832365.
+    """CCE-195: the exact tokens that blocked a real page on nightly 36245832365.
 
     `docs/site-src/architecture/citation-linting.md` documents this rule, so it
     quotes the shape `_REPO_PATH_RE` matches (`dir/file.ext`) and the two
@@ -879,7 +879,7 @@ def test_the_exemptions_are_exact_not_a_prefix_hole(tmp_path):
 
 
 def test_host_config_exempts_the_cce141_shortening_evidence(tmp_path):
-    """CCE-194: the three paths PR #241's page cannot be written without.
+    """CCE-195: the three paths PR #241's page cannot be written without.
 
     The shortening story's evidence IS a path that must not resolve. Blocking
     the page that explains it held the cursor at #241 and kept 13 authored
@@ -1328,3 +1328,134 @@ def test_help_output_states_the_bare_filename_scope():
     help_text = " ".join(r.stdout.split()).lower()
     assert "bare filenames" in help_text
     assert "citation_line_free" in help_text
+
+
+# ---------- CCE-195: the rule must not block pages that document it ----------
+#
+# This module's source is an INPUT to the pages it lints. page-author reads it
+# to document the rule and quotes back whatever example paths it finds, so a
+# concrete unresolvable path written in a docstring becomes a page-blocking
+# citation on every host. That is not hypothetical: an explanatory comment
+# added by the previous fix coined one, which re-blocked the very page the fix
+# had just unblocked (nightly 36722383698) and cost PR #263 its page to
+# deferral_skip. Seven more sat unfired in the same file.
+
+
+_PLUGIN_SOURCE_GLOBS = ("scripts/*.py", "scripts/lint/*.py", "agents/*.md")
+
+# Files whose unresolvable token is REQUIRED to block, so "mints no blocking
+# token" is the wrong invariant for them. Only one qualifies: external_refs.py
+# quotes a measured transcript whose token must keep blocking per CCE-181
+# (test_a_declined_token_reverts_to_being_blocked_by_the_linter runs check_path
+# unmocked and asserts it). Exempting it to quiet this sweep deleted that
+# guarantee once already. A page documenting that module quotes the transcript
+# inside a fence, which strip_fenced_blocks removes.
+#
+# This set is a CONTRACT, not a waiver list: every entry needs a test elsewhere
+# requiring the block, and test_the_sweep_exclusions_are_each_load_bearing
+# fails if an entry stops having an unresolvable token to justify it.
+_SWEEP_EXCLUSIONS = {"scripts/external_refs.py"}
+
+
+def _plugin_repo_root() -> Path:
+    return SCRIPT.parents[2]
+
+
+def _plugin_host_config() -> dict:
+    """This repo's OWN docs-agent config.
+
+    The plugin documents itself here, so the host config in play during a
+    nightly IS this file — loading it is what makes the guard reproduce the
+    nightly's verdict rather than an approximation of it. It supplies
+    site.docs_dir (sibling-page citations in agents/*.md resolve through it)
+    and the CCE-141 shortening-evidence exemptions that scripts/citation_repair.py
+    depends on.
+    """
+    cfg_path = _plugin_repo_root() / ".engineering-docs-agent" / "config.yml"
+    assert cfg_path.exists(), f"missing host config at {cfg_path}"
+    return yaml.safe_load(cfg_path.read_text()) or {}
+
+
+def test_this_modules_own_source_mints_no_blocking_token():
+    """citation_exists.py must pass its own rule.
+
+    Cited by the DEFAULT_EXEMPT_TOKENS comment as the enforcement for
+    "write every example path in this module as a placeholder".
+    """
+    repo = _plugin_repo_root()
+    ok, msg = citation_exists.check_path(
+        SCRIPT, repo, citation_exists.tracked_files(repo), _plugin_host_config()
+    )
+    assert ok, f"citation_exists.py cites something unresolvable: {msg}"
+
+
+def test_no_plugin_source_file_mints_a_blocking_token():
+    """Every file page-author reads to document the plugin passes the rule.
+
+    Scoped to the source an authored page actually quotes. A failure here
+    names a token that will block whichever page next describes that module —
+    fix it by rewording the example as a placeholder, or, when the literal
+    spelling is a measured record rather than an arbitrary illustration, by
+    exempting it.
+    """
+    repo = _plugin_repo_root()
+    files = citation_exists.tracked_files(repo)
+    config = _plugin_host_config()
+    offenders: dict[str, str] = {}
+    for pattern in _PLUGIN_SOURCE_GLOBS:
+        for src in sorted(repo.glob(pattern)):
+            rel = str(src.relative_to(repo))
+            if rel in _SWEEP_EXCLUSIONS:
+                continue
+            ok, msg = citation_exists.check_path(src, repo, files, config)
+            if not ok:
+                offenders[rel] = msg
+    assert not offenders, "plugin source mints blocking tokens: " + json.dumps(
+        offenders, indent=2, sort_keys=True
+    )
+
+
+def test_the_guard_rejects_a_concrete_example_path(tmp_path):
+    """The guard above fails when a docstring coins an unresolvable sibling.
+
+    The token is BUILT rather than written literally: this test file is plugin
+    source too, and spelling it out would mint the very citation the guard
+    exists to stop — the recursion in miniature.
+    """
+    minted = "scripts/" + "y" + ".py"
+    probe = tmp_path / "probe.md"
+    probe.write_text(f"a confabulated `{minted}` must still block.\n")
+    repo = _plugin_repo_root()
+    ok, msg = citation_exists.check_path(
+        probe, repo, citation_exists.tracked_files(repo), _plugin_host_config()
+    )
+    assert not ok
+    assert f"cites nonexistent path '{minted}'" in msg
+
+
+def test_placeholder_form_of_the_same_example_passes():
+    """...and the placeholder rewrite is what makes it legal."""
+    cites = citation_exists.extract_citations(
+        "a confabulated `scripts/<invented>.py` must still block."
+    )
+    assert cites["paths"] == []
+
+
+def test_the_sweep_exclusions_are_each_load_bearing():
+    """An excluded file must still HAVE an unresolvable token.
+
+    Without this, an exclusion added for a real reason outlives that reason and
+    silently stops covering a file that has since become clean — the sweep
+    shrinks and nobody notices. A failure here means: delete the entry.
+    """
+    repo = _plugin_repo_root()
+    files = citation_exists.tracked_files(repo)
+    config = _plugin_host_config()
+    for rel in sorted(_SWEEP_EXCLUSIONS):
+        src = repo / rel
+        assert src.exists(), f"stale exclusion, file is gone: {rel}"
+        ok, _ = citation_exists.check_path(src, repo, files, config)
+        assert not ok, (
+            f"{rel} no longer cites anything unresolvable — "
+            "remove it from _SWEEP_EXCLUSIONS"
+        )

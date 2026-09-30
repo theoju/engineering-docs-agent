@@ -1,7 +1,7 @@
 """Lint rule: citation_exists (CCE-110, Tier-1).
 
 Verifies that repo artifacts cited in a page's PROSE actually exist: inline
-code spans naming repo paths (`scripts/foo.py`, optional `:line` /
+code spans naming repo paths (`scripts/<name>.py`, optional `:line` /
 `:start-end` suffix) or test identifiers (`test_snake_case`). Confabulated
 pages cite tests/files that were never written; this rule blocks them.
 
@@ -9,7 +9,7 @@ Scope notes:
 - Fenced code blocks are stripped first — fenced examples are legitimately
   hypothetical. Only inline code spans in prose are checked.
 - Bare filenames are OUT OF SCOPE and pass unchecked (CCE-171 finding 2). A
-  citation must carry a directory separator to be verified: `scripts/foo.py`
+  citation must carry a directory separator to be verified: `scripts/<name>.py`
   is checked, a lone `README.md` is not. Resolving a bare name against the
   tracked-file list would be basename matching -- suffix matching under
   another name -- and suffix matching admits the confabulated paths this rule
@@ -80,20 +80,56 @@ DEFAULT_EXAMPLE_PREFIXES = ("example/",)
 # resolving, and exempt_tokens() unions with host config where
 # example_prefixes() replaces it.
 #
-# CCE-194: the same argument as CCE-134, for this module's OWN grammar
-# placeholders. `dir/file.ext` is how the docstring above spells the shape
-# `_REPO_PATH_RE` matches; `scripts/x.py` and `docs/../scripts/x.py` are the
-# normalization examples. All three live in plugin source, so any page that
-# documents this rule quotes them, on any host. Blocked
-# `docs/site-src/architecture/citation-linting.md` on nightly 36245832365.
+# CCE-195 (shipped under the wrong key as CCE-194 in 2b5567de -- that number
+# was taken the same day by an unrelated quota bug): the same argument as
+# CCE-134, for this module's OWN grammar placeholders. `dir/file.ext` is how
+# the docstring above spells the shape `_REPO_PATH_RE` matches; `scripts/x.py`
+# and `docs/../scripts/x.py` are the normalization examples. All three live in
+# plugin source, so any page that documents this rule quotes them, on any
+# host. Blocked the architecture/citation-linting page on nightly 36245832365.
 # Exact tokens, deliberately not an `x/` example prefix: a confabulated
-# `scripts/y.py` must still block.
+# `scripts/<invented>.py` must still block.
+#
+# WRITE EVERY EXAMPLE PATH IN THIS MODULE AS A PLACEHOLDER (CCE-195). This
+# module's source is an INPUT to the pages it lints: page-author reads it to
+# document the rule, and quotes back whatever it finds. The first version of
+# the comment above spelled that last contrast as a CONCRETE sibling of
+# `scripts/x.py`. That minted a fresh unresolvable citation, re-blocked the
+# very page the exemptions had just unblocked (nightly 36722383698), and cost
+# PR #263 its page to deferral_skip after three deferrals. Seven more such
+# tokens were sitting unfired in these docstrings, each one a page-blocker
+# waiting for the sentence that happened to quote it. Widening the allowlist
+# cannot converge -- every new entry arrives with prose that coins the next
+# token -- so the generator is removed instead: spell examples in a form
+# _PLACEHOLDER_MARKERS already accepts. Enforced by
+# `test_this_modules_own_source_mints_no_blocking_token`.
+#
+#
+# CCE-195, the other half: internal_links.py names the two links that actually
+# blocked host runs 32460602658 and 32495019606. Rewriting those to a
+# placeholder would make the sentence claim something that did not happen, so
+# they are exempted rather than reworded. The distinction is the rule for this
+# file: reword an ARBITRARY illustration (any name would do), exempt a token
+# whose exact spelling is a record.
+#
+# THIRD case, and the reason external_refs.py's own declared-prefix token is
+# NOT here (named in that module, deliberately un-backticked here so this
+# very comment does not re-mint it -- the guard caught that on first run):
+# that module quotes a transcript too, but its token's BLOCKING is a tested CCE-181
+# contract -- test_a_declined_token_reverts_to_being_blocked_by_the_linter
+# runs check_path unmocked and requires the block, because reverting a page
+# loudly beats publishing a link built on delimiters the renderer has just
+# shown it cannot model. Exempting it silently deleted that guarantee and the
+# suite caught it. A token that is SUPPOSED to block cannot be exempted to
+# quiet a linter; the file is excluded from the plugin-source sweep instead.
 DEFAULT_EXEMPT_TOKENS = (
     "test_snake_case",
     "path/to/file.py",
     "dir/file.ext",
     "scripts/x.py",
     "docs/../scripts/x.py",
+    "docs/runbook.md",
+    "docs/foo.md",
 )
 
 
@@ -220,7 +256,7 @@ def tracked_files(repo_root: Path) -> set[str]:
 def _is_gitignored(repo_root: Path, rel: str) -> bool:
     """True when the host's .gitignore deliberately excludes this path (CCE-145).
 
-    A generated artifact a host ignores by design -- `app/data/assessment.json`
+    A generated artifact a host ignores by design -- `app/data/<generated>.json`
     on the reference host -- exists on the author's disk and NOT in a fresh CI
     checkout, so `_resolves` reports it missing and the page blocks. But the
     .gitignore entry is the repo's own evidence that the path is expected: the
@@ -254,8 +290,8 @@ def cited_test_exists(repo_root: Path, name: str) -> bool:
 
     CCE-131: `def {name}_` also counts, so a test-FAMILY shorthand resolves —
     `test_lint_runner` is satisfied by test_lint_runner_missing_script_reports_block.
-    The trailing underscore is the boundary: a confabulated `test_foo` passes
-    only when a real `test_foo_*` exists, so the CCE-111 guard against wholly
+    The trailing underscore is the boundary: a confabulated `test_<name>` passes
+    only when a real `test_<name>_*` exists, so the CCE-111 guard against wholly
     invented names is preserved.
     """
     for needle in (f"def {name}(", f"{name}(", f"def {name}_"):
@@ -280,7 +316,7 @@ def _relativize(path_str: str, repo_root: Path) -> str | None:
     class admits `..`, and pathlib's `/` operator is string concatenation that
     never collapses it, so `repo_root / rel` handed an un-collapsed path to
     stat(2) and the KERNEL walked it out of the repo. A page citing
-    `docs/../../sibling-repo/README.md` resolved, and this BLOCKING rule passed
+    `docs/../../<sibling-repo>/README.md` resolved, and this BLOCKING rule passed
     a citation naming nothing a fresh CI checkout or any reader can see -- the
     same BLOCK-to-PASS class CCE-141 catalogued.
 
@@ -467,7 +503,7 @@ def source_roots(config: dict) -> tuple[str, ...]:
     """Extra package roots citation_exists tries when resolving a cited path.
 
     A nested monorepo's prose cites the import-path form the code uses for
-    itself (`app/core/destination_engine.py`), which is repo-relative only
+    itself (`app/core/<module>.py`), which is repo-relative only
     from inside the package root (`backend/`). Declared roots are tried AFTER
     the repo root and docs_dir, never before, so a root can only widen
     resolution — it can never redirect a path that already resolves.
@@ -657,7 +693,7 @@ def resolve_cited_sources(
 
     Ordered, deduped, and returned in RESOLVED form: a citation that only
     resolves under a declared package root (CCE-139) comes back as
-    `backend/app/core/x.py`, not as the `app/core/x.py` the prose wrote, so the
+    `backend/app/core/<name>.py`, not as the `app/core/<name>.py` the prose wrote, so the
     fact-checker can open it relative to repo_root. The repo root is tried
     first, so a declared root never shadows a real top-level file.
 

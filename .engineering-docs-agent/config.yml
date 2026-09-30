@@ -74,7 +74,7 @@ lint:
   # page documenting that rule necessarily names a file that cannot exist.
   citation_exempt_tokens:
     - tests/scripts/__init__.py
-    # CCE-194: the CCE-141 shortening story is documented in this repo, and
+    # CCE-195: the CCE-141 shortening story is documented in this repo, and
     # its evidence IS three paths that must not resolve here. The full path is
     # a file in the ADIS host repo; `references/checklist.md` is the shortened
     # form whose non-resolution is the whole finding; `erences/checklist.md`

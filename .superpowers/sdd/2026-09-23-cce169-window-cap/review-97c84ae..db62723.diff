@@ -1,0 +1,451 @@
+# Review package: 97c84ae..HEAD
+
+## Commits
+db62723 feat(orchestrator): bound the review window before admission — CCE-169
+
+## Files changed
+ scripts/orchestrator_runner.py                     |  64 ++++++-
+ tests/orchestrator/test_classification_coverage.py |  20 +-
+ tests/orchestrator/test_window_cap.py              | 202 +++++++++++++++++++++
+ 3 files changed, 275 insertions(+), 11 deletions(-)
+
+## Diff
+diff --git a/scripts/orchestrator_runner.py b/scripts/orchestrator_runner.py
+index d0ffc85..48a5a2d 100644
+--- a/scripts/orchestrator_runner.py
++++ b/scripts/orchestrator_runner.py
+@@ -881,23 +881,27 @@ def next_deferral_counts(
+ ) -> dict:
+     """Return the next persistent consecutive-deferral map (never mutates
+     ``counts``).
+ 
+     - in this window AND still deferred → count + 1
+     - in this window and NOT still deferred → entry dropped. Covers both the
+       processed case and the skipped case; "consecutive" means consecutive, so
+       an intermittently-slow PR never accumulates toward a skip.
+     - not in this window at all → carried forward unchanged. A window can
+       shrink transiently when the source-collector degrades, and absence is
+-      not evidence a PR was processed. Growth is bounded because a PR leaves
+-      the window only once the baseline passes it, which requires it to be in
+-      the cursor prefix, which requires it not to be deferred.
++      not evidence a PR was processed. CCE-169: growth used to be justified by
++      "a PR leaves the window only once the baseline passes it, which requires
++      it to be in the cursor prefix, which requires it not to be deferred" —
++      false under a window cap, which removes a PR from the window without the
++      baseline passing it. The BEHAVIOUR is unchanged and still correct (carry
++      forward is exactly right for a PR that was never attempted); growth is now
++      bounded by `run.window_pr_cap` instead.
+     """
+     out = dict(counts)
+     for n in window_pr_numbers:
+         k = deferral_key(repo, n)
+         if n in still_deferred_numbers:
+             out[k] = int(out.get(k, 0)) + 1
+         else:
+             out.pop(k, None)
+     return out
+ 
+@@ -2463,20 +2467,51 @@ def run(
+         for r in clip_reasons:
+             add_partial(state, r, degraded=True)
+ 
+         prs = sources.get("prs", [])
+         prs = _order_prs_oldest_first(
+             prs,
+             last_sha=sc_inputs["last_sha"],
+             head_sha=head_sha,
+             repo_root=repo_root,
+         )
++        # CCE-169: bound the window BEFORE admission. The only pre-existing
++        # truncation is the time-based cut inside the admission loop below,
++        # which fires after the run has already begun failing to keep up — so a
++        # stalled baseline widened by a day every night and each run finished a
++        # smaller fraction of it. `window_capped` is a THIRD category, not a
++        # reuse of `admission_deferred`: those two have the same shape and
++        # different causes (`admission_deferred` means the run TRIED and ran out
++        # of time; `window_capped` means the run deliberately DID NOT TRY), and
++        # per CCE-144 classification follows the call site, never the
++        # resemblance. It enters `held_back` so the cursor stops at the cap
++        # boundary, and stays out of `window_prs` and `_deferred_all` so it
++        # accrues no deferral count and the skip hatch cannot abandon it.
++        _window_cap = resolve_window_cap(config)
++        window_capped: list[dict] = []
++        if _window_cap and len(prs) > _window_cap:
++            window_capped = prs[_window_cap:]
++            prs = prs[:_window_cap]
++        if window_capped:
++            # A plain literal, deliberately NOT routed through `_rsn` below:
++            # that helper only discriminates truncated-vs-degraded, so a cap
++            # reason passed through it renders as `time_budget_window_capped` on
++            # a truncated run — factually wrong, since the cap fires before any
++            # clock is consulted. degraded=True (CCE-144): the run HELD BACK
++            # what it did not process; it did not consume and lose it.
++            add_partial(
++                state,
++                f"held_back_window_capped: {len(window_capped)} of "
++                f"{len(prs) + len(window_capped)} PRs held for a later run "
++                f"(cap {_window_cap})",
++                degraded=True,
++            )
+         jira_issues = sources.get("jira_issues", []) or []
+         jira_lookup = {issue["key"]: issue for issue in jira_issues}
+ 
+         summaries = []
+         lens_paths = config.get("docs", {}).get("lens_paths", {}) or {}
+         available_sections_by_lens: dict[str, list[str]] = {}
+         for _ln in lens_paths:
+             try:
+                 _lp, _ = resolve_lens(config, _ln)
+                 _root = repo_root / _lp
+@@ -2485,22 +2520,26 @@ def run(
+                         p.name
+                         for p in _root.iterdir()
+                         if p.is_dir() and not p.name.startswith(".")
+                     )
+                     if _root.is_dir()
+                     else []
+                 )
+             except (KeyError, OSError):
+                 available_sections_by_lens[_ln] = []
+         time_truncated = False
+-        # CCE-140: the full window, oldest-first, before admission truncation.
+-        # Deferral counting is keyed to the window a run actually saw.
++        # CCE-140: the admitted window, oldest-first, before admission
++        # truncation. Deferral counting is keyed to the window a run actually
++        # saw — which since CCE-169 EXCLUDES PRs the cap held back, because
++        # `next_deferral_counts` pops the entry for any in-window PR that is not
++        # still deferred, and a capped PR can never be in that set. Leaving them
++        # here would erase their genuine history every night they wait.
+         window_prs = list(prs)
+         # PRs the admission gate never reached (oldest-first), and the pages
+         # an admitted PR still owes because the authoring loop was cut.
+         admission_deferred: list[dict] = []
+         deferred_pages_by_pr: dict[int, list[str]] = {}
+         # CCE-140: bound on every path. A run that never truncates defers
+         # nothing, and the deferral-count prune below runs on EVERY run — a
+         # clean run is precisely what resets a PR's "consecutive" history.
+         still_deferred: list[dict] = []
+         # CCE-159: a merged PR's summary is a pure function of content that can
+@@ -3296,21 +3335,29 @@ def run(
+             counts=_deferral_counts,
+             repo=repo,
+             threshold=_threshold,
+             forgive=_forgive,
+         )
+         skipped_numbers = {p.get("number") for p in _skipped_prs}
+         # CCE-140: hold every PR this run did not finish out of the cursor
+         # prefix. On a run with no skips `skipped_numbers` is empty and
+         # `held_back` is exactly "everything unfinished".
+         held_back = (
+-            set(deferred_pages_by_pr) | {p.get("number") for p in admission_deferred}
++            set(deferred_pages_by_pr)
++            | {p.get("number") for p in admission_deferred}
++            # CCE-169: capped PRs stop the cursor exactly like unfinished ones.
++            # They cannot intersect `skipped_numbers` — that set comes from
++            # `partition_deferrals(_deferred_all, ...)` and a capped PR is in
++            # neither of `_deferred_all`'s two writers — so the subtraction
++            # below is a no-op for them, which is row 3 of the routing table
++            # holding by construction rather than by a guard.
++            | {p.get("number") for p in window_capped}
+         ) - skipped_numbers
+         still_deferred = _still_deferred
+         if _forgive:
+             # Guarded on `_skipped_prs`, NOT on `_stalled` alone. A stalled
+             # baseline with nothing deferred is a CLEAN run — and it is the
+             # most important run in the cycle, because holding nothing back
+             # makes it cursor-backed, so it auto-merges, so it resets the very
+             # clock that is stalled. Emitting here on `_stalled` alone would
+             # flip that run to partial and block the merge that ends the
+             # stall, converting the escape hatch into a second deadlock.
+@@ -3326,25 +3373,26 @@ def run(
+                 f"{_baseline_age:.1f}d (window {_stall_days}d); forgiving the "
+                 f"oldest deferred PR #{_blocker} so state can reach main",
+                 info_only=True,
+             )
+         # CCE-175 observability: the 457-line nightly log never named which PRs
+         # were admitted, deferred, or held back, so diagnosing the stall meant
+         # diffing state.json between main and a run branch by hand. One line,
+         # emitted on every run including clean ones, so a future operator can
+         # answer "which PR is blocking the cursor?" by reading the log.
+         emit_log(
+-            "cursor: admitted=[%s] deferred=[%s] held_back=[%s] skipped=[%s] "
+-            "baseline_age=%s stall_window=%sd"
++            "cursor: admitted=[%s] deferred=[%s] capped=[%s] held_back=[%s] "
++            "skipped=[%s] baseline_age=%s stall_window=%sd"
+             % (
+                 ", ".join(str(p.get("number")) for p in prs) or "none",
+                 ", ".join(str(p.get("number")) for p in _deferred_all) or "none",
++                ", ".join(str(p.get("number")) for p in window_capped) or "none",
+                 ", ".join(str(n) for n in sorted(held_back, key=str)) or "none",
+                 ", ".join(str(n) for n in sorted(skipped_numbers, key=str)) or "none",
+                 "unknown" if _baseline_age is None else f"{_baseline_age:.1f}d",
+                 _stall_days,
+             )
+         )
+         if time_truncated or held_back:
+             # CCE-109 Component 4: never advance to a cursor we cannot confirm
+             # is forward-of-baseline and reachable from HEAD, never advance
+             # past an unanchorable deferred PR, and persist only the canonical
+diff --git a/tests/orchestrator/test_classification_coverage.py b/tests/orchestrator/test_classification_coverage.py
+index 88eda9e..b2bb09b 100644
+--- a/tests/orchestrator/test_classification_coverage.py
++++ b/tests/orchestrator/test_classification_coverage.py
+@@ -139,24 +139,38 @@ def test_orchestrator_has_the_expected_call_site_population():
+     would ship the raw token as prose with no block at all — silent.
+     `degraded=True` flips `partial`, which the CCE-101 auto-merge gate
+     already treats as ineligible, so the page's batch is held for human
+     review instead. It is not the blind default either: the run did not
+     consume the page's authored work unprocessed and lose it — the page
+     stays on disk, in `authored`, and reaches content-validator's own
+     `lint_block` revert exactly as before, which is what actually keeps bad
+     content out of the committed diff on the live-lens path, with
+     `degraded=True` covering the archive-index path that revert does not
+     reach. That is the same held-back, self-healing shape as
+-    `page_author_invalid`, not the blind consumed-and-lost shape."""
++    `page_author_invalid`, not the blind consumed-and-lost shape.
++
++    46 -> 47, CCE-169: `held_back_window_capped` in `run`. Audited
++    degraded=True. The run HELD BACK the PRs beyond the cap — it did not
++    consume and lose them, which is the blind shape. They enter `held_back`, so
++    CCE-151's cursor stops at the cap boundary and their content is documented
++    by a later run; nothing is stranded outside every future window. Explicitly
++    NOT info_only: the reason must flip `partial` so the count is visible in the
++    digest, and it is the run's ONLY signal that any PR was held — on a healthy
++    capped run CCE-151's walk takes its `if ok:` branch, which sets
++    `advance_sha` and `advance_cursor_backed` without calling `add_partial` at
++    all. Also explicitly NOT left bare, which would default to blind and turn
++    every draining nightly red; and NOT added to `_MERGE_VETO_REASON_PREFIXES`,
++    because a capped run is the healthy case and must merge or the cap
++    accomplishes nothing."""
+     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
+-    assert len(calls) == 46, (
+-        f"expected 46 add_partial calls, found {len(calls)}; re-audit and "
++    assert len(calls) == 47, (
++        f"expected 47 add_partial calls, found {len(calls)}; re-audit and "
+         "update this count deliberately"
+     )
+     # 42 -> 43: CCE-141 round 5 added `citation_diagnosis_truncated` in
+     # `_diagnose_citation_paths`. Findings from one page are capped at
+     # `_CITATION_FINDINGS_CAP`, and this site reports how many the cap
+     # withheld. It exists precisely so a truncated digest never reads as a
+     # complete one — a silent cap is the failure mode this ticket exists to
+     # fight, and the cap without the line would BE that failure mode.
+     #
+     # Classification: info_only=True, same as the two sites it stands beside.
+diff --git a/tests/orchestrator/test_window_cap.py b/tests/orchestrator/test_window_cap.py
+index 1ead542..b55be04 100644
+--- a/tests/orchestrator/test_window_cap.py
++++ b/tests/orchestrator/test_window_cap.py
+@@ -52,10 +52,212 @@ def test_window_cap_zero_is_unlimited():
+     """
+     assert orun.resolve_window_cap({"run": {"window_pr_cap": 0}}) == 0
+ 
+ 
+ def test_window_cap_tolerates_a_malformed_run_block():
+     """`_run_cfg` exists because `config.get("run") or {}` raises
+     AttributeError on `run: "nonsense"`. Mirror its siblings, do not reinvent.
+     """
+     assert orun.resolve_window_cap({"run": "nonsense"}) == 10
+     assert orun.resolve_window_cap({"run": None}) == 10
++
++
++# ---------------------------------------------------------------------------
++# the cut: third-category routing
++# ---------------------------------------------------------------------------
++
++
++def _git(repo: Path, *args: str) -> str:
++    import subprocess
++
++    return subprocess.run(
++        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
++    ).stdout.strip()
++
++
++def _seed_capped_host(tmp_path, init_host, base_config_yaml, *, cap, state_extra=None):
++    """Real git window of three PR merges plus a trailing non-PR commit.
++
++    Returns (state_path, base, [c1, c2, c3], fakes).
++
++    c4 exists so the newest PR merge is never HEAD: without it `advance == c2`
++    and `advance != head` stop being independent statements. Copied from
++    test_cursor_backed_merge._seed_merge_host for that reason.
++
++    The cap is set by REPLACING a line of the shared config, never by appending
++    a second `run:` block -- CONFIG_YAML already carries `run:` with
++    `time_budget_seconds: 2100`, and PyYAML keeps only the LAST duplicate key,
++    so an append would silently delete the budget and change what the test
++    measures.
++    """
++    cfg = base_config_yaml.replace(
++        "  time_budget_seconds: 2100",
++        f"  time_budget_seconds: 2100\n  window_pr_cap: {cap}",
++    )
++    assert "window_pr_cap" in cfg, "config replacement anchor drifted"
++    seeded = {"version": "1", "last_successful_run": {"head_sha": "seed"}}
++    seeded.update(state_extra or {})
++    state_path = init_host(seeded, config_yaml=cfg)
++    repo = tmp_path
++    base = _git(repo, "rev-parse", "HEAD")
++    shas = []
++    for i in range(1, 5):
++        (repo / "f.txt").write_text(f"c{i}")
++        _git(repo, "add", ".")
++        _git(repo, "commit", "-q", "-m", f"c{i}")
++        shas.append(_git(repo, "rev-parse", "HEAD"))
++    seeded["last_successful_run"] = {"head_sha": base}
++    state_path.write_text(json.dumps(seeded))
++    fakes = tmp_path / "fakes_cap"
++    fakes.mkdir(parents=True, exist_ok=True)
++    for f in FAKES_MULTI.iterdir():
++        (fakes / f.name).write_text(f.read_text())
++    sc = json.loads((FAKES_MULTI / "fake_source_collector.json").read_text())
++    for pr, sha in zip(sc["prs"], shas[:3]):
++        pr["merge_sha"] = sha
++    (fakes / "fake_source_collector.json").write_text(json.dumps(sc))
++    return state_path, base, shas[:3], fakes
++
++
++def test_a_capped_run_advances_to_the_cap_boundary_and_says_so(
++    tmp_path, init_host, base_config_yaml, read_current_run
++):
++    """THE CCE-151 REGRESSION GUARD, and the most important test in this file.
++
++    A bare `prs = prs[:cap]` puts capped PRs in neither `deferred_pages_by_pr`
++    nor `admission_deferred`, so `held_back` is empty, `time_truncated` is
++    False, CCE-151's walk is never entered, and control reaches the `else`
++    branch where `advance_sha = current_run.head_sha` -- FULL WINDOW HEAD. The
++    run would document 2 PRs and advance past all 3, losing the third
++    permanently and silently.
++
++    The reason must be asserted PRESENT, by list membership on the fully
++    rendered line. Nothing else here distinguishes the right label from a wrong
++    one or from NO label at all, and emitting nothing is the dangerous variant
++    because it passes everything else: on a healthy capped run CCE-151's walk
++    takes its `if ok:` branch, which sets `advance_sha` and
++    `advance_cursor_backed` WITHOUT calling `add_partial`, so this site is the
++    run's only signal that any PR was held.
++    """
++    state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
++        tmp_path, init_host, base_config_yaml, cap=2
++    )
++    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
++    assert rc == 0
++    written = json.loads(state_path.read_text())
++    advance = written["last_successful_run"]["head_sha"]
++    assert advance == c2, written["last_successful_run"]
++    assert advance != _git(tmp_path, "rev-parse", "HEAD")
++    cr = read_current_run(state_path)
++    assert (
++        "held_back_window_capped: 1 of 3 PRs held for a later run (cap 2)"
++        in cr["partial_reasons"]
++    ), cr["partial_reasons"]
++
++
++def test_a_capped_pr_does_not_accrue_a_deferral_count(
++    tmp_path, init_host, base_config_yaml
++):
++    """Row 2 of the routing table. The danger is ERASURE, not over-counting.
++
++    `next_deferral_counts` pops the entry for any in-window PR that is not in
++    `still_deferred_numbers`, and a capped PR can never be in that set. So a
++    capped PR left inside `window_prs` has its genuine history DELETED every
++    night it waits, permanently disarming the CCE-140 skip hatch for it.
++    """
++    state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
++        tmp_path,
++        init_host,
++        base_config_yaml,
++        cap=2,
++        state_extra={"deferral_counts": {"unknown/unknown#3": 2}},
++    )
++    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
++    assert rc == 0
++    written = json.loads(state_path.read_text())
++    assert written.get("deferral_counts", {}).get("unknown/unknown#3") == 2, (
++        written.get("deferral_counts")
++    )
++
++
++def test_a_capped_pr_at_threshold_is_not_abandoned(
++    tmp_path, init_host, base_config_yaml
++):
++    """Row 3. The skip hatch must never abandon a PR the run did not attempt.
++
++    Threshold is 3 by default, so a count of 3 is exactly at it. The PR is only
++    safe because it never reaches `_deferred_all` -- `partition_deferrals` is
++    order-independent and would skip it on sight.
++    """
++    state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
++        tmp_path,
++        init_host,
++        base_config_yaml,
++        cap=2,
++        state_extra={"deferral_counts": {"unknown/unknown#3": 3}},
++    )
++    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
++    assert rc == 0
++    written = json.loads(state_path.read_text())
++    skipped = written.get("skipped_prs", [])
++    assert not [s for s in skipped if "#3" in json.dumps(s)], skipped
++
++
++def test_window_pr_cap_zero_is_a_true_no_op(
++    tmp_path, init_host, base_config_yaml, read_current_run
++):
++    """The advertised opt-out. No reason, and the advance reaches the FULL
++    WINDOW HEAD exactly as an uncapped run would.
++
++    The compared value is `git rev-parse HEAD` (commit c4), not c3. With
++    nothing held back, CCE-151's walk is not entered and the `else` branch
++    assigns `advance_sha = state["current_run"]["head_sha"]`, which is the
++    repo HEAD — and the fixture deliberately puts a trailing NON-PR commit
++    above the newest PR merge, so HEAD is c4. Asserting c3 here would be
++    asserting a cursor-backed advance on a run that never took one, and it is
++    the difference between "the cap did nothing" and "something else stopped
++    the cursor one commit short."
++    """
++    state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
++        tmp_path, init_host, base_config_yaml, cap=0
++    )
++    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
++    assert rc == 0
++    cr = read_current_run(state_path)
++    assert not [r for r in cr["partial_reasons"] if "window_capped" in r], cr[
++        "partial_reasons"
++    ]
++    written = json.loads(state_path.read_text())
++    assert written["last_successful_run"]["head_sha"] == _git(
++        tmp_path, "rev-parse", "HEAD"
++    ), written["last_successful_run"]
++    assert written["last_successful_run"]["head_sha"] != c2, (
++        "cap 0 must not stop at the cap-2 boundary"
++    )
++
++
++def test_a_sub_cap_window_is_untouched(
++    tmp_path, init_host, base_config_yaml, read_current_run
++):
++    """Three PRs against a cap of 10 -- `window_capped` stays empty, nothing is
++    added to `held_back`, and the code path is today's.
++
++    Same HEAD-vs-c3 correction as the cap-0 test above: an untruncated run
++    holding nothing back advances to `git rev-parse HEAD` (c4), never to the
++    newest PR merge.
++    """
++    state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
++        tmp_path, init_host, base_config_yaml, cap=10
++    )
++    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
++    assert rc == 0
++    cr = read_current_run(state_path)
++    assert not [r for r in cr["partial_reasons"] if "window_capped" in r], cr[
++        "partial_reasons"
++    ]
++    written = json.loads(state_path.read_text())
++    assert written["last_successful_run"]["head_sha"] == _git(
++        tmp_path, "rev-parse", "HEAD"
++    ), written["last_successful_run"]
++    assert written["last_successful_run"]["head_sha"] != c2, (
++        "a sub-cap window must not stop at any cap boundary"
++    )

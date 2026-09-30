@@ -1,0 +1,496 @@
+# Review package: 9d5e381..138b25e
+
+## Commits
+138b25e docs: announce run.window_pr_cap — it is a default-ON behaviour change — CCE-169
+233d0a1 docs(orchestrator): the `> 0` guard's justification was false — CCE-169
+148227b test(orchestrator): observe admission, not just its bookkeeping — CCE-169
+00b0647 fix(orchestrator): the window cap must never hold back an unanchored PR — CCE-169
+
+## Files changed
+ CHANGELOG.md                               |  21 ++++
+ README.md                                  |   2 +
+ docs/site-src/architecture/orchestrator.md |  16 +++
+ scripts/orchestrator_runner.py             |  28 +++--
+ tests/orchestrator/test_window_cap.py      | 178 ++++++++++++++++++++++++++++-
+ 5 files changed, 234 insertions(+), 11 deletions(-)
+
+## Diff
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d61f0c7..646c723 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -47,20 +47,41 @@
+   auto-merges a run whose pages were cut or never fact-checked.
+ 
+ ### Added
+ 
+ - **CCE-159** — a merged PR's summary is bought once, not once per night. Measured on the `advanced-data-import-system` host: of the 58 PRs summarized on 2026-08-17, 52 had been summarized the night before — 90% repeat work, including every PR that run went on to discard, at 29,346 fresh-input tokens per summarized PR (~1.53M tokens a night re-deriving summaries of content that cannot change). The window is a lookback from a baseline that advances slowly, so the same PRs are re-collected until the cursor passes them, and every one of those re-collections re-dispatched `pr-summarizer` against a merge commit that is, by construction, immutable. That immutability is what makes this cache exact rather than heuristic — but the number alone is not identity, so an entry is served only while BOTH its `merge_sha` still matches the PR's and its fingerprint still matches `agents/pr-summarizer.md`. The first covers a rewritten history or a re-merge, where serving a summary of code that is no longer there would be worse than any amount of re-summarizing; the second covers an edited summarizer, and hashes the agent file rather than naming a version constant precisely so nobody has to remember to bump it. An unreadable agent file yields an empty fingerprint that matches nothing — "unknown" must not resolve to "unchanged", which would serve summaries whose provenance cannot be established, and do it silently. Stored in `state.json` under a new `pr_summaries` key, never seeded empty (matching `skipped_prs` and `deferral_counts`, so a host that caches nothing writes a byte-identical state file) and declared in `state.schema.json`. Eviction is by last-seen against a 30-day retention, deliberately NOT by window membership: the obvious "prune what is not in the window" empties the cache on exactly the night a degraded source-collector can least afford to re-buy every summary, and it would also age out the PR that benefits most — one deferred night after night, which has no fresh summary of its own to re-store, so its entry is refreshed on sight instead. `run.reuse_pr_summaries` (boolean, default true) restores the old behaviour; it is declared in `config.schema.json` because `run` is `additionalProperties: false`, where an undeclared key read by the runner does not degrade but aborts the host's nightly at config validation — so the config case is tested through `load_config_validated`, not a raw dict. The saving is reported as an `info_only` `pr_summaries_reused: n/m` reason: it describes work the run did NOT have to do, the opposite of a degradation, and flipping `partial` on a successful saving would cost auto-merge every night through CCE-140's `partial and not advance_cursor_backed` gate — turning the optimization into an outage. It is recorded at all because a saving nobody can see is indistinguishable from a feature that silently stopped working.
+ 
+ - **Factual-accuracy guard for authored pages (page-author confabulation fix).** Three layers: page-author now receives `source_paths` grounding inputs and returns advisory `evidence.files_read`; a new Tier-1 `citation_exists` lint rule blocks pages citing nonexistent repo paths or test identifiers (regression-pinned against the two 2026-06-09 confabulated pages); a new warn-only `fact-checker` subagent (the eighth) flags prose that contradicts cited source, rendered as a "Factual-accuracy warnings" PR-body section. Generic-first: no git → trivial pass, no citations → no dispatch, fact-checker failure → info-only note. Tracker: CCE-110.
+ 
+ ### Changed
+ 
++- **Behavior change (CCE-169):** a run now admits at most 10 merged PRs,
++  oldest-first. Every existing host starts capping on upgrade with no
++  config edit. Set `run.window_pr_cap` in
++  `.engineering-docs-agent/config.yml` to raise it, or `0` to restore the
++  pre-CCE-169 unbounded window. The window had no upper bound, so a
++  stalled baseline was self-reinforcing — it widened by a day every
++  night and each run finished a smaller fraction of it, while the only
++  pre-existing truncation fired inside the admission loop, after the run
++  had already begun failing to keep up. Capped PRs are a third category,
++  not a deferral: they stop the CCE-109 cursor at the cap boundary so
++  the baseline never walks past them, but they accrue no deferral count
++  and are never exposed to the `run.deferral_skip_threshold` hatch,
++  because the run did not attempt them. A capped run is partial with a
++  `held_back_window_capped: n of m PRs held for a later run (cap c)`
++  reason and still auto-merges, which is what lets the next run take the
++  next `c`. A PR returned without a `merge_sha` is admitted even past
++  the cap: the cap may only hold back a PR a later window can
++  re-anchor, and such a PR sorts last, so capping it would strand it
++  behind a baseline that advanced past its real merge commit. The work
++  bound is therefore `cap + unanchored`, not exactly `cap`.
++
+ - **Behavior change (CCE-101):** docs-agent PRs now auto-merge by default
+   when the run is non-partial with zero fact-checker warnings (squash +
+   branch delete, host CI respected when it reports). Set
+   `merge: { policy: manual }` in `.engineering-docs-agent/config.yml` to
+   keep PRs open for review. The setup skill now asks this explicitly.
+   After an auto-merge the runner dispatches `publishing.build_workflow`
+   directly, so Pages deploys fire even for `GITHUB_TOKEN` merges.
+ 
+ ## [0.5.1] — 2026-06-09
+ 
+diff --git a/README.md b/README.md
+index 91ae1a4..fe7a7fa 100644
+--- a/README.md
++++ b/README.md
+@@ -43,20 +43,22 @@ For per-subagent raw-stdout diagnostics, set `DOCS_AGENT_DEBUG_DIR=/tmp/cce-debu
+ ### Nightly authoring run
+ 
+ The main authoring pipeline (`scripts/orchestrator_runner.py` with no subcommand) runs automatically once daily at 07:00 UTC via `.github/workflows/docs-agent-nightly.yml`. The workflow opens or append-commits to a `docs-agent/YYYY-MM-DD` PR; per spec §8, a partial run still opens the PR with `partial: true` in the body so an operational gap is visible, not silent.
+ 
+ The workflow runs its GitHub App-token step under `continue-on-error` and exports the step's outcome as `DOCS_AGENT_APP_TOKEN_STATUS`. When that value is exactly `failure` — an App is configured but its installation token could not be minted, typically because the App was uninstalled or transferred to another account — the orchestrator records a blocking `app_token_unavailable` reason and marks the run partial. Since CCE-140 a partial run is no longer barred from auto-merging outright (a cursor-backed advance merges), so `app_token_unavailable` carries its own explicit veto in `_MERGE_VETO_REASON_PREFIXES`: a PR built on the fallback `GITHUB_TOKEN` never triggers host CI, so its check list would be empty rather than green, and the cursor proves only that the baseline is honest — not that anything validated this PR. The values `skipped` (no App configured), `success`, and unset are all silent. Set nothing when running locally.
+ 
+ Auto-merge eligibility (CCE-140): `merge.policy: auto` (the default when the block is absent), no vetoing partial reason, and either a non-partial run **or** a run whose baseline advance came from the CCE-109 cursor. Fact-checker warnings never gate the merge — they ride the PR body and the notification. A PR deferred on `run.deferral_skip_threshold` consecutive runs (default 3; set `0` to disable) is abandoned on the next run, recorded in `state.json`'s append-only `skipped_prs` array, and named in a partial reason so the notification carries it. A human commit on the docs-agent PR still blocks the merge unconditionally.
+ 
+ **PR summaries are cached across runs (CCE-159).** The collection window is a lookback from a baseline that advances slowly, so the same merged PRs are re-collected night after night until the cursor passes them — and each re-collection used to re-dispatch `pr-summarizer` against a merge commit that cannot have changed. On the `advanced-data-import-system` host that was 52 of 58 PRs on 2026-08-17, about 1.53M tokens a night. A summary is now stored in `state.json` under `pr_summaries`, keyed `{owner}/{name}#{pr}`, and reused on the next run — but only while **both** the PR's `merge_sha` and a fingerprint of `agents/pr-summarizer.md` still match what was stored. A re-merge or a rewritten history changes the first; editing the summarizer changes the second; either one re-buys that summary. Entries are evicted 30 days after they were last seen in a window, not when they fall out of one, so a transiently short window (a degraded source-collector) does not wipe the cache and a repeatedly-deferred PR does not age out of it. The reuse count rides the digest as an advisory `pr_summaries_reused: n/m` — it reports work the run did not have to do, so it never marks a run partial. Set `run.reuse_pr_summaries: false` to re-summarize every PR every run.
+ 
++**The review window is capped at 10 PRs per run (CCE-169), and this is ON by default.** Every existing host starts capping on upgrade with no config edit; set `run.window_pr_cap` to raise it, or `0` to restore the pre-CCE-169 unbounded window. The window had no upper bound, so a stalled baseline was self-reinforcing: it widened by a day every night, each run finished a smaller fraction of it, and the only pre-existing truncation was the time-based cut _inside_ the admission loop, which fires after the run has already begun failing to keep up. The cap fires **before** admission, oldest-first, so the work per run is bounded rather than the clock. PRs beyond the cap are a third category, not a deferral: they stop the CCE-109 cursor at the cap boundary so the baseline never walks past them, but they accrue **no** deferral count and are never exposed to the `run.deferral_skip_threshold` hatch — the run did not attempt them, so it must not abandon them. A capped run is partial with a `held_back_window_capped: n of m PRs held for a later run (cap c)` reason and still auto-merges, which is what lets the next run take the next `c` PRs. One exemption: a PR the source-collector returned **without** a `merge_sha` is admitted even past the cap, because the cap may only hold back a PR a later window can re-anchor — such a PR sorts last and would otherwise land in the capped tail, be held out of the cursor, and be stranded behind a baseline that advanced past its real merge commit. So the work bound is `cap + unanchored`, not exactly `cap`.
++
+ **Time budget, and why the merge is exempt from it.** `run.time_budget_seconds` bounds the _authoring_ work — the expensive, interruptible part. It does not bound the merge epilogue when the advance is cursor-backed, because the only run that can BE cursor-backed is a time-truncated one, which is past its deadline by construction: enforcing the run budget there would refuse every run auto-merge exists for, silently. The epilogue stays bounded by `merge.checks_grace_seconds` / `merge.checks_timeout_seconds` measured from the merge attempt, so **a run that earns a merge may overrun `time_budget_seconds` by up to `checks_timeout_seconds` (default 900s) while it waits out host CI.** Size the workflow's own job timeout for `time_budget_seconds + checks_timeout_seconds` — the scaffolded template moved from 60 to 90 minutes for exactly this reason, since the 2700s default budget alone already reached the old ceiling. Lower `merge.checks_timeout_seconds` if you would rather forfeit a merge than let the nightly run long.
+ 
+ **The job timeout is not the real ceiling** — the GitHub App installation token is. It is minted mid-job and expires 1h later, and no `timeout-minutes` extends it, so the whole run must clear **one hour from the mint step**, not from job start.
+ 
+ Budget for `authoring + checks_timeout_seconds + tail`, and note that **authoring is not `time_budget_seconds`** — since CCE-152 the authoring loop may run to `run.authoring_hard_cap_seconds`, defaulting to `time_budget_seconds * 1.15`, in order to finish the PR group it is in the middle of (a cut mid-group leaves that PR owing a page and blocks the baseline advance). At the documented 2100s budget that is 2415 + 900 = 3315s, leaving ~285s of the hour for the tail (the in-flight page batch, site generators, the push, the PR create). Both hosts in this repo's orbit set `run.time_budget_seconds: 2100` against a 900s check timeout for that reason.
+ 
+ Part of that sizing is now **enforced structurally**, not just documented: `resolve_authoring_hard_cap` clamps the hard cap down to `GITHUB_APP_TOKEN_TTL_SECONDS - checks_timeout_seconds - 285s` (the poll term is dropped for a `merge.policy: manual` host, which never runs it), so no host can configure an authoring **overrun** that outlives its own token **measured from the moment the orchestrator starts**. Read "overrun" strictly: the clamp bounds the stretch _above_ `time_budget_seconds`, and it applies on the two paths where there is one to bound — a cap that already fits under the ceiling, and a cap narrowed down to it. **It does not bound the budget.** A host whose ceiling lands at or below its own budget gets no ceiling applied at all (the second bullet below), and is bounded by `time_budget_seconds` alone; `time_budget_seconds + checks_timeout_seconds` can reach the token's TTL exactly, and exceed it as the budget grows. Note also what the enforced terms cover: they are the ones `run()` can see — its own budget, its own overrun, the poll it will run, and the tail reserve — all counted from the `clock()` call at `run()` entry. The workflow mints the token in the job's FIRST step, several minutes of checkout and install earlier, and nothing in the process can measure that gap. **Sizing it is yours**: subtract your job's setup time from the hour before you spend the rest, and keep `time_budget_seconds + the overrun (authoring_hard_cap_seconds - time_budget_seconds) + checks_timeout_seconds + 285` — that is, `authoring_hard_cap_seconds + checks_timeout_seconds + 285` — under what is left. Drop the overrun term and you will size the run short by exactly it: the documented 2100s host resolves a 2415s cap, so its real requirement is 2415 + 900 + 285 = 3600s, the **entire** token TTL. Because the clamp guarantees `cap + poll + 285 <= 3600`, a host sitting exactly on that ceiling has **zero** seconds of the hour left for setup — the three-term sum would have told it 3285 and left it believing five minutes of checkout still fit. Three consequences worth knowing before you tune either knob:
+ 
+ - **An explicit `run.authoring_hard_cap_seconds` at or below `time_budget_seconds` is rejected at startup** with exit 2 and a logged reason. It is not clamped up. A cap equal to the budget collapses the hard deadline onto the soft one, which restores the arbitrary mid-group cut the cap exists to prevent — silently, in the exact place you were trying to prevent it. **That comparison uses the _resolved_ budget, so `--time-budget-seconds` can trip it against a config file nobody edited**: on a host configured `2100` / `2415`, a hand re-run with `--time-budget-seconds 3000` raises the budget above the config's fixed cap and exits 2 before any work, on a config that is perfectly valid for the nightly. There is no CLI override for the cap, so a hand re-run above the configured cap means editing `run.authoring_hard_cap_seconds` too — or overriding the budget downward rather than up.
+ - **If the TTL ceiling lands at or below your budget, there is no overrun left to grant.** The run does not abort; the cap is held at the budget and an advisory `authoring_hard_cap_squeezed` reason names the squeeze in the digest. Authoring can then be cut mid-PR-group again and such a run earns no baseline advance — the pre-CCE-152 behaviour, never worse, never silent. **The stock `DEFAULT_TIME_BUDGET_SECONDS` (2700) is in this state**: 2700 + 900 is the entire hour with nothing left for the tail. Lower `run.time_budget_seconds` (2100 is the tested value) or `merge.checks_timeout_seconds` to get the overrun back.
+diff --git a/docs/site-src/architecture/orchestrator.md b/docs/site-src/architecture/orchestrator.md
+index 52716d7..7a9a341 100644
+--- a/docs/site-src/architecture/orchestrator.md
++++ b/docs/site-src/architecture/orchestrator.md
+@@ -55,20 +55,36 @@ CCE-144 splits `partial` into two orthogonal classifications carried on `state["
+ - neither → flips `partial` AND `blind`, and appends the reason to `blind_reasons` too. This is the fail-safe default — an unclassified new failure mode fails loud rather than passing silently.
+ 
+ Classification happens by CALL SITE, never by matching on the reason string — a `schema_invalid:` reason is emitted by three different call sites (source-collector, page-author, gap-detector) that classify differently, and only the call site knows which. `_record_dispatch_reasons` (`scripts/orchestrator_runner.py:_record_dispatch_reasons`) is the one path all seven agent dispatches route their reasons through; page-author and gap-detector pass `degraded=True` explicitly (an unlanded page batch is held out of the watermark advance rather than lost — see the cursor-backed section below — and gap-detector's output is advisory and outside the merge gate anyway), and every other blocking dispatch takes the `degraded=False` default.
+ 
+ Three consumers read the flag:
+ 
+ - **`_exit_code`** (`scripts/orchestrator_runner.py:_exit_code`) returns 1 when `blind`, 0 otherwise — the same exit-1 class the runner already used when it couldn't open the docs PR, so an operator watching only run status takes one action for both.
+ - **`_should_advance_watermark`** (`scripts/orchestrator_runner.py:_should_advance_watermark`) refuses to move `last_successful_run` at all when `blind` — a run that never saw its input has nothing honest to advance to.
+ - **`_maybe_auto_merge`** (`scripts/orchestrator_runner.py:_maybe_auto_merge`) skips with `blind_run` unconditionally, ahead of the CCE-140 `partial and not advance_cursor_backed` carve-out — a cursor-backed advance proves the baseline is honest about what the run SAW, and a blind run did not see anything.
+ 
++## Pre-admission window cap
++
++The soft budget below bounds the clock. It does not bound the work, and until CCE-169 nothing did: the review window was a lookback from a baseline that advances slowly, so a stalled baseline widened by a day every night and each run finished a smaller fraction of it. The only truncation was the time-based cut inside the admission loop, which fires after the run has already begun failing to keep up.
++
++`resolve_window_cap` (`scripts/orchestrator_runner.py:resolve_window_cap`) resolves `run.window_pr_cap` in config over `DEFAULT_WINDOW_PR_CAP` — 10 (`scripts/orchestrator_runner.py:DEFAULT_WINDOW_PR_CAP`). `0` is the advertised opt-out and restores the pre-CCE-169 unbounded window. The key is **default-ON**, unlike `citation_source_roots` and `lint.external_repos`: every CCE-169 incident happened on a host that had configured nothing, and an opt-in guard against an unrecoverable failure is discovered by having the failure. A cap set too tight is a visible nightly reason an operator raises in one edit; a cap set too loose is a silent stall.
++
++The cut runs on the oldest-first PR list, before the admission loop. PRs past the cap become `window_capped`, which is a **third category** — not a reuse of `admission_deferred`. The two have the same shape and different causes (`admission_deferred` means the run TRIED and ran out of time; `window_capped` means the run deliberately DID NOT TRY), and per CCE-144 classification follows the call site, never the resemblance. Three consumers, and only the first takes them:
++
++- **`held_back`** — YES. Capped PRs stop the CCE-151 cursor exactly like unfinished ones, so `advance_cursor_list` (`scripts/orchestrator_runner.py:advance_cursor_list`) breaks at the cap boundary and the baseline never walks past a PR the run did not document.
++- **`window_prs` → `next_deferral_counts`** — NO. `next_deferral_counts` (`scripts/orchestrator_runner.py:next_deferral_counts`) pops the entry of any in-window PR that is not still-deferred, and a capped PR can never be still-deferred. Leaving it in `window_prs` would DELETE its genuine deferral history every night it waits.
++- **`_deferred_all` → `partition_deferrals`** — NO. The CCE-140 deferral-skip hatch (`scripts/orchestrator_runner.py:partition_deferrals`) must never abandon a PR the run never attempted.
++
++A capped run is partial with a `held_back_window_capped: n of m PRs held for a later run (cap c)` reason, `degraded=True` (CCE-144 — the run HELD BACK what it did not process; it did not consume and lose it). It is a plain literal, deliberately not routed through the `time_budget` / `held_back` reason selector, which only discriminates truncated-vs-degraded and would render a cap as `time_budget_window_capped` on a truncated run — factually wrong, since the cap fires before any clock is consulted. Such a run still auto-merges: `held_back` is non-empty, so the advance is cursor-backed, so CCE-140's `partial and not advance_cursor_backed` carve-out permits the merge — which is what promotes `state.json` and lets the next run take the next `c` PRs.
++
++**One exemption: a PR with no `merge_sha` is never capped.** `_order_prs_oldest_first` (`scripts/orchestrator_runner.py:_order_prs_oldest_first`) keys such a PR as `len(order) + 1`, so it sorts last, and the cap takes the tail — whenever the cap fires, an unanchored PR is guaranteed to be in the capped slice. From there it would enter `held_back` but neither writer of `_deferred_all`, so it never reaches `still_deferred` and the `_no_advance_unanchored_deferred` guard — whose entire purpose is to refuse advancing past a PR that cannot be re-anchored — would never see it. The cursor would advance past its real merge commit and the next window, `cursor..HEAD`, would exclude it permanently. The invariant is that **the cap may only hold back a PR a later window can re-anchor**, so unanchored PRs are pulled back out of the capped tail and admitted. The work bound is `cap + unanchored`, not exactly `cap`.
++
+ ## Soft time budget
+ 
+ The run computes one deadline up front and carries it through every loop:
+ 
+ ```python
+ budget = resolve_time_budget(config, time_budget_seconds)
+ deadline = clock() + budget if budget > 0 else None
+ ```
+ 
+ `resolve_time_budget` (`scripts/orchestrator_runner.py:resolve_time_budget`) resolves precedence CLI override (including an explicit `0` for "unlimited") over `run.time_budget_seconds` in config over `DEFAULT_TIME_BUDGET_SECONDS` — 2700 seconds, 45 minutes (`scripts/orchestrator_runner.py:DEFAULT_TIME_BUDGET_SECONDS`). That default is a default, not a safe sizing: the job timeout is no longer what bounds it (both workflow files carry `timeout-minutes: 90` since CCE-140), and the binding bound is the GitHub App installation token's `GITHUB_APP_TOKEN_TTL_SECONDS` less the merge poll and the post-run tail. A stock 2700s host is squeezed flat by that ceiling — it gets no authoring overrun at all and emits an advisory `authoring_hard_cap_squeezed` reason on every run. See the hard-cap paragraph below for the arithmetic and for the budgets that do fit. A budget `<= 0` means no deadline at all: every per-loop check below is a no-op and the run authors, fact-checks, and gap-checks everything it admitted.
+diff --git a/scripts/orchestrator_runner.py b/scripts/orchestrator_runner.py
+index ca83138..c2d3cd9 100644
+--- a/scripts/orchestrator_runner.py
++++ b/scripts/orchestrator_runner.py
+@@ -2481,30 +2481,40 @@ def run(
+         # smaller fraction of it. `window_capped` is a THIRD category, not a
+         # reuse of `admission_deferred`: those two have the same shape and
+         # different causes (`admission_deferred` means the run TRIED and ran out
+         # of time; `window_capped` means the run deliberately DID NOT TRY), and
+         # per CCE-144 classification follows the call site, never the
+         # resemblance. It enters `held_back` so the cursor stops at the cap
+         # boundary, and stays out of `window_prs` and `_deferred_all` so it
+         # accrues no deferral count and the skip hatch cannot abandon it.
+         _window_cap = resolve_window_cap(config)
+         window_capped: list[dict] = []
+-        # `> 0`, not truthiness. `resolve_window_cap` ends in a bare `int(val)`
+-        # with no clamp, so a host writing `window_pr_cap: -1` reaches here with
+-        # a negative cap: it is truthy, `len(prs) > -1` is always true, and the
+-        # slices INVERT — `prs[-1:]` caps the NEWEST PR and `prs[:-1]` admits
+-        # every other one, reporting `(cap -1)`. That is not a loud failure, it
+-        # is a quiet one on the wrong end of the window. `> 0` makes a negative
+-        # cap behave as the documented unlimited opt-out, exactly like 0.
++        # `> 0`, not truthiness: a negative cap is truthy and would INVERT the
++        # slices, capping the NEWEST PR. Defence-in-depth only — no host can
++        # reach here with one, because `templates/config.schema.json` sets
++        # `minimum: 0` and `run()` loads through `load_config_validated`, which
++        # exits 2 first. It guards direct callers of the raw dict, tests among
++        # them, since `resolve_window_cap` ends in a bare `int(val)`.
+         if _window_cap > 0 and len(prs) > _window_cap:
+-            window_capped = prs[_window_cap:]
+-            prs = prs[:_window_cap]
++            _tail = prs[_window_cap:]
++            # The cap may only hold back a PR a LATER WINDOW CAN RE-ANCHOR. A
++            # PR with no merge_sha cannot be: it is held out of the cursor but
++            # reaches neither writer of `_deferred_all`, so the
++            # `_no_advance_unanchored_deferred` guard below never sees it and
++            # the baseline advances past its real merge commit, outside every
++            # future window. `_order_prs_oldest_first` keys such a PR last, so
++            # it is always in this tail — admit it instead, at a work bound of
++            # `cap + unanchored` rather than exactly `cap`.
++            window_capped = [p for p in _tail if (p.get("merge_sha") or "").strip()]
++            prs = prs[:_window_cap] + [
++                p for p in _tail if not (p.get("merge_sha") or "").strip()
++            ]
+         if window_capped:
+             # A plain literal, deliberately NOT routed through `_rsn` below:
+             # that helper only discriminates truncated-vs-degraded, so a cap
+             # reason passed through it renders as `time_budget_window_capped` on
+             # a truncated run — factually wrong, since the cap fires before any
+             # clock is consulted. degraded=True (CCE-144): the run HELD BACK
+             # what it did not process; it did not consume and lose it.
+             add_partial(
+                 state,
+                 f"held_back_window_capped: {len(window_capped)} of "
+diff --git a/tests/orchestrator/test_window_cap.py b/tests/orchestrator/test_window_cap.py
+index d6c1092..80c3e21 100644
+--- a/tests/orchestrator/test_window_cap.py
++++ b/tests/orchestrator/test_window_cap.py
+@@ -4,20 +4,21 @@
+ The review window had no upper bound, so a stalled baseline widened by a day
+ every night and each run finished a smaller fraction of it. These tests pin the
+ cap itself (this file's first half) and the third-category routing that keeps a
+ capped PR out of the deferral machinery while still stopping the cursor at the
+ cap boundary (second half, added in Task 2).
+ """
+ 
+ from __future__ import annotations
+ 
+ import json
++import re
+ import sys
+ from pathlib import Path
+ 
+ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+ 
+ import orchestrator_runner as orun  # noqa: E402
+ 
+ sys.path.insert(0, str(Path(__file__).parent))
+ from test_cursor_backed_merge import _install_fake_gh  # noqa: E402
+ 
+@@ -57,38 +58,111 @@ def test_window_cap_zero_is_unlimited():
+ 
+ 
+ def test_window_cap_tolerates_a_malformed_run_block():
+     """`_run_cfg` exists because `config.get("run") or {}` raises
+     AttributeError on `run: "nonsense"`. Mirror its siblings, do not reinvent.
+     """
+     assert orun.resolve_window_cap({"run": "nonsense"}) == 10
+     assert orun.resolve_window_cap({"run": None}) == 10
+ 
+ 
++def test_window_cap_resolver_does_not_clamp_a_negative():
++    """The resolver ends in a bare `int(val)` -- no clamp, deliberately.
++
++    Pins WHERE the responsibility sits. The `> 0` at the cut is
++    defence-in-depth for direct callers of the raw dict (these tests among
++    them), NOT a guard against a reachable config: the test below is what
++    stops a host. Asserting the resolver clamps would be asserting behaviour
++    it does not have.
++    """
++    assert orun.resolve_window_cap({"run": {"window_pr_cap": -1}}) == -1
++
++
++def test_the_schema_is_what_rejects_a_negative_cap():
++    """`run()` loads through `load_config_validated`, which validates against
++    this file and returns 2 before the cut is reached -- so no host can hand
++    the cut a negative cap, and an end-to-end negative-cap test would be
++    asserting an unreachable state.
++
++    Pinned here because the cut's comment says so in prose: drop `minimum` and
++    that comment silently becomes false while the negative path becomes
++    reachable again.
++    """
++    schema = json.loads(
++        (
++            Path(__file__).resolve().parents[2] / "templates" / "config.schema.json"
++        ).read_text()
++    )
++    node = schema["properties"]["run"]["properties"]["window_pr_cap"]
++    assert node["type"] == "integer", node
++    assert node["minimum"] == 0, node
++
++
+ # ---------------------------------------------------------------------------
+ # the cut: third-category routing
+ # ---------------------------------------------------------------------------
+ 
+ 
+ def _git(repo: Path, *args: str) -> str:
+     import subprocess
+ 
+     return subprocess.run(
+         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+     ).stdout.strip()
+ 
+ 
+-def _seed_capped_host(tmp_path, init_host, base_config_yaml, *, cap, state_extra=None):
++_CURSOR_FIELDS = ("admitted", "deferred", "capped", "held_back", "skipped")
++
++
++def _cursor_line(capsys) -> dict[str, list[str]]:
++    """Parse the run's `cursor:` line into its five PR-number lists.
++
++    THE ONLY SIGNAL IN THE RUN THAT OBSERVES ADMISSION. Every other assertion
++    in this file measures downstream bookkeeping -- watermark sha, reason
++    literal, deferral counts, `pr_merge` -- and all of it is produced from
++    `window_capped`, which a post-admission cap populates identically to a
++    pre-admission one. Delete `prs = prs[:_window_cap]` while leaving
++    `window_capped` and the reason's saved pre-cut total intact and this whole
++    file stays green while `pr-summarizer` is dispatched for every PR in the
++    window: the run does all N PRs' work every night, which is the unbounded
++    work CCE-169 exists to stop.
++
++    Parsed rather than asserted as a substring so a test names the set it
++    expects, not a rendering of it.
++    """
++    err = capsys.readouterr().err
++    lines = [ln for ln in err.splitlines() if ln.startswith("cursor: admitted=[")]
++    assert lines, f"no `cursor:` line was emitted; stderr tail={err[-2000:]!r}"
++    line = lines[-1]
++    out: dict[str, list[str]] = {}
++    for field in _CURSOR_FIELDS:
++        m = re.search(rf"\b{field}=\[([^\]]*)\]", line)
++        assert m, f"`{field}=[...]` missing from cursor line: {line!r}"
++        body = m.group(1).strip()
++        out[field] = [] if body == "none" else [t.strip() for t in body.split(",")]
++    return out
++
++
++def _seed_capped_host(
++    tmp_path, init_host, base_config_yaml, *, cap, state_extra=None, unanchored=()
++):
+     """Real git window of three PR merges plus a trailing non-PR commit.
+ 
+     Returns (state_path, base, [c1, c2, c3], fakes).
+ 
++    `unanchored` is a set of PR numbers whose `merge_sha` key is REMOVED from
++    the source-collector payload after the shas are assigned -- the PR still
++    merged at its commit, the collector just did not report where.
++    `merge_sha` is not in `required` in `agents/schemas/source_collector.schema.json`,
++    and `_clip_prs_to_window` deliberately KEEPS such a PR, so this is a shape
++    production can hand the cut.
++
+     c4 exists so the newest PR merge is never HEAD: without it `advance == c2`
+     and `advance != head` stop being independent statements. Copied from
+     test_cursor_backed_merge._seed_merge_host for that reason.
+ 
+     The cap is set by REPLACING a line of the shared config, never by appending
+     a second `run:` block -- CONFIG_YAML already carries `run:` with
+     `time_budget_seconds: 2100`, and PyYAML keeps only the LAST duplicate key,
+     so an append would silently delete the budget and change what the test
+     measures.
+     """
+@@ -110,49 +184,66 @@ def _seed_capped_host(tmp_path, init_host, base_config_yaml, *, cap, state_extra
+         shas.append(_git(repo, "rev-parse", "HEAD"))
+     seeded["last_successful_run"] = {"head_sha": base}
+     state_path.write_text(json.dumps(seeded))
+     fakes = tmp_path / "fakes_cap"
+     fakes.mkdir(parents=True, exist_ok=True)
+     for f in FAKES_MULTI.iterdir():
+         (fakes / f.name).write_text(f.read_text())
+     sc = json.loads((FAKES_MULTI / "fake_source_collector.json").read_text())
+     for pr, sha in zip(sc["prs"], shas[:3]):
+         pr["merge_sha"] = sha
++    for pr in sc["prs"]:
++        if pr["number"] in set(unanchored):
++            pr.pop("merge_sha", None)
+     (fakes / "fake_source_collector.json").write_text(json.dumps(sc))
+     return state_path, base, shas[:3], fakes
+ 
+ 
+ def test_a_capped_run_advances_to_the_cap_boundary_and_says_so(
+-    tmp_path, init_host, base_config_yaml, read_current_run
++    tmp_path, init_host, base_config_yaml, read_current_run, capsys
+ ):
+     """THE CCE-151 REGRESSION GUARD, and the most important test in this file.
+ 
+     A bare `prs = prs[:cap]` puts capped PRs in neither `deferred_pages_by_pr`
+     nor `admission_deferred`, so `held_back` is empty, `time_truncated` is
+     False, CCE-151's walk is never entered, and control reaches the `else`
+     branch where `advance_sha = current_run.head_sha` -- FULL WINDOW HEAD. The
+     run would document 2 PRs and advance past all 3, losing the third
+     permanently and silently.
+ 
+     The reason must be asserted PRESENT, by list membership on the fully
+     rendered line. Nothing else here distinguishes the right label from a wrong
+     one or from NO label at all, and emitting nothing is the dangerous variant
+     because it passes everything else: on a healthy capped run CCE-151's walk
+     takes its `if ok:` branch, which sets `advance_sha` and
+     `advance_cursor_backed` WITHOUT calling `add_partial`, so this site is the
+     run's only signal that any PR was held.
++
++    THE ADMISSION ASSERTION IS SEPARATE AND ALSO REQUIRED. Everything above
++    measures downstream bookkeeping, all of it produced from `window_capped` --
++    so a POST-admission cap (compute `window_capped`, keep it out of
++    `window_prs`, render the reason from a saved pre-cut total, but never
++    truncate `prs`) satisfies every one of them while `pr-summarizer` is
++    dispatched for all three PRs. The run would do all N PRs' work every night
++    and nothing would notice, which is the unbounded work CCE-169 exists to
++    stop. `_cursor_line` is the only observation of admission itself.
+     """
+     state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
+         tmp_path, init_host, base_config_yaml, cap=2
+     )
+     rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+     assert rc == 0
++    # Admission itself. The ONLY assertion in this file that a post-admission
++    # cap cannot satisfy -- see the docstring.
++    cur = _cursor_line(capsys)
++    assert cur["admitted"] == ["1", "2"], cur
++    assert cur["capped"] == ["3"], cur
+     written = json.loads(state_path.read_text())
+     advance = written["last_successful_run"]["head_sha"]
+     assert advance == c2, written["last_successful_run"]
+     assert advance != _git(tmp_path, "rev-parse", "HEAD")
+     cr = read_current_run(state_path)
+     assert (
+         "held_back_window_capped: 1 of 3 PRs held for a later run (cap 2)"
+         in cr["partial_reasons"]
+     ), cr["partial_reasons"]
+ 
+@@ -254,20 +345,103 @@ def test_window_pr_cap_zero_is_a_true_no_op(
+     ]
+     written = json.loads(state_path.read_text())
+     assert written["last_successful_run"]["head_sha"] == _git(
+         tmp_path, "rev-parse", "HEAD"
+     ), written["last_successful_run"]
+     assert written["last_successful_run"]["head_sha"] != c2, (
+         "cap 0 must not stop at the cap-2 boundary"
+     )
+ 
+ 
++# ---------------------------------------------------------------------------
++# the cap must only hold back PRs a later window can re-anchor
++# ---------------------------------------------------------------------------
++
++
++def test_an_unanchored_pr_is_never_capped(
++    tmp_path, init_host, base_config_yaml, capsys
++):
++    """A capped PR with no merge_sha is stranded permanently -- a REGRESSION
++    CCE-169 introduces, and the coupling is structural, not coincidental.
++
++    `_order_prs_oldest_first` keys a PR with a missing merge_sha as
++    `big = len(order) + 1`, so it sorts LAST; the cap takes the TAIL. Whenever
++    the cap fires, an unanchored PR is GUARANTEED to be in the capped slice.
++
++    From there it enters `held_back` but NEITHER writer of `_deferred_all`, so
++    it is absent from `still_deferred` and the
++    `..._no_advance_unanchored_deferred` guard -- whose entire purpose is to
++    refuse advancing past a PR that cannot be re-anchored -- never sees it. The
++    cursor walk covers only admitted PRs, yields a valid cursor,
++    `advance_cursor_backed=True`, and the baseline advances past the unanchored
++    PR's REAL merge commit. The next window is `cursor..HEAD`, so that PR is
++    never returned again: permanently undocumented, rc 0, and the run
++    auto-merges.
++
++    Pre-CCE-169 there was no such path. Uncapped, the PR was admitted and
++    documented; time-truncated, it entered `admission_deferred` ->
++    `still_deferred` and the guard froze the baseline.
++
++    Here PR 2 truly merged at c2 and is returned without a merge_sha, so the
++    window order is [1, 3, 2] and cap 2 puts it in the capped tail.
++    """
++    state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
++        tmp_path, init_host, base_config_yaml, cap=2, unanchored={2}
++    )
++    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
++    assert rc == 0
++    cur = _cursor_line(capsys)
++    written = json.loads(state_path.read_text())
++    advance = written["last_successful_run"]["head_sha"]
++    next_window = set(_git(tmp_path, "rev-list", f"{advance}..HEAD").split())
++    # THE INVARIANT, stated as the harm rather than as the mechanism: a PR the
++    # run did not admit must still be inside the window the NEXT run reads.
++    assert "2" in cur["admitted"] or c2 in next_window, (
++        f"PR 2 merged at {c2[:8]} and was neither admitted nor left in the next "
++        f"window ({advance[:8]}..HEAD): it is outside every future window and "
++        f"is permanently undocumented. admitted={cur['admitted']} "
++        f"capped={cur['capped']} held_back={cur['held_back']}"
++    )
++    # And the mechanism, so a future reader sees WHICH of the two arms holds.
++    assert cur["capped"] == [], cur
++
++
++def test_the_cap_still_holds_back_an_anchored_pr_beside_an_unanchored_one(
++    tmp_path, init_host, base_config_yaml, read_current_run, capsys
++):
++    """The exemption is for unanchored PRs only, not a disabled cap.
++
++    Cap 1 against window order [1, 3, 2] puts BOTH 3 (anchored, at c3) and 2
++    (unanchored) in the capped tail. Only 2 is pulled back; 3 stays capped, so
++    the reason still fires and the cursor still stops at the cap boundary --
++    here c1, the newest admitted PR that carries a merge_sha, since
++    `_last_processed_merge_sha` scans from the end past PR 2.
++    """
++    state_path, base, (c1, c2, c3), fakes = _seed_capped_host(
++        tmp_path, init_host, base_config_yaml, cap=1, unanchored={2}
++    )
++    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
++    assert rc == 0
++    cur = _cursor_line(capsys)
++    assert sorted(cur["admitted"]) == ["1", "2"], cur
++    assert cur["capped"] == ["3"], cur
++    cr = read_current_run(state_path)
++    assert (
++        "held_back_window_capped: 1 of 3 PRs held for a later run (cap 1)"
++        in cr["partial_reasons"]
++    ), cr["partial_reasons"]
++    written = json.loads(state_path.read_text())
++    advance = written["last_successful_run"]["head_sha"]
++    assert advance == c1, written["last_successful_run"]
++    assert c3 in set(_git(tmp_path, "rev-list", f"{advance}..HEAD").split())
++
++
+ def test_a_sub_cap_window_is_untouched(
+     tmp_path, init_host, base_config_yaml, read_current_run
+ ):
+     """Three PRs against a cap of 10 -- `window_capped` stays empty, nothing is
+     added to `held_back`, and the code path is today's.
+ 
+     Same HEAD-vs-c3 correction as the cap-0 test above: an untruncated run
+     holding nothing back advances to `git rev-parse HEAD` (c4), never to the
+     newest PR merge.
+     """

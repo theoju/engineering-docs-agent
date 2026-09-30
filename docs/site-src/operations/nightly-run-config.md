@@ -7,7 +7,7 @@ synthesized_into: []
 
 # Nightly Run Config
 
-The nightly run's shape — how long it works, how many PRs it admits, when it gives up on a stuck PR, and now, which other repositories it may cite — comes from two blocks in the host's config: `run:` and `lint:`. This page is the reference for both.
+The nightly run's shape — how long it works, how many PRs it admits, when it gives up on a stuck PR, and now, which other repositories it may cite — comes from three blocks in the host's config: `run:`, `merge:`, and `lint:`. This page is the reference for all three.
 
 ## The `run:` block
 
@@ -70,7 +70,7 @@ A declared token renders to one of two forms:
 - **Public** (`url` set): a Markdown link, `` [`basename`](blob-url) ``, where `basename` is the last path segment and the blob URL is built from the entry's `url`/`ref`/`blob_template`. A trailing `:line`/`:symbol` citation suffix is kept in the visible link text but stripped from the URL — left in the URL it would silently 404 while still passing the linter.
 - **Private** (`private: true`): the bare basename, `` `name` `` — the repository is never named anywhere in the rendered output.
 
-The rewrite deliberately declines to touch a token that sits inside an ambiguous backtick run (for example, a token wrapped in double backticks next to another backtick) rather than try to model CommonMark's run-length pairing correctly. A declined token simply reverts to pre-existing behavior: `citation_exists` sees the raw, unrendered `prefix/path` form and blocks it, loudly and self-healing via the usual lint-block revert.
+The rewrite deliberately declines to touch a token when either of its delimiters abuts another backtick (for example, a token wrapped in double backticks). Replacing a match consumes one backtick per side, which changes backtick run lengths, and CommonMark re-pairs code spans by run length — so a rewrite there could dissolve a neighbouring code span and let content that was escaped fall out of it. The guard declines instead of modelling run pairing correctly. A declined token simply reverts to pre-existing behavior: `citation_exists` sees the raw, unrendered `prefix/path` form and blocks it, loudly and self-healing via the usual lint-block revert.
 
 ### Failure handling
 

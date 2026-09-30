@@ -29,6 +29,11 @@ pinned at `175162e1` for five consecutive nights, with `deferral_counts` for
 PR #235 and PR #236 recomputed to the same value every run because the write
 never reached `main`.
 
+The plugin's own dogfood host, `theoju/engineering-docs-agent`, showed the
+same symptom: it had published no documentation since 2026-08-22 (PR #240),
+and every nightly after that reported `partial` and left the baseline
+frozen.
+
 ## The fix: a wall-clock backstop
 
 CCE-175 adds a stall clock keyed on a signal that was already on `main` and

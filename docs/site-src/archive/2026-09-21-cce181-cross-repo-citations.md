@@ -82,6 +82,10 @@ TDD, fixture-driven, fixtures modeling an arbitrary host rather than this repo's
 - `tests/orchestrator/test_external_refs_wiring.py` and `tests/orchestrator/test_external_refs_e2e.py` cover the orchestrator call site and an end-to-end run — including, per the CCE-179 lesson that a test reaching its assertion by a different code path than production is not coverage, exercising the non-time-truncated production shape rather than only the truncated one.
 - `tests/orchestrator/test_classification_coverage.py` covers the `degraded=True` classification of a render failure.
 
+The code-span regression test renders BEFORE and AFTER through python-markdown, the engine the published site uses. `markdown>=3.4` is therefore listed in `requirements-dev.txt` on purpose: the CI test workflow installs only that file, and the library otherwise arrives transitively through the docs requirements. Without the line the test would `importorskip` in the suite that gates every merge.
+
+A skip makes the job report green, so the exit code cannot show that this test ran. On PR #279 the signal was the skip count: `1614 passed, 10 skipped` against `main`'s `1554 passed, 10 skipped`. The unchanged 10 shows the new test executed. A missing dependency would have made it 11.
+
 ## Out of scope
 
 - Widening `citation_exists` itself to recognize the prefixed form — it never sees it, by design; the rendering happens first.

@@ -6,6 +6,7 @@
       "architecture/orchestrator.md"
     ],
     "CLAUDE.md": [
+      "architecture/citation-shortening-detection.md",
       "architecture/external-citations.md"
     ],
     "CONTEXT.md": [
@@ -1169,12 +1170,14 @@
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/cce32-github-pages-publish-target.md",
+      "architecture/citation-shortening-detection.md",
       "architecture/structured-docs-site-generation.md"
     ],
     "docs/superpowers/plans/2026-08-21-cce141-corroborated-repair.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
       "architecture/cce32-github-pages-publish-target.md",
+      "architecture/citation-shortening-detection.md",
       "architecture/structured-docs-site-generation.md"
     ],
     "docs/superpowers/plans/2026-09-21-cce181-cross-repo-citations.md": [
@@ -1539,6 +1542,7 @@
     "docs/superpowers/specs/2026-08-21-cce141-citation-path-repair-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/citation-shortening-detection.md",
       "architecture/structured-docs-site-generation.md"
     ],
     "docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md": [
@@ -1605,6 +1609,7 @@
       "architecture/publish-verifier.md"
     ],
     "scripts/citation_repair.py": [
+      "architecture/citation-shortening-detection.md",
       "architecture/orchestrator.md"
     ],
     "scripts/contracts.py": [
@@ -1671,6 +1676,7 @@
       "architecture/cce23-source-map-drift.md",
       "architecture/cce4-schema-enforcement.md",
       "architecture/cce6-7-8-batch.md",
+      "architecture/citation-shortening-detection.md",
       "architecture/external-citations.md",
       "architecture/index.md",
       "architecture/orchestrator.md",
@@ -2042,6 +2048,14 @@
     ],
     "architecture/cce6-7-8-batch.md": [
       "scripts/dispatch_subagent.py",
+      "scripts/orchestrator_runner.py"
+    ],
+    "architecture/citation-shortening-detection.md": [
+      "CLAUDE.md",
+      "docs/superpowers/plans/2026-08-21-cce141-citation-path-repair.md",
+      "docs/superpowers/plans/2026-08-21-cce141-corroborated-repair.md",
+      "docs/superpowers/specs/2026-08-21-cce141-citation-path-repair-design.md",
+      "scripts/citation_repair.py",
       "scripts/orchestrator_runner.py"
     ],
     "architecture/engineering-docs-agent.md": [

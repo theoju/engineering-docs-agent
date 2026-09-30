@@ -118,10 +118,12 @@ stays order-independent — it just checks membership in `forgive` — and the
 caller resolves window order, the same division of responsibility
 `advance_cursor_list` already uses for the prefix-boundary invariant.
 
-`tests/orchestrator/test_forgiven_run_merge_gate.py` pins the boundary
-directly: a PR at zero deferrals is never forgiven on its own, a PR with
-prior history is, and in a mixed window only the one with history is
-abandoned while the other two keep waiting.
+`tests/orchestrator/test_forgiven_run_merge_gate.py` pins the boundary at two
+levels. At the `partition_deferrals` level, a PR at zero deferrals is not
+abandoned unless it is in the `forgive` set, and only members of that set are
+abandoned in a mixed window. End to end, with a lint block deferring all three
+window PRs and no prior counts, exactly the oldest is abandoned and the other
+two keep their three chances (CCE-175 skipped all three).
 
 ## What ships
 

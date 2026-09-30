@@ -46,6 +46,75 @@ def test_fact_checker_bad_verdict_rejected():
     assert any("schema_invalid" in r for r in reasons)
 
 
+# CCE-197: `ok` is declared but not required. The orchestrator's fact-checker
+# consumer reads `verdict` and `findings` only (orchestrator_runner.py, the
+# advisory layer that fills `fact_check_warnings`) and never reads `ok`, so a
+# schema that rejects a payload for omitting it converts a usable answer into
+# `fact_checker_unavailable`. That is the CCE-180 class: a schema stricter than
+# its consumer turns a handled result into an unhandled failure.
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "cce197"
+
+
+def test_fact_checker_schema_declares_ok_without_requiring_it():
+    schema = json.loads((SCHEMAS / "fact_checker.schema.json").read_text())
+    assert "verdict" in schema["required"]
+    assert "ok" not in schema["required"]
+    # Still declared, so an agent that DOES emit it is not rejected either.
+    assert schema["properties"]["ok"]["type"] == "boolean"
+
+
+def test_real_09_30_payload_without_ok_validates():
+    """The exact answer that made run 36741357748 report fact_checker_unavailable."""
+    raw = json.loads(
+        (FIXTURES / "20260930T161538-fact-checker-no-ok.stdout.txt").read_text()
+    )
+    assert "ok" not in raw  # fixture integrity: this is the point of the fixture
+    parsed, reasons = validate_and_parse("fact-checker", raw)
+    assert reasons == []
+    assert parsed.verdict == "contradiction"
+    assert len(parsed.findings) == 1
+    assert parsed.findings[0]["source_path"].endswith(
+        "2026-09-06-security-remediation-group-b.md"
+    )
+
+
+def test_absent_ok_is_derived_true():
+    parsed, reasons = validate_and_parse("fact-checker", {"verdict": "consistent"})
+    assert reasons == []
+    assert parsed.ok is True
+
+
+def test_absent_ok_is_derived_false_when_error_is_set():
+    parsed, reasons = validate_and_parse(
+        "fact-checker", {"verdict": "unverifiable", "error": "page unreadable: x.md"}
+    )
+    assert reasons == []
+    assert parsed.ok is False
+
+
+def test_explicit_ok_false_is_preserved():
+    """The documented failure payload keeps its meaning — derivation must not
+    overwrite an `ok` the agent supplied."""
+    parsed, reasons = validate_and_parse(
+        "fact-checker",
+        {"ok": False, "verdict": "unverifiable", "error": "page unreadable: x.md"},
+    )
+    assert reasons == []
+    assert parsed.ok is False
+
+
+def test_missing_verdict_is_still_rejected():
+    parsed, reasons = validate_and_parse("fact-checker", {"ok": True})
+    assert parsed is None
+    assert any("schema_invalid" in r for r in reasons)
+
+
+def test_payload_missing_both_ok_and_verdict_is_still_rejected():
+    parsed, reasons = validate_and_parse("fact-checker", {})
+    assert parsed is None
+    assert any("schema_invalid" in r for r in reasons)
+
+
 def test_page_author_schema_declares_evidence():
     schema = json.loads((SCHEMAS / "page_author.schema.json").read_text())
     assert "evidence" in schema["properties"]

@@ -23,6 +23,7 @@ SCHEMA_BLOCK = re.compile(
         "page-author",
         "content-validator",
         "gap-detector",
+        "fact-checker",
         "publish-verifier",
         "notifier",
     ],

@@ -38,7 +38,7 @@ This is a warn-layer check: you report findings; you never edit files.
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "fact-checker output",
   "type": "object",
-  "required": ["ok", "verdict"],
+  "required": ["verdict"],
   "properties": {
     "page": { "type": "string" },
     "verdict": { "enum": ["consistent", "contradiction", "unverifiable"] },

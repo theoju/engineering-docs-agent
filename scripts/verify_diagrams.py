@@ -53,7 +53,7 @@ def scan_mermaid_sources(source_dir: Path) -> dict[str, int]:
 
 def source_to_built_urls(page: str) -> list[str]:
     """Candidate built-site relative paths for a source page, probing both
-    MkDocs layouts. ``foo/bar.md`` -> ``[foo/bar/index.html, foo/bar.html]``;
+    MkDocs layouts. ``<dir>/<page>.md`` -> ``[<dir>/<page>/index.html, <dir>/<page>.html]``;
     an ``index.md`` -> its directory's ``index.html``.
     """
     stem = page[:-3] if page.endswith(".md") else page

@@ -79,7 +79,7 @@ shortened from, and stops.
 - `suffix_match_only` — exactly one tracked file matches, resting on the
   string match alone.
 - `ambiguous` — more than one tracked file matches, listed up to a cap.
-  `no_candidate` — no tracked file ends with the cited tail at all.
+- `no_candidate` — no tracked file ends with the cited tail at all.
 
 None of these labels establish that the citation was actually a
 shortening, only what the module observed. `no_candidate` findings are
@@ -100,16 +100,17 @@ per-run so that a pathological page cannot blow out the PR body.
 Two numbers closed the argument, independent of the four rounds of
 corruption:
 
-1. **Zero real-world firings.** Measured against the complete archived
-   production record — 19 PRs, 15 distinct blocked citations in
-   `.engineering-docs-agent/stale-prs-archive/` — the repair would have
-   fired zero times. The genuine shortenings in that record already
-   resolved through an unrelated `docs_dir` resolution branch added later
-   (CCE-139/145), so repair never even reached them.
-2. **The test suite was unchanged with the feature disabled.** Disabling
-   the production call site entirely left the suite green and
-   byte-identical to baseline — no test in the repository exercised the
-   feature through the path production actually used.
+1. **Zero real-world firings.** The archive in
+   `.engineering-docs-agent/stale-prs-archive/` holds 41 PRs; 19 carry a
+   `cites nonexistent path` block, over 15 distinct blocked citations.
+   Checked against the 887 tracked files, 5 now resolve through the
+   `docs_dir` branch added later (CCE-139/145), 10 have no candidate at all,
+   and none has a unique suffix match. The repair would have fired zero
+   times, before corroboration was even consulted.
+2. **The test suite was unchanged with the feature disabled.** Replacing
+   the production call site with `if False:` in a detached worktree gave
+   1531 passed / 4 skipped, identical to that worktree's baseline — no test
+   exercised the feature through the path production actually used.
 
 Given a capability with demonstrated zero production value and four
 successive corruption findings, the corruption findings are the reason to

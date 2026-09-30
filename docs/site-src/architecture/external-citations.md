@@ -85,6 +85,14 @@ The subtler guard is about backtick delimiters, not content. `render_external_re
 
 The tempting design is "if the path doesn't resolve in the host, and an external repo is declared, link it." Its entry condition is exactly the confabulation population `citation_exists` exists to block — CCE-141 measured 2086 unique-suffix non-resolving tokens against 887 tracked files, and under that design every one becomes a link, turning a BLOCK into a silent PASS. That is the same class of defect that cost CCE-141 four adversarial review rounds before the repair capability there was deleted outright rather than patched a fifth time. CCE-181 avoids it structurally: the escape is opt-in *per token*, gated on an explicit declared prefix the agent must name, never on the token's failure to resolve. A rejected token's page text never changes, so nothing this renderer declines to touch is any less safe than it was before CCE-181 existed.
 
+## Fences and scope
+
+`render_external_refs` walks the page line by line. It skips fenced blocks (backtick or `~~~` fences) and applies the inline-code regex to every other line. On an unterminated fence it treats every line to end of file as fenced, so a declared-prefix token there stays raw. `citation_exists` fails closed on the same input and scans those lines as prose, so it blocks the raw token. The two disagree, but only in the safe direction, and the code records this as a known divergence.
+
+## Guarding the render test
+
+The BEFORE/AFTER test that renders output through a markdown parser needs `markdown>=3.4`, which is listed in `requirements-dev.txt`. The merge-gating workflow installs only `pyyaml jsonschema pytest` plus that file. Without the line, the test would `importorskip` and be reported as skipped in the suite that gates every merge, and a skipped test leaves the job green. To confirm the test ran, compare the skip count against the `main` baseline. On PR #279 the count stayed at 10 skipped, where a silent skip would have made it 11.
+
 ## Config-gated no-op
 
 A host that declares no `lint.external_repos` gets `resolve_config(config)` returning an empty map, and `_render_external_refs_for_pages` returns immediately without reading or writing anything. There is no reachability today on this repo's own dogfood config — no host declares `external_repos` yet — so this path is exercised only by `tests/scripts/test_external_refs_config.py`, `tests/scripts/test_external_refs_render.py`, `tests/orchestrator/test_external_refs_wiring.py`, and `tests/orchestrator/test_external_refs_e2e.py`.

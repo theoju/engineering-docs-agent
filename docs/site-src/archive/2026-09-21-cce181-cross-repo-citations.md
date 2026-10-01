@@ -60,6 +60,10 @@ Five properties of the rendering rule were treated as load-bearing rather than i
 4. A token is rendered only if it would otherwise have been recognized as a citation at all — the same grammar and placeholder exemption `citation_exists` itself uses, plus an explicit rejection of any `..` path segment (which would otherwise retarget the rendered link to an arbitrary repository on the configured forge via ordinary URL dot-segment resolution).
 5. A rewrite never crosses a backtick run. A citation token is normally matched as a single backtick pair, but CommonMark pairs backtick *runs* of equal length anywhere in a paragraph, not single backticks; rewriting a match that abuts another backtick changes run lengths and can dissolve a **neighbouring** token's code span, letting content that was escaped before the rewrite become live markup after it. When either delimiter of the matched span abuts another backtick, the renderer declines and leaves the token untouched — it reverts to pre-CCE-181 behavior and blocks, which is the safe direction.
 
+Do not read property 4 as "the linter blocks a `..` token." `citation_exists` normalizes the traversal, sees that the result escapes the repo root, and silently skips it; `check_path` returns `(True, 'ok')` for the untouched token. A rejected token is safe because the page text never changes and the token stays in its code span, not because anything blocks it. Property 5 exists because that second half is a per-paragraph property: a neighbouring rewrite can dissolve the span.
+
+No host declares `lint.external_repos` yet, so the renderer's behavior is guarded by tests only.
+
 Properties 4 and 5 did not exist in the first design pass; they were found by a whole-branch review that rendered the output through an actual markdown parser rather than checking it against the linter's grammar alone, and are recorded because each closes a real BLOCK→PASS corruption that had already been produced and measured (100 payload-attributable flips for the code-span case, 0 the other way).
 
 ## Error handling / degradation

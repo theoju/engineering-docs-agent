@@ -1630,6 +1630,7 @@
     ],
     "scripts/lint/citation_exists.py": [
       "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/citation-linting.md",
       "architecture/engineering-docs-agent.md",
       "architecture/linting.md"
     ],
@@ -1787,6 +1788,7 @@
     ],
     "tests/lint/test_citation_exists.py": [
       "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/citation-linting.md",
       "architecture/linting.md"
     ],
     "tests/orchestrator/fakes_external_repo/fake_content_validator.json": [
@@ -2049,6 +2051,10 @@
     "architecture/cce6-7-8-batch.md": [
       "scripts/dispatch_subagent.py",
       "scripts/orchestrator_runner.py"
+    ],
+    "architecture/citation-linting.md": [
+      "scripts/lint/citation_exists.py",
+      "tests/lint/test_citation_exists.py"
     ],
     "architecture/citation-shortening-detection.md": [
       "CLAUDE.md",

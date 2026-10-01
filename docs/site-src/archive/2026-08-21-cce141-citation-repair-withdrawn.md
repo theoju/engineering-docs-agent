@@ -93,7 +93,14 @@ loop finishes and before the lint-block revert runs — so it inspects the
 same finished tree `citation_exists` is about to check, not an
 intermediate one. It is `info_only`: it adds a digest line, never flips
 `partial`, and never blocks a merge. Findings are bounded both per-page and
-per-run so that a pathological page cannot blow out the PR body.
+per-run, and each bound reports what it withheld, so that a pathological page
+cannot push the PR body past GitHub's size limit. A single malformed token
+costs only its own finding, not the page's whole list.
+
+One path keeps the advisory as the only signal: under an `archive-index`
+section, `citation_exists` is downgraded to `warn` and the revert fires only
+on `block`, so such a page ships with its shortened citation and no
+`lint_block`. The digest line is the sole warning there.
 
 ## Why the measurements, not just the incidents, decided it
 

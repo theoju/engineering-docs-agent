@@ -25,7 +25,7 @@ unreachable by construction: a counter cannot be a precondition for the
 escape from that counter.
 
 This was observed on `theoju/claude-code-self-assessment`: the baseline
-pinned at `175162e1` for five consecutive nights, with `deferral_counts` for
+pinned at `175162e1` for six consecutive nights, with `deferral_counts` for
 PR #235 and PR #236 recomputed to the same value every run because the write
 never reached `main`.
 
@@ -121,6 +121,20 @@ Every end-to-end case added for this fix
 (`tests/orchestrator/test_forgiven_run_merge_gate.py`) therefore runs with
 `time_budget_seconds=0`, the shape that actually ran in production, and
 says so in its docstring.
+
+The same failure has a design-time twin. The state-machine prototype built
+for CCE-175 earned real value: it falsified a wrong risk hypothesis about
+intermittent pages being abandoned, and it caught the `_stalled`-alone guard
+bug before implementation. It also modeled the `else` branch as cursor-backed
+where the real code set `False`, so it confirmed the design that was about to
+fail. A prototype is evidence about the model you wrote, not the code you did
+not run. When a prototype and a test agree, check whether they share the same
+wrong assumption before treating the agreement as corroboration.
+
+Because the 457-line nightly log never named which PRs were admitted,
+deferred or held back, the deadlock took six nights to see. The run now emits
+one `cursor: admitted=[...] deferred=[...] held_back=[...] skipped=[...]
+baseline_age=Nd stall_window=Nd` line.
 
 ## The regression that mattered most
 

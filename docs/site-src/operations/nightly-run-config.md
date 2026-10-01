@@ -81,6 +81,10 @@ The render step is config-gated and best-effort per page, not a hard dependency 
 - A render failure on one page does not stop the rest of the batch; it's caught, recorded as a `partial_reasons` entry of the form `external_ref_render_failed: <page>: <ExceptionType>: ...`, and classified `degraded=True` — the run held this page back rather than losing it blind.
 - Writes are atomic: the renderer writes to a `.tmp` sibling and `os.replace`s it onto the real page, so a write-time failure (disk full, permission revoked mid-write) leaves the real page exactly as it was, never half-written.
 
+### Testing the delimiter guard
+
+`tests/scripts/test_external_refs_render.py` renders each page before and after the rewrite through python-markdown, the engine mkdocs uses, to prove a rewrite cannot dissolve a neighbouring code span. That is why `markdown>=3.4` is listed in `requirements-dev.txt`: the merge-gating test workflow installs only that file, and without the line the render test would `importorskip` and report as skipped while the job stayed green. To confirm the test ran, compare the skip count against `main`'s baseline rather than reading the pass/fail result.
+
 ### Reachability today
 
 No host in production has declared `lint.external_repos` yet, so every behavior above is exercised only by tests, not a live nightly run.

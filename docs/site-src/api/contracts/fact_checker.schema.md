@@ -7,5 +7,5 @@ _Auto-generated from JSON Schema; do not edit by hand — see `scripts/contracts
 | `page` | string | no |  |
 | `verdict` | enum | yes |  |
 | `findings` | array[object] | no |  |
-| `ok` | boolean | yes |  |
+| `ok` | boolean | no |  |
 | `error` | string \| null | no |  |

@@ -221,6 +221,51 @@ Bad (post-head PR included):
 when `head_sha = b2cd07af` and `git rev-list a2a9dba..b2cd07af` does not
 contain `f0e774c3`.
 
+## Payload budget
+
+Two budgets govern your answer and they are not the same thing. The per-field
+bound in Step 3 and Step 5 caps one `body` or one `description`. This section
+caps the **whole JSON object**, and it is the one that decides whether the run
+survives.
+
+**Your whole emitted JSON object has a ceiling of 120,000 characters.** That is
+the number to measure against. Your output ceiling is approximately 160,000
+characters; the difference is deliberate headroom and is not yours to spend.
+
+**Measure it, do not estimate it.** Before you emit, measure the length of the
+complete JSON object you are about to return — write it to a file and `wc -c`
+the file. Do not infer it from the number of PRs, and do not reason about it
+from how large the window felt.
+
+**If the measurement is at or under 120,000, you are finished. Emit it.** Do
+not trim further, and do not trim for safety. A payload that fits is done.
+Content you remove below this line is content the run can never recover: the
+orchestrator advances its baseline past every PR it was given, so a PR you
+emptied is never collected again by any future run. Trimming a payload that
+already fits destroys work silently and buys nothing.
+
+**Floor — what you may never drop while you are under the ceiling.** Every PR
+you emit keeps a `body` of at least 200 characters of text, or its full text
+when the body is shorter than that, and keeps its `labels` and `jira_keys`.
+Never emit `body: null`, an empty `body`, or a PR stripped of those two fields,
+while the measured total is under the ceiling.
+
+**If the measurement is over 120,000, shed whole PRs — never content.** Drop
+whole PR objects, oldest `merged_at` first, so the PRs you keep form the newest
+contiguous run of the window. Re-measure after each drop and stop as soon as it
+fits. Keep every PR you retain at the full per-field budget. Shedding PR count
+is recoverable, because the orchestrator can see that the window held more PRs
+than you returned. Emptying fields is not recoverable, because a PR present
+with no content is indistinguishable from a PR that genuinely had none.
+
+**Both budgets bind at once, and this one wins.** The per-field bound in Step 3
+and Step 5 is calibrated against a window of roughly 20 PRs. It does **not**
+scale with window size: a window several times that large will exceed this
+section's ceiling while every individual field sits comfortably inside its own
+bound. That is not a contradiction to resolve by guessing — resolve it by
+shedding PR count, never by lowering the per-field bound beneath the floor
+above.
+
 ## Procedure
 
 You MUST complete the steps below in order. You MAY NOT proceed to step N+1
@@ -303,6 +348,12 @@ exactly 1,000 characters. When it already fits, emit it unchanged and add no
 marker. The budget is not cosmetic: an over-long payload gets truncated
 mid-object by your own output ceiling, the orchestrator parses a fragment, and
 the entire run is lost. A bounded `body` is worth more than a complete one.
+
+This 1,000-character bound is per field, and it is not the only budget.
+The payload as a whole has its own ceiling, and a floor beneath which you
+may not trim, both in **§Payload budget**. At a large window size the two
+pull against each other; that section says which one wins and how to
+resolve it.
 
 If Step 1 returned 0 PRs, skip to Step 6 and emit `{"prs": [], "jira_issues": []}`.
 
@@ -397,6 +448,12 @@ Before emitting, verify:
   marker. The marker counts toward the 1,000 — a cut value is never longer than
   an uncut one. An unbounded payload gets truncated mid-object by your output
   ceiling and the run is lost.
+- **Have you measured the complete JSON object you are about to emit?**
+  It must be 120,000 characters or fewer. Measure the real thing with `wc -c`
+  rather than estimating. If it is over, shed whole PR objects oldest-first per
+  **§Payload budget** — do not empty fields to get under. If it is under, trim
+  nothing: every PR you emit carries at least 200 characters of `body` text, or
+  its full text when shorter, plus its `labels` and `jira_keys`.
 
 If any check fails, return to the missing step or add the missing fields.
 Otherwise emit the final JSON per the Output schema. Return ONLY the JSON

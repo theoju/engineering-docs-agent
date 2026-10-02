@@ -1,8 +1,8 @@
 {
   "version": "1",
   "last_successful_run": {
-    "head_sha": "13511b6cf0436f35ca0b1e9c77f24bf31757defd",
-    "completed_at": "2026-10-01T14:22:32.426408+00:00"
+    "head_sha": "ce8a8fa0dd4ec0f35a43cf3e80e3e576e5bdb931",
+    "completed_at": "2026-10-02T13:45:08.269942+00:00"
   },
   "pr_summaries": {
     "theoju/engineering-docs-agent#221": {
@@ -554,6 +554,216 @@
           }
         ],
         "notes": "PR is docs-only and edits CLAUDE.md (the project-instructions/voice-sample file) directly rather than a docs/site-src page, so there is no single obvious existing site page to edit \u2014 the proposed target is a new archive digest. If the orchestrator's archive already has per-incident pages for CCE-127, CCE-90, or CCE-181, this should be an edit to the most relevant one instead of a create."
+      }
+    },
+    "theoju/engineering-docs-agent#283": {
+      "merge_sha": "137240e63309c6e07a97dc8956c8c0ece14b4048",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-02T13:52:21.594350+00:00",
+      "summary": {
+        "pr_number": 283,
+        "what_changed": "The nightly docs-agent run now bounds its review window before PR admission. Previously the window had no upper bound, so a stalled baseline widened the window each night. A run could then finish a smaller fraction of it, which left the baseline frozen. The orchestrator now caps the window. The change touches orchestrator_runner.py and adds a config option to templates/config.schema.json. The CHANGELOG, README, CLAUDE.md, the orchestrator architecture page, and a spec and plan were updated to match.",
+        "why": "A stalled baseline was self-reinforcing. The frozen baseline widened the window by a day. The next run finished a smaller fraction of it and still earned no cursor prefix. The PR was then auto-closed and the baseline stayed frozen. On the ADIS host this forced about 113 merged PRs to be written off by hand (CCE-169). Capping the window breaks that loop so a few blocked nights do not become unrecoverable.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "notes": "Document the bounded review window applied before admission, its config knob, and how it interacts with the cursor-backed advance, deferral skip, and time-budget behavior."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-09-23-cce169-window-cap.md",
+            "doc_kind": "decision",
+            "notes": "Record the decision and rationale: the self-reinforcing baseline stall and why the window is capped."
+          }
+        ],
+        "notes": "The PR body and Jira descriptions were truncated, so the exact config key name and default cap are not stated here. The page author should read scripts/orchestrator_runner.py and templates/config.schema.json for them. page_hint paths assume docs/site-src/architecture/orchestrator.md maps to the core lens's architecture/orchestrator.md."
+      }
+    },
+    "theoju/engineering-docs-agent#284": {
+      "merge_sha": "f83689867f0c7fda32aeb61fd2a233eb7ea35828",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-02T13:52:21.594350+00:00",
+      "summary": {
+        "pr_number": 284,
+        "what_changed": "Adds a single regression test in tests/orchestrator/test_deferral_stall_escape.py that pins the `i > 0` clause in the stall-escape logic. The escape picks the prefix blocker by scanning `prs`, which has had its admission-deferred tail removed (`prs = prs[:i]`). The test ensures that the escape stays reachable when the clock has stalled. There is no production code change.",
+        "why": "CCE-178 forgives the oldest deferred PR once the baseline has stalled. CCE-185 found that the escape could become inert when nothing was admitted. The `i > 0` clause is what keeps it reachable, and nothing guarded it, so a refactor could silently remove it. The test pins that behavior.",
+        "breaking": false,
+        "doc_targets": [],
+        "notes": "Test-only change with no user-visible behavior change, so no documentation update is needed. The stall-escape behavior is already covered by the CCE-175/CCE-178 material. If a page on the deferral stall escape exists under architecture/, it could mention this guard, but that is optional."
+      }
+    },
+    "theoju/engineering-docs-agent#285": {
+      "merge_sha": "3da70bf98e4996918e062c02f181bde8db3c7805",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-02T13:52:21.594350+00:00",
+      "summary": {
+        "pr_number": 285,
+        "what_changed": "The source-collector agent's output is now bounded, and the agent refuses to emit a split when it would hit the token limit. Before this, it could return output missing the required `prs` key. The orchestrator also changed in `scripts/orchestrator_runner.py` so a source-collector failure is reported with a payload that carries the failure reason. Evidence and design specs were added for CCE-177. Two new test files cover the output budget and the failure payload. An observability page was updated.",
+        "why": "Source-collector returned output missing the required `prs` key on 3 of the last 6 nightlies (09-18, 09-20, 09-23). Schema validation failed, the run was classified blind, the exit code became 1, and the watermark froze. The cause was that agent output was unbounded and could hit the token limit mid-output (CCE-177, related to CCE-183).",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "operations/step-summary-observability.md",
+            "notes": "This page was changed in the PR itself. Check that it covers the new source-collector failure payload and output-budget behavior."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-09-24-cce177-source-collector-output-ceiling.md",
+            "doc_kind": "decision",
+            "notes": "Records the investigation and decision: bound source-collector output and refuse token-limit splits. This fixes the recurring blind nightlies that freeze the watermark."
+          }
+        ],
+        "notes": "The page_hint for the edit target was not checked against disk, so confirm that operations/step-summary-observability.md exists. The Jira keys CCE-12, CCE-9, CCE-151, CCE-173 and CCE-176 are likely related background. CCE-183, the broader agent payload bounding work, is still in Backlog."
+      }
+    },
+    "theoju/engineering-docs-agent#288": {
+      "merge_sha": "1c6e65fd83086e9b98d394fb9298fbe9321b3b70",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-02T13:52:21.594350+00:00",
+      "summary": {
+        "pr_number": 288,
+        "what_changed": "The orchestrator's cursor-advance logic now distinguishes two causes of a missing cursor SHA. Previously, a single `cursor is None` branch reported `held_back_no_advance_no_cursor` as a missing merge_sha, both when the cursor prefix was empty (a blocked PR at the head of the window) and when prefix members lacked a merge_sha. The run now names the blocked cursor prefix when that is the cause, so triage points at the right subsystem. Behavior is otherwise unchanged: the baseline still does not advance in either case. Tests covering authoring truncation, classification coverage, degraded non-truncated advance and PR-boundary authoring cuts were updated.",
+        "why": "On nightly runs 36000442301 and 36007491599 (2026-09-24), the run refused to advance the baseline and reported a missing merge_sha. The actual cause was a blocked cursor prefix. The misleading reason sent triage at the wrong subsystem (CCE-186). It relates to the baseline-stall work in CCE-169 and CCE-175.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "notes": "Update the description of the held_back_* / time_budget_* cursor-walk reason strings to say the no-cursor reason now distinguishes an empty (blocked) cursor prefix from a prefix whose members lack merge_sha."
+          }
+        ],
+        "notes": "The edit target assumes architecture/orchestrator.md exists. The available_sections list confirms the architecture/ directory but not that specific page. Reason-string wording was inferred from the PR title and Jira summary because the PR body was truncated."
+      }
+    },
+    "theoju/engineering-docs-agent#290": {
+      "merge_sha": "1c2e21c3ee7d178e9427ad35b1326e5b62c0d563",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-02T13:52:21.594350+00:00",
+      "summary": {
+        "pr_number": 290,
+        "what_changed": "The orchestrator's parsing of subagent output now tolerates raw control characters (such as literal newlines or tabs inside JSON string values). A strict JSON parse is tried first, and a fallback tier with strict=False runs only if it fails. Subagent output that is structurally complete but carries unescaped control characters, for example from Jira descriptions, is now accepted for every field of every agent. Previously it was rejected and the run was classified blind. The PR adds a design spec, an evidence document, a regression fixture reproducing the invalid-escaping source-collector output, and a test module for the tolerance behavior.",
+        "why": "Nightly run 36080301431 was classified blind with source_collector_invalid: returned None, even though the subagent had succeeded and its roughly 93 KB of stdout was structurally complete. The JSON parse failed only because of raw control characters in embedded text. The blind classification froze the watermark and blocked auto-merge. Tolerating control characters removes a stochastic parse gate that fails otherwise-valid runs. An unescaped double quote in a body or title remains a residual, tracked separately as CCE-189.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-09-25-cce187-control-char-tolerant-agent-output-parsing.md",
+            "doc_kind": "decision",
+            "notes": "Records the incident (blind nightly from raw control characters in agent JSON), the strict-then-strict=False parse tiers, and the residual left open for unescaped quotes (CCE-189)."
+          },
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "notes": "Add the agent-output parsing behavior: a strict parse first, then a control-character-tolerant fallback, before a dispatch is judged invalid. This page may not exist, so verify before editing."
+          }
+        ],
+        "notes": "The architecture/orchestrator.md target is a guess based on the section list and was not verified against the lens tree. If it is absent, fall back to creating a flat dated page. The PR body and Jira descriptions were truncated, so the details come from the visible portions and the file list."
+      }
+    },
+    "theoju/engineering-docs-agent#291": {
+      "merge_sha": "d8f1e6620175afde51de3c31c446362c32eebb88",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-02T13:52:21.594350+00:00",
+      "summary": {
+        "pr_number": 291,
+        "what_changed": "The orchestrator no longer passes a --plugin-dir flag that shadowed the worktree when dispatching page-author, which caused every Edit/Write attempt to be refused as a sensitive-file write. The orchestrator now also detects and reports these write refusals as partial reasons, instead of finishing a run with exit 0, zero pages written and no reasons recorded. The PR adds a design spec and tests covering the plugin-dir write denial and the classification coverage audit.",
+        "why": "CCE-188 found that the docs-agent had never authored a page. In the last successful nightly (run 36007491599), page-author was dispatched 13 times with returncode 0. Those runs made 17 Edit/Write attempts, and all 17 were refused. No pages were written and no partial reasons were recorded. This was the root cause of the baseline freeze. The related tickets CCE-186, CCE-187 and CCE-189 covered a misleading reason string and two parse failures that sat in front of it.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "notes": "Document that page-author dispatch no longer uses --plugin-dir in a way that shadows the worktree, and that refused Edit/Write attempts are now recorded as partial reasons. The blind/degraded classification of the new reason follows the call-site rule."
+          }
+        ],
+        "notes": "The page_hint assumes architecture/orchestrator.md exists, based on the example in the agent contract. I did not check available_sections beyond the top-level directories. If the page is missing, create it as a flat slug or under architecture/. The PR body and Jira descriptions were truncated, so the exact name of the new partial reason is not confirmed."
+      }
+    },
+    "theoju/engineering-docs-agent#293": {
+      "merge_sha": "0ef374aea7ab9f917287e92c2afddf9d506cd79f",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-02T13:52:21.594350+00:00",
+      "summary": {
+        "pr_number": 293,
+        "what_changed": "load_voice_samples in scripts/state_io.py no longer stops reading voice sources when it meets an empty sample. Previously a `break` in what looked like a budget guard abandoned every remaining source once one was empty. It is now a `continue`, so the empty sample is skipped and later sources are still loaded. A regression test was added in tests/contracts/test_state_io.py.",
+        "why": "The `break` was mistaken for a budget guard. An empty or zero-budget snippet ended the loop and silently dropped configured voice samples (CCE-176: a configured sample and the newest half of CLAUDE.md were discarded). Skipping the empty sample preserves the 20,000-char cap while still reading the remaining sources.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "operations/2026-10-02-voice-sample-loading-skip-empty.md",
+            "doc_kind": "decision",
+            "notes": "Short note on the bug fix: load_voice_samples now skips empty voice sources rather than aborting the loop. No existing page is confirmed to cover voice-sample loading."
+          }
+        ],
+        "notes": "CCE-183 is linked (unbounded agent payloads) but is still Backlog, and this PR addresses only the empty-sample skip from CCE-176. The PR body and Jira descriptions were truncated, so the details are inferred from the title and the files changed."
+      }
+    },
+    "theoju/engineering-docs-agent#294": {
+      "merge_sha": "db29bf9d32b1a9950934102dca6a4f841d2f737b",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-02T13:52:21.594350+00:00",
+      "summary": {
+        "pr_number": 294,
+        "what_changed": "Corrected a single sentence in the orchestrator architecture page that claimed any run marked partial never auto-merges. The page now says a partial run can auto-merge when its watermark advance is cursor-backed. Blind runs and runs vetoed by reasons such as app_token_unavailable still never auto-merge.",
+        "why": "The old claim was wrong. CCE-140 narrowed the auto-merge gate to `partial and not advance_cursor_backed`. CCE-144 added a separate blind-run gate. CCE-101 on its own does not make every partial run unmergeable. The PR also corrects the misreporting described in CCE-186.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "notes": "Fix the sentence near line 46 about partial runs and CCE-101 auto-merge. A partial run with a cursor-backed advance may merge. Blind runs and merge-veto reasons still skip the merge."
+          }
+        ],
+        "notes": "The PR is itself a docs change that has already been merged. The only target is the existing page it edited. No new pages are needed.",
+        "error": null,
+        "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#296": {
+      "merge_sha": "bd592fbc590dd91de1b9223289f2f2a42df61b7f",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-02T13:52:21.594350+00:00",
+      "summary": {
+        "pr_number": 296,
+        "what_changed": "The orchestrator's agent-output JSON parsing now repairs an unescaped double quote inside a string value (for example a Jira description or PR body containing \"explicitly mentioned\"), in addition to the existing tolerance for raw control characters added by CCE-187. Agent payloads with these faults now parse instead of returning None, so a source-collector response with such text no longer makes the run blind. Changes are in scripts/orchestrator_runner.py, with new tests for quote repair and control-character tolerance.",
+        "why": "Nightly run 36080301431 went blind on source_collector_invalid: returned None. Its payload had two independent escaping faults in one Jira description: raw newlines and an unescaped quote. CCE-187 (#290) fixed the control-character fault via a strict=False parse tier but deliberately left the unescaped-quote residual open. CCE-189 closes that residual.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "notes": "Describe the tiered JSON parse of agent output: strict parse, strict=False for control characters (CCE-187), and the unescaped-quote repair (CCE-189), and how this avoids blind runs. Only edit if the page covers dispatch/parsing; otherwise add a short section."
+          }
+        ],
+        "notes": "The page architecture/orchestrator.md is assumed to exist, but it was not verified against the available_sections listing, which shows only top-level directories. If it is missing, create operations/2026-10-02-agent-output-json-repair.md instead. The PR body was truncated in the input, so the rationale comes from the PR body excerpt and the Jira summaries."
+      }
+    },
+    "theoju/engineering-docs-agent#297": {
+      "merge_sha": "ce8a8fa0dd4ec0f35a43cf3e80e3e576e5bdb931",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-02T13:52:21.594350+00:00",
+      "summary": {
+        "pr_number": 297,
+        "what_changed": "Adds a section to CLAUDE.md recording that the write fence on the local engineering-docs-agent checkout has been removed on purpose. It explains why the fence existed (the checkout was a marketplace `directory` source loaded live by every session), why it is gone (the marketplace now resolves to a managed GitHub clone), which two layers were removed, and that the checkout must never be re-added as a `directory` source. It also notes that the sibling `eda-cce181` clone was a temporary workaround and that new work belongs in this checkout.",
+        "why": "On 2026-09-25 the write fence on the local checkout was removed. CCE-191 asks for the removal and the workaround clone to be recorded so future sessions do not restore the fence or keep working in the sibling clone.",
+        "breaking": false,
+        "doc_targets": [],
+        "notes": "Only CLAUDE.md changed. It holds a maintainer's local-machine workflow notes (fence history, personal paths, sibling clone) with no user-visible plugin behavior, so no published docs page is needed. CLAUDE.md is a source file, not a docs page."
       }
     }
   },

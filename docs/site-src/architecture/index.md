@@ -15,10 +15,10 @@ _Architecture: component design, agent contracts, data flows, and system interna
 <!-- docs-agent:overview:start -->
 **In this section**
 
+- **Orchestrator** — `run()` in `scripts/orchestrator_runner.py:run` is the nightly pipeline entry point. It runs as a straight-line sequence of stages against one window of merged PRs (`last_successful_run.head_sha` to the current `HEAD`):
 - **Citation linting** — `citation_exists` is a Tier-1 **block** rule in `scripts/lint/citation_exists.py`. It reads the inline code spans in a page's prose and fails the page when a cited repo path, test name, or `path:symbol` does not exist. It exists to stop confabulated citations from shipping.
 - **Citation shortening detection** — `page-author` sometimes shortens a citation that already resolves. A committed page cited `.claude/skills/connector-builder/references/checklist.md` at three sites. The rewrite emitted bare `references/checklist.md`. `citation_exists` resolves from the repo root, finds nothing, and blocks the page.
 - **External citations** — `page-author`'s grounding rule (CCE-110) requires a backticked path to assert that the artifact exists in the **host** repo. Until CCE-181, that left no legal way to cite something that is real, current, and simply lives somewhere else. A page documenting plugin work on a downstream host repo would write the plugin's own path:
-- **Orchestrator** — `run()` in `scripts/orchestrator_runner.py:run` is the nightly pipeline entry point. It runs as a straight-line sequence of stages against one window of merged PRs (`last_successful_run.head_sha` to the current `HEAD`):
 - **Subagent contracts** — Every subagent's output shape exists in three places, and all three must agree:
 - **Glossary** — The orchestrator has accumulated overlapping terms — baseline, cursor, window
 - **Linting: citation existence** — Every page a `page-author` subagent writes cites code — a file, a test, or a

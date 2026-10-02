@@ -2,6 +2,7 @@
 status: draft
 sources:
   - https://github.com/theoju/engineering-docs-agent/pull/62
+  - https://github.com/theoju/engineering-docs-agent/pull/285
 synthesized_into: []
 ---
 
@@ -49,6 +50,19 @@ Each bullet identifies the failure stage and a short reason string. Common prefi
 `output_token_limit_truncated` names a subagent answer the CLI split across two assistant messages after hitting its 64,000-output-token ceiling. Only the second half reaches the orchestrator, so the captured payload is known-incomplete and is refused rather than parsed — a fragment that happened to parse would be accepted as the whole answer and the watermark would advance past changes the run never documented. At the source-collector call site the reason is **blind**: the run exits non-zero and the baseline stays put, so nothing is silently skipped.
 
 **What to do:** re-run the nightly. The trigger is how verbosely the subagent transcribes each `body` and `description`, which varies run to run on identical input, so a re-run usually clears it. If it repeats, the per-field character budget in `agents/source-collector.md` (Steps 3 and 5) is too loose for the window and should be tightened.
+
+### Source-collector output budget and failure payload (CCE-177)
+
+Three nightlies (09-18, 09-20, 09-23) failed with `schema_invalid: source-collector: 'prs' is a required property`. The agent's answer was correct but about 160KB, so the CLI hit its output-token ceiling mid-object and the model finished the JSON in a second assistant message. Only the last message was kept, so the fragment had no `prs` key. The run was classified blind, exited 1, and froze the watermark.
+
+Two changes keep that signature unambiguous:
+
+- **The agent bounds its own output.** `agents/source-collector.md` caps each `prs[].body` and `jira_issues[].description` at 1,000 characters in total, marker included: a cut value ends in `…[truncated]`. This is an instruction, not a schema `maxLength` — a schema can only reject what the agent already emitted, and a blind `schema_invalid` would turn a sometimes-failure into a nightly one. The cap bounds each value, not the number of linked Jira issues, so a very large window can still reach the ceiling.
+- **The documented failure payload is schema-valid.** On unrecoverable Git failure the agent now returns `{"prs": [], "jira_issues": [], "partial": true, "error": "git_unrecoverable: <reason>"}`. The old `{"error": ...}` shape also produced `'prs' is a required property`, which made a real Git failure indistinguishable from a truncated answer. A source-collector failure now reaches the digest with its reason attached.
+
+If the ceiling is crossed anyway, you see `output_token_limit_truncated: source-collector` rather than the `'prs'` error. That is the detector working, not a regression.
+
+The detector only runs when `DOCS_AGENT_DEBUG_DIR` is set, because the event stream exists only in that mode. Hosts without it get the output budget but no split detection.
 
 For deeper investigation — per-subagent prompt, stdout, stderr, and stream files — use the forensics artifact uploaded by the nightly workflow (see CCE-41). The step summary gives you the reason string; the forensics artifact gives you the full LLM exchange.
 

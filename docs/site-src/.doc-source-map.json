@@ -1830,6 +1830,9 @@
     "tests/orchestrator/fakes_schema_invalid/fake_source_collector.json": [
       "architecture/cce4-schema-enforcement.md"
     ],
+    "tests/orchestrator/fixtures/cce187_invalid_escaping_source_collector.json": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_agent_authored_create_frontmatter.py": [
       "architecture/orchestrator.md"
     ],
@@ -1861,8 +1864,14 @@
     "tests/orchestrator/test_degraded_advance_non_truncated.py": [
       "architecture/orchestrator.md"
     ],
+    "tests/orchestrator/test_dispatch_control_char_tolerance.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_dispatch_debug_capture.py": [
       "archive/cce14-source-collector-prompt-hardening.md"
+    ],
+    "tests/orchestrator/test_dispatch_quote_repair.py": [
+      "architecture/orchestrator.md"
     ],
     "tests/orchestrator/test_dispatch_reasons_classification.py": [
       "architecture/orchestrator.md"
@@ -1909,6 +1918,9 @@
     "tests/orchestrator/test_pipeline_integration.py": [
       "architecture/cce4-schema-enforcement.md",
       "archive/v0-1-1-hardening.md"
+    ],
+    "tests/orchestrator/test_plugin_dir_write_denial.py": [
+      "architecture/orchestrator.md"
     ],
     "tests/orchestrator/test_pr_boundary_authoring_cut.py": [
       "architecture/orchestrator.md"
@@ -2138,6 +2150,10 @@
       "tests/orchestrator/test_authoring_hard_cap_bounds.py",
       "tests/orchestrator/test_dispatch_reasons_classification.py",
       "tests/orchestrator/test_deferral_skip.py",
+      "tests/orchestrator/test_dispatch_control_char_tolerance.py",
+      "tests/orchestrator/test_dispatch_quote_repair.py",
+      "tests/orchestrator/test_plugin_dir_write_denial.py",
+      "tests/orchestrator/fixtures/cce187_invalid_escaping_source_collector.json",
       "tests/orchestrator/test_deferral_stall_escape.py",
       "tests/orchestrator/test_forgiven_run_merge_gate.py",
       "tests/orchestrator/test_citation_repair_wiring.py",

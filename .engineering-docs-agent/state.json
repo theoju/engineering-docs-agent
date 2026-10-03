@@ -1,8 +1,8 @@
 {
   "version": "1",
   "last_successful_run": {
-    "head_sha": "ce8a8fa0dd4ec0f35a43cf3e80e3e576e5bdb931",
-    "completed_at": "2026-10-02T13:45:08.269942+00:00"
+    "head_sha": "899091a5e5dbe0a2dbd769155802d69a4dcad324",
+    "completed_at": "2026-10-03T12:24:03.559723+00:00"
   },
   "pr_summaries": {
     "theoju/engineering-docs-agent#221": {
@@ -764,6 +764,122 @@
         "breaking": false,
         "doc_targets": [],
         "notes": "Only CLAUDE.md changed. It holds a maintainer's local-machine workflow notes (fence history, personal paths, sibling clone) with no user-visible plugin behavior, so no published docs page is needed. CLAUDE.md is a source file, not a docs page."
+      }
+    },
+    "theoju/engineering-docs-agent#299": {
+      "merge_sha": "847ae91424f8234b78b9a3e7ba6a9bf6964ef75b",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-03T12:28:55.597393+00:00",
+      "summary": {
+        "pr_number": 299,
+        "what_changed": "The orchestrator now vendors the plugin directory (passed to the Claude CLI via --plugin-dir) to a location outside the git worktree for page-author dispatches. It no longer uses --permission-mode auto to get past the 'sensitive file' write gate on plugin-dir paths. Page writes therefore no longer depend on a server-side classifier verdict. A new test file, tests/orchestrator/test_plugin_dir_write_denial.py, covers the write-denial scenario.",
+        "why": "CCE-188 fixed the 100% 'sensitive file' write denials by switching to --permission-mode auto. That mode makes a server-side safety classifier approve each write. On nightly 36241035222 (2026-09-26) the classifier returned no verdict. All ten page-author dispatches failed, zero pages were authored, the baseline stayed frozen at 1718883f, and PR #298 was left open as a partial run. Moving the plugin directory outside the worktree removes the sensitive-file trigger without needing a third party to rule on each write.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-09-26-plugin-dir-vendoring-replaces-auto-permission-mode.md",
+            "doc_kind": "decision",
+            "notes": "Decision record. It covers why --permission-mode auto (CCE-188) was the wrong remedy, and why vendoring --plugin-dir outside the worktree replaces it. Cite CCE-193. The PR title and the squash commit say CCE-192 in error."
+          },
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "notes": "Update the description of how page-author subagents are dispatched. It should mention the plugin-dir vendoring and no longer mention the permission mode, if it currently does."
+          }
+        ],
+        "notes": "The PR title and merge commit cite CCE-192, but the correct ticket is CCE-193. CCE-192 is an unrelated source-collector payload ticket. The architecture/orchestrator.md page is assumed to exist, since other nightly pages reference it. The PR body was truncated, so the exact vendoring location is not confirmed."
+      }
+    },
+    "theoju/engineering-docs-agent#300": {
+      "merge_sha": "74a3f53102d1805de880357d6b31adbb7f5483ea",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-03T12:28:55.597393+00:00",
+      "summary": {
+        "pr_number": 300,
+        "what_changed": "Corrects ten ticket-key references from CCE-192 to CCE-193 in scripts/orchestrator_runner.py and tests/orchestrator/test_plugin_dir_write_denial.py. These references belong to the vendored --plugin-dir fix merged in #299. CCE-192 was already taken by an unrelated source-collector payload-size bug. One reference stays as CCE-192, in the `_vendored_plugin_dir` docstring, because the squash-merged commit 847ae914 is immutable and still says CCE-192. The docstring now explains this. No runtime behavior changes.",
+        "why": "The #299 fix was written citing CCE-192 on the assumption it was the next free key. CCE-192 had already been filed from another session for an unrelated bug. The correct key for this work is CCE-193. Fixing the in-code references keeps traceability accurate.",
+        "breaking": false,
+        "doc_targets": [],
+        "notes": "Comment, docstring and test-reference correction only, with no user-visible behavior change, so no documentation page needs to change. The vendoring fix itself (CCE-193, #299) is documented via its own PR.",
+        "partial": false
+      }
+    },
+    "theoju/engineering-docs-agent#302": {
+      "merge_sha": "2b5567deebd149874b78f666b4b402e73e964fd5",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-03T12:28:55.597393+00:00",
+      "summary": {
+        "pr_number": 302,
+        "what_changed": "The Tier-1 citation_exists lint now exempts a small set of exact example tokens that pages about citation linting quote, so those pages are no longer blocked. The plugin defaults in the rule exempt dir/file.ext, scripts/x.py and docs/../scripts/x.py. The host config exempts the three CCE-141 shortening-evidence paths: references/checklist.md, erences/checklist.md and .claude/skills/.../references/checklist.md. Tests cover the new exemptions.",
+        "why": "Nightly 36245832365 authored 13 pages and merged none of them. citation_exists blocked two pages that document citation paths and quote example paths. One of them was the last page owed by PR #241, the oldest admitted PR. That kept the cursor prefix empty, the run partial and auto-merge skipped, so all the authoring was discarded. The blocked tokens are deliberate examples or fixtures, and their non-existence is the point of the page, so they are not real citations.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/citation-linting.md",
+            "doc_kind": "architecture",
+            "notes": "Document the exact-token exemptions for example paths and the host-config exemption list. Do not quote concrete unresolvable sibling paths; use placeholder forms such as scripts/<name>.py."
+          },
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/citation-shortening-detection.md",
+            "doc_kind": "architecture",
+            "notes": "Note that the shortening-evidence example paths are exempted in host config so this page is not blocked by citation_exists."
+          }
+        ],
+        "notes": "Merged commit 2b5567de cites CCE-194 in the PR, branch and code comments. That key is wrong, and the correct ticket is CCE-195. The CCE-195 follow-up found that this PR's explanatory comment minted a fourth blocking token. Target pages are inferred from the PR body, not confirmed against the lens tree. The available_sections list only top-level directories, so the edit targets are best guesses. If either page does not exist, switch the action to create."
+      }
+    },
+    "theoju/engineering-docs-agent#305": {
+      "merge_sha": "3df7896a46f3d21c7ec65d6e41fd3d7cf79afc1c",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-03T12:28:55.597393+00:00",
+      "summary": {
+        "pr_number": 305,
+        "what_changed": "The Tier-1 citation_exists lint no longer blocks pages that document it. Concrete example paths in the module's docstrings and comments were reworded into placeholder forms already accepted by the placeholder markers (such as scripts/<name>.py). Measured-record tokens were exempted in the host config. Plugin source files (scripts/lint/*.py, scripts/*.py, agents/*.md) are now swept with the production rule so no source file can mint a blocking token. The change also touches scripts/verify_diagrams.py, agents/publish-verifier.md and CLAUDE.md, with new tests in tests/lint/test_citation_exists.py.",
+        "why": "PR #302 exempted three tokens that blocked architecture/citation-linting.md, but its own explanatory comment coined a fourth. page-author quotes whatever example paths it reads in the module source, so the page was blocked again on a later nightly. PR #263 then hit deferral_skip after three deferrals. Seven more unresolvable example tokens remained in the same file. Widening the allowlist cannot converge because each new entry arrives with prose that mints the next token, so the fix removes the source of the tokens instead.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/citation-linting.md",
+            "notes": "Describe the placeholder-form convention for examples in linter source, the three cases (illustrative, measured record, tested-contract), and the sweep guard test."
+          }
+        ],
+        "notes": "Jira keys CCE-141, CCE-181, CCE-192, CCE-193 and CCE-194 appear in the PR metadata mostly as historical references. CCE-195 is the primary ticket. The existence of architecture/citation-linting.md is inferred from the PR body and Jira context, not from a listing of pages."
+      }
+    },
+    "theoju/engineering-docs-agent#306": {
+      "merge_sha": "874591e18c3a1f5788e9505ed8d9be149192772e",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-03T12:28:55.597393+00:00",
+      "summary": {
+        "pr_number": 306,
+        "what_changed": "The fact-checker output schema no longer requires the `ok` field. The orchestrator's fact-checker consumer reads only `verdict` and `findings`, so an answer that omits `ok` is now accepted instead of being recorded as `fact_checker_unavailable`. The change updates `agents/schemas/fact_checker.schema.json` and the canonical schema block in `agents/fact-checker.md` together. It also updates the typed view in `scripts/contracts.py`. It adds tests, including a fixture of the real nightly response that omitted `ok`.",
+        "why": "On nightly run 36741357748, one of 16 fact-checker dispatches returned a complete answer with `verdict` and `findings` but no `ok`. The schema listed `ok` as required, so the run reported a schema failure and went blind, and auto-merge was skipped as `blind_run`. The orchestrator never reads `ok`. This is the same class as CCE-180 and CCE-125: a schema stricter than its consumer turns a usable answer into a handled failure.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "api/contracts/fact-checker.schema.md",
+            "notes": "Published contract doc is generated by scripts/contracts_doc.py. Regenerate it, do not hand-edit. It should show `ok` as no longer required."
+          },
+          {
+            "lens": "core",
+            "action": "create",
+            "page_hint": "archive/2026-09-30-fact-checker-optional-ok.md",
+            "doc_kind": "decision",
+            "notes": "Record the CCE-197 decision. Include the measured 16/16/15/1 dispatch breakdown and the link to the CCE-180 and CCE-125 schema-stricter-than-consumer class."
+          }
+        ],
+        "notes": "Existing page names are not known beyond the section list. The edit target for the contract page is inferred from the generated-contracts convention."
       }
     }
   },

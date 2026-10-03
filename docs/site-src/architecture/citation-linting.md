@@ -65,3 +65,30 @@ The `path:symbol` loop handles the same error differently. It skips the token wi
 This module's source is an input to the pages that document it. `page-author` reads it and quotes back what it finds. A concrete example path in a docstring that does not resolve becomes a blocking citation on the page about the rule (CCE-195).
 
 Write every example path in `scripts/lint/citation_exists.py` as a placeholder form. `DEFAULT_EXEMPT_TOKENS` holds only exact tokens that must stay verbatim.
+
+### Why the allowlist alone could not fix it
+
+PR #302 exempted the three grammar examples that blocked this page on nightly 36245832365: `dir/file.ext`, `scripts/x.py` and `docs/../scripts/x.py`. They are exact tokens in `DEFAULT_EXEMPT_TOKENS`, not a prefix, so an invented neighbour of any of them still blocks. The same PR exempted the three CCE-141 shortening-evidence paths in the host's `lint.citation_exempt_tokens` list, because that story cannot be told without naming paths that must not resolve.
+
+The PR's own explanatory comment then spelled out a concrete sibling of the first example. That minted a fourth blocking token and re-blocked this page on nightly 36722383698. PR #263 lost its page to `deferral_skip` after three deferrals. Seven more concrete examples sat unfired in the same file.
+
+Widening the allowlist cannot converge: each new entry arrives with prose that mints the next token. PR #305 removed the generator instead.
+
+### Three cases for an example path in linter source
+
+When a path in a docstring or comment would not resolve, decide which case it is:
+
+1. **Arbitrary illustration.** Any name would do. Reword it into a form `_PLACEHOLDER_MARKERS` already skips, such as `scripts/<name>.py`. Never write a concrete sibling.
+2. **Measured record.** The exact spelling is the evidence, such as the two links that blocked real host runs. Rewording would make the sentence claim something that did not happen, so exempt the token in host config.
+3. **Tested contract.** The token is supposed to block. `scripts/external_refs.py` quotes a transcript of its renderer declining a token, and `test_a_declined_token_reverts_to_being_blocked_by_the_linter` requires the linter to block it. You can neither reword nor exempt it. The file is excluded from the sweep instead.
+
+### The sweep guard
+
+`tests/lint/test_citation_exists.py` runs the production rule over the source an authored page quotes: `scripts/*.py`, `scripts/lint/*.py` and `agents/*.md`. It loads this repo's real host config, because the plugin documents itself and the nightly's config is that file.
+
+- `test_this_modules_own_source_mints_no_blocking_token` checks `scripts/lint/citation_exists.py` alone.
+- `test_no_plugin_source_file_mints_a_blocking_token` checks the whole sweep and names every offender.
+- `test_the_sweep_exclusions_are_each_load_bearing` fails when an excluded file no longer has an unresolvable token. The exclusion set is a contract, not a waiver list.
+- `test_the_guard_rejects_a_concrete_example_path` builds its offending token from string pieces. Writing it literally would mint the citation the guard exists to stop.
+
+If the sweep fails, check the module the blocked page documents before adding an exemption. The token is probably in a docstring, and the fix is upstream of the allowlist.

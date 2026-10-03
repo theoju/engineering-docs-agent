@@ -8,6 +8,50 @@ synthesized_into: []
 
 # What's New
 
+## 2026-10-03T12:24:03.559723+00:00
+- PR #299: The orchestrator now vendors the plugin directory (passed to the Claude CLI via --plugin-dir) to a location outside the git worktree for page-author dispatches. It no longer uses --permission-mode auto to get past the 'sensitive file' write gate on plugin-dir paths. Page writes therefore no longer depend on a server-side classifier verdict. A new test file, tests/orchestrator/test_plugin_dir_write_denial.py, covers the write-denial scenario.
+- PR #300: Corrects ten ticket-key references from CCE-192 to CCE-193 in scripts/orchestrator_runner.py and tests/orchestrator/test_plugin_dir_write_denial.py. These references belong to the vendored --plugin-dir fix merged in #299. CCE-192 was already taken by an unrelated source-collector payload-size bug. One reference stays as CCE-192, in the `_vendored_plugin_dir` docstring, because the squash-merged commit 847ae914 is immutable and still says CCE-192. The docstring now explains this. No runtime behavior changes.
+- PR #302: The Tier-1 citation_exists lint now exempts a small set of exact example tokens that pages about citation linting quote, so those pages are no longer blocked. The plugin defaults in the rule exempt dir/file.ext, scripts/x.py and docs/../scripts/x.py. The host config exempts the three CCE-141 shortening-evidence paths: references/checklist.md, erences/checklist.md and .claude/skills/.../references/checklist.md. Tests cover the new exemptions.
+- PR #305: The Tier-1 citation_exists lint no longer blocks pages that document it. Concrete example paths in the module's docstrings and comments were reworded into placeholder forms already accepted by the placeholder markers (such as scripts/<name>.py). Measured-record tokens were exempted in the host config. Plugin source files (scripts/lint/*.py, scripts/*.py, agents/*.md) are now swept with the production rule so no source file can mint a blocking token. The change also touches scripts/verify_diagrams.py, agents/publish-verifier.md and CLAUDE.md, with new tests in tests/lint/test_citation_exists.py.
+- PR #306: The fact-checker output schema no longer requires the `ok` field. The orchestrator's fact-checker consumer reads only `verdict` and `findings`, so an answer that omits `ok` is now accepted instead of being recorded as `fact_checker_unavailable`. The change updates `agents/schemas/fact_checker.schema.json` and the canonical schema block in `agents/fact-checker.md` together. It also updates the typed view in `scripts/contracts.py`. It adds tests, including a fixture of the real nightly response that omitted `ok`.
+### Pages to review (source drift)
+- architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
+- architecture/cce-capability-c-canonical-core-citations.md — changed: agents/fact-checker.md, scripts/lint/citation_exists.py, tests/lint/test_citation_exists.py
+- architecture/cce-capability-c3-diagram-render-gate.md — changed: scripts/verify_diagrams.py
+- architecture/cce10-source-collector-canonical-shape.md — changed: scripts/orchestrator_runner.py, tests/agents/test_schema_md_sync.py
+- architecture/cce12-source-collector-tool-use-diagnostics.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-decision-archive.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-source-map-drift.md — changed: agents/schemas/fact_checker.schema.json, scripts/contracts.py, scripts/orchestrator_runner.py
+- architecture/cce4-schema-enforcement.md — changed: agents/fact-checker.md, agents/publish-verifier.md, agents/schemas/fact_checker.schema.json, scripts/orchestrator_runner.py, tests/agents/test_schema_md_sync.py
+- architecture/cce6-7-8-batch.md — changed: scripts/orchestrator_runner.py
+- architecture/citation-linting.md — changed: scripts/lint/citation_exists.py, tests/lint/test_citation_exists.py
+- architecture/citation-shortening-detection.md — changed: .engineering-docs-agent/config.yml, CLAUDE.md, scripts/orchestrator_runner.py
+- architecture/engineering-docs-agent.md — changed: agents/fact-checker.md, scripts/lint/citation_exists.py
+- architecture/external-citations.md — changed: CLAUDE.md, scripts/orchestrator_runner.py
+- architecture/index.md — changed: scripts/orchestrator_runner.py
+- architecture/linting.md — changed: scripts/lint/citation_exists.py, tests/lint/test_citation_exists.py
+- architecture/orchestrator.md — changed: scripts/orchestrator_runner.py, tests/orchestrator/test_plugin_dir_write_denial.py
+- architecture/publish-verifier.md — changed: agents/publish-verifier.md
+- architecture/structured-docs-site-generation.md — changed: agents/schemas/fact_checker.schema.json, scripts/verify_diagrams.py
+- archive/2026-07-13-cce120-gap-detector-prid-injection.md — changed: scripts/orchestrator_runner.py
+- archive/cce14-source-collector-prompt-hardening.md — changed: scripts/orchestrator_runner.py
+- archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
+- archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
+- archive/v0-1-1-hardening.md — changed: scripts/contracts.py, scripts/orchestrator_runner.py
+### Pages to review (citation drift)
+- architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+### Core pages to review (drift)
+- architecture/cce-capability-c-canonical-core-citations.md (source, citation)
+- architecture/cce-capability-c3-diagram-render-gate.md (source)
+- architecture/cce10-source-collector-canonical-shape.md (source)
+- architecture/cce12-source-collector-tool-use-diagnostics.md (source)
+- architecture/cce23-decision-archive.md (source)
+- architecture/cce23-source-map-drift.md (source)
+- architecture/cce4-schema-enforcement.md (source)
+- architecture/cce6-7-8-batch.md (source)
+- architecture/engineering-docs-agent.md (source)
+- architecture/structured-docs-site-generation.md (source)
+
 ## 2026-10-02T13:45:08.269942+00:00
 - PR #283: The nightly docs-agent run now bounds its review window before PR admission. Previously the window had no upper bound, so a stalled baseline widened the window each night. A run could then finish a smaller fraction of it, which left the baseline frozen. The orchestrator now caps the window. The change touches orchestrator_runner.py and adds a config option to templates/config.schema.json. The CHANGELOG, README, CLAUDE.md, the orchestrator architecture page, and a spec and plan were updated to match.
 - PR #284: Adds a single regression test in tests/orchestrator/test_deferral_stall_escape.py that pins the `i > 0` clause in the stall-escape logic. The escape picks the prefix blocker by scanning `prs`, which has had its admission-deferred tail removed (`prs = prs[:i]`). The test ensures that the escape stays reachable when the clock has stalled. There is no production code change.

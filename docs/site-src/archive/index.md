@@ -11,6 +11,8 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 **In this section**
 
 - **Voice-sample loading skips an empty source instead of aborting** — `load_voice_samples` in `scripts/state_io.py:load_voice_samples` now skips an empty voice source and keeps reading the sources behind it. Before PR #293 (CCE-176), one empty file silently discarded every remaining sample.
+- **Decision: the fact-checker schema no longer requires `ok`** — **Date:** 2026-09-30. **Ticket:** CCE-197. **PR:** #306.
+- **Vendor `--plugin-dir` outside the worktree instead of using `--permission-mode auto`** — Decision record for CCE-193 (PR #299). The PR title and squash commit say CCE-192 in error; CCE-192 is an unrelated source-collector payload ticket.
 - **CCE-187: control-character-tolerant parsing of agent output** — The orchestrator parses subagent output in tiers. It tries a strict `json.loads` first. If that fails, it retries with `strict=False`, which accepts raw control characters (a literal newline or tab) inside string values. The fallback runs only after the strict parse fails, so well-formed output never takes it.
 - **CCE-177: bound source-collector output, refuse token-limit splits** — Bound what `source-collector` emits, and refuse any answer the Claude CLI split across two turns at its output-token ceiling. The agent contract in `agents/source-collector.md` now caps `prs[].body` and `jira_issues[].description` at 1,000 characters each. `scripts/orchestrator_runner.py` now records `output_token_limit_truncated: <agent>` and returns no output when it sees the split.
 - **CCE-169: cap the review window before admission** — **Decision:** the orchestrator admits at most `run.window_pr_cap` merged PRs per run, oldest first. The default is 10. PRs beyond the cap wait for a later run. Setting the key to `0` restores the unbounded window.
@@ -76,5 +78,5 @@ _Decision Archive: ADRs, design rationale, and "why we chose X" records._
 - **PR Summarizer — Design Decisions** — This page records the design rationale behind the `pr-summarizer` subagent (`agents/pr-summarizer.md`). It is an archive document: it explains *why* the agent is shaped the way it is, not *what it currently does*. For the current interface, see the agent definition directly.
 - **Specs archive** — _Auto-generated; 77 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
 
-_65 pages · regenerated nightly_
+_67 pages · regenerated nightly_
 <!-- docs-agent:overview:end -->

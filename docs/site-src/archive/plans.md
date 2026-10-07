@@ -1,6 +1,12 @@
 # Plans archive
 
-_Auto-generated; 79 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+_Auto-generated; 80 entries. Do not edit by hand — see `scripts/archive_indexes.py`._
+
+## 2026-10
+
+| Title | Status | Summary |
+|---|---|---|
+| [CCE-199 — Bound the collector payload at source Implementation Plan](https://github.com/theoju/engineering-docs-agent/blob/main/docs/superpowers/plans/2026-10-06-cce199-collector-window-bound.md) | — | > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:… |
 
 ## 2026-09
 

@@ -1,8 +1,8 @@
 {
   "version": "1",
   "last_successful_run": {
-    "head_sha": "a327af85c3b536d6237e294f79e0927d12bc41d5",
-    "completed_at": "2026-10-06T14:05:40.132075+00:00"
+    "head_sha": "6b2bfc19ae59308107e48d07a6e8367afe62281a",
+    "completed_at": "2026-10-07T14:22:39.316030+00:00"
   },
   "pr_summaries": {
     "theoju/engineering-docs-agent#221": {
@@ -880,6 +880,28 @@
           }
         ],
         "notes": "Existing page names are not known beyond the section list. The edit target for the contract page is inferred from the generated-contracts convention."
+      }
+    },
+    "theoju/engineering-docs-agent#315": {
+      "merge_sha": "c408b727303f87ecd4523e69ec27b19cfb7235d6",
+      "fingerprint": "e6d7c2a0894b9d2f",
+      "last_seen_at": "2026-10-07T14:24:15.189677+00:00",
+      "summary": {
+        "pr_number": 315,
+        "what_changed": "The orchestrator now bounds the source-collector's input window before dispatching it, instead of capping only after the collector has already emitted output. The collector gets a window bound plus metadata anchors, so a baseline far behind no longer produces an output the collector can't fit. The source-collector agent contract was updated to match. Tests cover the window bound and the blind/degraded classification coverage audit.",
+        "why": "CCE-169's window cap ran after the collector dispatch. With a very wide window (ADIS run 37493982560: 173 in-window PRs, only 12 returned), the collector invented an uncontracted `output_size_limit` error. That error fell into the generic `sources.get(\"error\")` branch and was recorded as blind. A blind run exits non-zero, skips auto-merge and freezes the watermark. The window then widened each night, so every later run failed the same way.",
+        "breaking": false,
+        "doc_targets": [
+          {
+            "lens": "core",
+            "action": "edit",
+            "page_hint": "architecture/orchestrator.md",
+            "notes": "Describe the collector window bound applied at dispatch, before the CCE-169 admission cap, and the metadata anchors."
+          }
+        ],
+        "notes": "The PR body and Jira description were truncated in the input. The target page is assumed to exist, since the architecture section is present. Check that architecture/orchestrator.md exists before editing.",
+        "error": null,
+        "partial": false
       }
     }
   },

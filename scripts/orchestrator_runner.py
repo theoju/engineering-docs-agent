@@ -2803,11 +2803,37 @@ def run(
             return _exit_code(state)
 
         jira_payload = config.get("sources", {}).get("jira")
+        # CCE-199: hand the collector its own detail bound. CCE-169's cap is
+        # applied below, AFTER this dispatch returns, so it bounds what the run
+        # ADMITS while nothing bounded what the collector EMITS. A baseline far
+        # enough behind therefore handed the collector a window it could not
+        # fit in one output; it improvised `error: "output_size_limit: N of M
+        # in-window PRs returned"`, which no call site handles, so the generic
+        # `sources.get("error")` branch recorded it blind -- and a blind run
+        # exits non-zero, skips auto-merge and freezes the watermark, leaving
+        # the window a day wider for the next run to fail on identically.
+        # Observed on the ADIS host for 26 days (run 37493982560: 12 of 173
+        # PRs detailed, exit 1, five failures in six nights).
+        #
+        # This bounds DETAIL, not membership: the collector still returns every
+        # in-window PR, emitting a metadata-only anchor past the bound. That is
+        # load-bearing rather than cosmetic. A bound that dropped the tail would
+        # leave the orchestrator unaware those PRs exist, so `held_back` would
+        # be empty, CCE-151's walk would never be entered, and the advance would
+        # reach full window HEAD -- the same silent loss
+        # `test_a_capped_run_advances_to_the_cap_boundary_and_says_so` pins one
+        # layer down, where it cannot observe this one.
+        #
+        # The same resolver feeds both layers deliberately: this stops the
+        # overflow, and the cut below stays as defence in depth against a
+        # collector that details more than it was asked for. `0` means
+        # unlimited and must pass through as 0 -- see `resolve_window_cap`.
         sc_inputs = {
             "last_sha": state.get("last_successful_run", {}).get("head_sha", ""),
             "head_sha": head_sha,
             "repo": repo,
             "pr_branch_filter": ["docs-agent/*"],
+            "max_detail_prs": resolve_window_cap(config),
         }
         if jira_payload:
             sc_inputs["jira"] = jira_payload
@@ -2854,6 +2880,37 @@ def run(
             head_sha=head_sha,
             repo_root=repo_root,
         )
+        # CCE-199: a bounded payload must still ACCOUNT for every in-window PR.
+        # `payload_bounded: <detailed> of <total>` is the collector's own claim
+        # about how wide the window was; if fewer PRs arrived than it claims,
+        # the tail was dropped rather than anchored and the orchestrator has no
+        # way to learn those PRs exist. Nothing downstream can recover that: an
+        # absent PR reaches neither `window_capped` nor `_deferred_all`, so
+        # `held_back` stays empty, CCE-151's walk is skipped and the advance
+        # reaches full window HEAD -- consuming a window whose tail was never
+        # documented, consume-once, with no red anywhere.
+        #
+        # Deliberately blind (`degraded=False`). A run that cannot enumerate its
+        # own window must stall rather than guess: stalling costs a night, and
+        # advancing past unknown work costs those PRs' docs permanently. This is
+        # the CCE-144 incident's exact shape (a watermark advanced past
+        # #211/#212/#213). With `max_detail_prs` honoured the collector anchors
+        # its tail instead of dropping it, so this guard is defence in depth and
+        # should never fire in a healthy run.
+        if isinstance(sources.get("error"), str):
+            _bounded = re.search(
+                r"payload_bounded:\s*(\d+)\s+of\s+(\d+)", sources["error"]
+            )
+            if _bounded and len(sources.get("prs") or []) < int(_bounded.group(2)):
+                add_partial(
+                    state,
+                    "collector_payload_incomplete: "
+                    f"{len(sources.get('prs') or [])} PRs returned but "
+                    f"{_bounded.group(2)} claimed in window; tail dropped "
+                    "rather than anchored",
+                    degraded=False,
+                )
+
         # CCE-169: bound the window BEFORE admission. The only pre-existing
         # truncation is the time-based cut inside the admission loop below,
         # which fires after the run has already begun failing to keep up — so a

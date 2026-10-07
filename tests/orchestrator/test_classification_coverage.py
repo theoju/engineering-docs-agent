@@ -223,10 +223,31 @@ def test_orchestrator_has_the_expected_call_site_population():
     (`page_author_error: <path>: <err>` at the `else` near
     `orchestrator_runner.py:4150`) so the two authoring paths report a refusal
     identically, and it interpolates the agent's own `error` text because that
-    string is the only clue an operator gets about why the write failed."""
+    string is the only clue an operator gets about why the write failed.
+
+    49 -> 50, CCE-199: `collector_payload_incomplete` in `run`, immediately
+    after the `sources.get("error")` branch. Audited degraded=False, and this
+    one is blind on the CCE-144 definition rather than by the default: a PR
+    absent from the payload was CONSUMED, not held back. There is no seam that
+    could hold it -- an absent PR reaches neither `window_capped` nor
+    `_deferred_all`, so `held_back` stays empty, CCE-151's cursor walk is
+    skipped, and the advance reaches full window HEAD. The window is
+    consume-once, so that tail is then outside every future window and nothing
+    goes red.
+
+    The guard fires only when the collector's own `payload_bounded: <d> of <t>`
+    claim outruns the PRs it actually returned, which is why Task 2's anchor
+    contract is the thing that makes a bounded payload safe: an anchored tail
+    satisfies `<t>` and does not trip this. Explicitly NOT degraded -- a
+    degraded run merges and advances to its cursor, and the cursor here is
+    computed from a payload known to be short, which is precisely the silent
+    permanent loss this ticket exists to stop. Explicitly NOT info_only: it
+    must flip `partial`. Not added to `_MERGE_VETO_REASON_PREFIXES`, since
+    blind already skips auto-merge via `blind_run` and a veto would add
+    nothing."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 49, (
-        f"expected 49 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 50, (
+        f"expected 50 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
     # 42 -> 43: CCE-141 round 5 added `citation_diagnosis_truncated` in

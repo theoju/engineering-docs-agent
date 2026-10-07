@@ -8,6 +8,45 @@ synthesized_into: []
 
 # What's New
 
+## 2026-10-07T14:22:39.316030+00:00
+- PR #315: The orchestrator now bounds the source-collector's input window before dispatching it, instead of capping only after the collector has already emitted output. The collector gets a window bound plus metadata anchors, so a baseline far behind no longer produces an output the collector can't fit. The source-collector agent contract was updated to match. Tests cover the window bound and the blind/degraded classification coverage audit.
+### Gaps flagged
+- theoju/engineering-docs-agent#315: The PR is not dismissed and matches no allowlist glob, because the allowlist is empty. The size filter can't be applied. The size_filter config is empty and the files carry no additions or deletions, so no LOC total can be computed. That leaves LLM judgment. The PR changes the source-collector agent contract (agents/source-collector.md) and the orchestrator's window-bounding and blind/degraded behavior in scripts/orchestrator_runner.py. That alters how runs fail, merge and advance the watermark, so a senior engineer would expect a written plan. The PR already includes docs/superpowers/plans/2026-10-06-cce199-collector-window-bound.md, so the expectation looks met.
+### Pages to review (source drift)
+- architecture/bootstrap-fail-fast.md — changed: scripts/orchestrator_runner.py
+- architecture/cce-capability-c-canonical-core-citations.md — changed: docs/superpowers/plans/2026-10-06-cce199-collector-window-bound.md
+- architecture/cce-capability-c2-canonical-core-authoring.md — changed: docs/superpowers/plans/2026-10-06-cce199-collector-window-bound.md
+- architecture/cce10-source-collector-canonical-shape.md — changed: scripts/orchestrator_runner.py
+- architecture/cce12-source-collector-tool-use-diagnostics.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-decision-archive.md — changed: scripts/orchestrator_runner.py
+- architecture/cce23-source-map-drift.md — changed: scripts/orchestrator_runner.py
+- architecture/cce32-github-pages-publish-target.md — changed: docs/superpowers/plans/2026-10-06-cce199-collector-window-bound.md
+- architecture/cce4-schema-enforcement.md — changed: agents/source-collector.md, scripts/orchestrator_runner.py
+- architecture/cce6-7-8-batch.md — changed: scripts/orchestrator_runner.py
+- architecture/citation-shortening-detection.md — changed: scripts/orchestrator_runner.py
+- architecture/external-citations.md — changed: scripts/orchestrator_runner.py, tests/orchestrator/test_classification_coverage.py
+- architecture/index.md — changed: scripts/orchestrator_runner.py
+- architecture/orchestrator.md — changed: agents/source-collector.md, scripts/orchestrator_runner.py, tests/orchestrator/test_classification_coverage.py, tests/orchestrator/test_collector_window_bound.py
+- architecture/structured-docs-site-generation.md — changed: docs/superpowers/plans/2026-10-06-cce199-collector-window-bound.md
+- archive/2026-07-13-cce120-gap-detector-prid-injection.md — changed: scripts/orchestrator_runner.py
+- archive/cce14-source-collector-prompt-hardening.md — changed: scripts/orchestrator_runner.py
+- archive/cce15-source-collector-root-cause-sweep.md — changed: scripts/orchestrator_runner.py
+- archive/cce5-9-batch-prep-roadmap.md — changed: scripts/orchestrator_runner.py
+- archive/v0-1-1-hardening.md — changed: scripts/orchestrator_runner.py
+### Pages to review (citation drift)
+- architecture/cce-capability-c-canonical-core-citations.md — citation gone: backend/connectors/base.py (class BaseConnector)
+### Core pages to review (drift)
+- architecture/cce-capability-c-canonical-core-citations.md (source, citation)
+- architecture/cce-capability-c2-canonical-core-authoring.md (source)
+- architecture/cce10-source-collector-canonical-shape.md (source)
+- architecture/cce12-source-collector-tool-use-diagnostics.md (source)
+- architecture/cce23-decision-archive.md (source)
+- architecture/cce23-source-map-drift.md (source)
+- architecture/cce32-github-pages-publish-target.md (source)
+- architecture/cce4-schema-enforcement.md (source)
+- architecture/cce6-7-8-batch.md (source)
+- architecture/structured-docs-site-generation.md (source)
+
 ## 2026-10-03T12:24:03.559723+00:00
 - PR #299: The orchestrator now vendors the plugin directory (passed to the Claude CLI via --plugin-dir) to a location outside the git worktree for page-author dispatches. It no longer uses --permission-mode auto to get past the 'sensitive file' write gate on plugin-dir paths. Page writes therefore no longer depend on a server-side classifier verdict. A new test file, tests/orchestrator/test_plugin_dir_write_denial.py, covers the write-denial scenario.
 - PR #300: Corrects ten ticket-key references from CCE-192 to CCE-193 in scripts/orchestrator_runner.py and tests/orchestrator/test_plugin_dir_write_denial.py. These references belong to the vendored --plugin-dir fix merged in #299. CCE-192 was already taken by an unrelated source-collector payload-size bug. One reference stays as CCE-192, in the `_vendored_plugin_dir` docstring, because the squash-merged commit 847ae914 is immutable and still says CCE-192. The docstring now explains this. No runtime behavior changes.

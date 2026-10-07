@@ -25,6 +25,7 @@ The orchestrator will pass you a JSON block named `inputs` containing:
 - `repo`: `{ owner, name }`
 - `jira`: optional `{ enabled, project_keys, base_url }` — present only if Jira opt-in is on
 - `pr_branch_filter`: list of glob patterns to EXCLUDE (e.g. `["docs-agent/*"]`)
+- `max_detail_prs`: integer bound on how many PRs you emit with FULL detail. `0` means unlimited. It bounds DETAIL, never membership — see §8.
 
 ## Output schema (canonical)
 
@@ -303,6 +304,37 @@ exactly 1,000 characters. When it already fits, emit it unchanged and add no
 marker. The budget is not cosmetic: an over-long payload gets truncated
 mid-object by your own output ceiling, the orchestrator parses a fragment, and
 the entire run is lost. A bounded `body` is worth more than a complete one.
+
+**§8 — `max_detail_prs`: bound the DETAIL, never drop a PR.**
+
+When `max_detail_prs` is greater than `0` and the window holds more PRs than
+that, do NOT shorten the list. Emit every in-window PR, in two shapes:
+
+1. The **oldest** `max_detail_prs` PRs, ordered oldest-merge-first, with the
+   full detail Step 3 describes.
+2. Every remaining PR as a **metadata anchor** — exactly `number`, `url`,
+   `merge_sha` and `merged_at`, and nothing else. No `title`, `body`, `files`
+   or `labels`.
+
+Then set `partial: true` and `error: "payload_bounded: <detailed> of <total>"`,
+where `<detailed>` is how many you gave full detail to and `<total>` is the
+in-window count. That reason is contracted; do not invent your own wording for
+this condition.
+
+**Oldest-first is a correctness requirement, not a preference.** The
+orchestrator cannot tell an oldest-first payload from a newest-first one — it
+only sees what you returned. If you detail the NEWEST PRs, the run's cursor
+advances across them and every older PR in the window falls permanently behind
+the baseline, outside every future window, and is never documented by anyone.
+
+**Never omit the anchors.** They are what tells the orchestrator those PRs
+exist, so that it holds them back and stops its cursor at your detailed
+prefix. A payload that simply ends early reads to the orchestrator as a
+complete window, and it will advance past work nobody has documented.
+
+If `max_detail_prs` is `0`, or the window holds no more PRs than the bound,
+emit full detail for all of them and set neither flag.
+
 
 If Step 1 returned 0 PRs, skip to Step 6 and emit `{"prs": [], "jira_issues": []}`.
 

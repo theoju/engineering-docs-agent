@@ -857,6 +857,55 @@ def resolve_window_cap(config: dict) -> int:
     return int(val)
 
 
+# CCE-199: the one source-collector error that means HELD BACK, not BLIND.
+_PAYLOAD_BOUNDED_RE = re.compile(r"^payload_bounded:\s*(\d+)\s+of\s+(\d+)$")
+
+
+def collector_error_is_held_back(error: object, prs: object) -> bool:
+    """Whether a source-collector error reports held-back work (CCE-144).
+
+    CCE-144 classifies by CALL SITE and never by reason string. This IS that
+    call site: it serves exactly one agent, whose contract enumerates which
+    errors mean "I held work back" and which mean "I could not look". The
+    string is matched here so the knowledge stays next to the only dispatch it
+    can describe, rather than becoming a general reason-sniffing habit.
+
+    `payload_bounded: <detailed> of <total>` is the only held-back value, and
+    only when the payload bears it out. It is the collector ANSWERING in full
+    about a window too wide to detail in one response: every in-window PR is
+    present, the tail anchor-shaped, so CCE-169's admission cut makes the same
+    decision it always does and CCE-151's cursor stops at the cap boundary. The
+    run judged the window and deferred part of it -- self-healing, because the
+    anchored tail is still in the next run's window.
+
+    Three ways it is refused, each a case where the premise does not hold:
+
+    - a non-`payload_bounded` error. `git_rate_limit` and
+      `git_unrecoverable` mean the collector could not LOOK, so what came back
+      is not a judgement about the window at all. An unrecognised string --
+      including the `output_size_limit` an overflowing agent improvised before
+      this contract existed -- is refused for the same reason CCE-144 makes
+      blind the default: an unclassified failure mode is loud, not silent.
+    - fewer PRs than the claimed total. The tail was dropped rather than
+      anchored, so the cursor would be computed from a window the run cannot
+      see the end of. `run()` records this independently as
+      `collector_payload_incomplete`; both must agree, so neither is load-
+      bearing alone.
+    - nothing detailed, or nothing returned. There is no detailed prefix for
+      the cursor to stop on, and admitting anchors would hand the authoring
+      stage PRs with no body or files to write from.
+    """
+    if not isinstance(error, str):
+        return False
+    m = _PAYLOAD_BOUNDED_RE.match(error.strip())
+    if not m:
+        return False
+    detailed, total = int(m.group(1)), int(m.group(2))
+    if detailed <= 0 or not isinstance(prs, list) or not prs:
+        return False
+    return len(prs) >= total
+
+
 def resolve_authoring_hard_cap(
     config: dict, budget: int, *, out_reasons: list[str] | None = None
 ) -> int:
@@ -2848,12 +2897,34 @@ def run(
                 )
             sources = {"prs": [], "jira_issues": []}
         else:
+            # CCE-199: classify by what the collector actually reported.
+            # `collector_error_is_held_back` returns True for exactly one case
+            # -- an accounted `payload_bounded` payload, which is the collector
+            # DEFERRING part of a too-wide window -- and False for every other
+            # error, which stays blind as before. Read the predicate for which
+            # is which; the classification is not a literal here because the
+            # same reason string is held-back or blind depending on whether the
+            # payload bears its own claim out.
+            #
+            # BOTH sites take it, and that is the point rather than tidiness.
+            # `blind` is monotonic within a run (`state_io.add_partial`), and
+            # the contract requires a bounded payload to set `partial: true` as
+            # well as the error -- so routing only the error would leave
+            # `source_collector_partial: true` to freeze the watermark by
+            # itself, with a digest naming a reason the operator had just been
+            # told was benign. `partial: true` with no error, or with a blind
+            # one, is unchanged: `held_back` is False and the site stays blind.
+            held_back = collector_error_is_held_back(
+                sources.get("error"), sources.get("prs")
+            )
             if sources.get("error"):
                 add_partial(
-                    state, f"source_collector_error: {sources['error']}", degraded=False
+                    state,
+                    f"source_collector_error: {sources['error']}",
+                    degraded=held_back,
                 )
             if sources.get("partial"):
-                add_partial(state, "source_collector_partial: true", degraded=False)
+                add_partial(state, "source_collector_partial: true", degraded=held_back)
 
         # CCE-19: orchestrator-side safety net. The source-collector agent's
         # prompt was observed in 3/5 CCE-16 baseline runs to return PRs whose

@@ -26,6 +26,7 @@ Plan: docs/superpowers/plans/2026-10-06-cce199-collector-window-bound.md
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -79,7 +80,9 @@ def test_collector_inputs_carry_the_window_bound(
     THE WHOLE POINT OF CCE-199. Without it the collector has no way to know
     the window is bounded, so it details the entire window and overflows.
     """
-    captured = _capture_sc_inputs(monkeypatch, tmp_path, init_host, base_config_yaml, cap=2)
+    captured = _capture_sc_inputs(
+        monkeypatch, tmp_path, init_host, base_config_yaml, cap=2
+    )
     assert "max_detail_prs" in captured, sorted(captured)
     assert captured["max_detail_prs"] == 2, captured["max_detail_prs"]
 
@@ -92,12 +95,16 @@ def test_the_bound_tracks_the_config_key_not_a_literal(
     This is the test that distinguishes `resolve_window_cap(config)` from a
     literal, so it must use a cap that is not the default.
     """
-    captured = _capture_sc_inputs(monkeypatch, tmp_path, init_host, base_config_yaml, cap=7)
+    captured = _capture_sc_inputs(
+        monkeypatch, tmp_path, init_host, base_config_yaml, cap=7
+    )
     assert captured["max_detail_prs"] == 7, captured["max_detail_prs"]
     assert captured["max_detail_prs"] != orun.DEFAULT_WINDOW_PR_CAP
 
 
-def test_zero_reaches_the_collector_as_zero(monkeypatch, tmp_path, init_host, base_config_yaml):
+def test_zero_reaches_the_collector_as_zero(
+    monkeypatch, tmp_path, init_host, base_config_yaml
+):
     """`0` is CCE-169's advertised unlimited opt-out and must survive transit.
 
     `resolve_window_cap(config) or DEFAULT` would rewrite an explicit opt-out
@@ -105,7 +112,9 @@ def test_zero_reaches_the_collector_as_zero(monkeypatch, tmp_path, init_host, ba
     the same `is None` versus truthiness trap `resolve_window_cap` is itself
     written to avoid.
     """
-    captured = _capture_sc_inputs(monkeypatch, tmp_path, init_host, base_config_yaml, cap=0)
+    captured = _capture_sc_inputs(
+        monkeypatch, tmp_path, init_host, base_config_yaml, cap=0
+    )
     assert captured["max_detail_prs"] == 0, captured["max_detail_prs"]
 
 
@@ -158,14 +167,10 @@ def test_the_schema_accepts_an_anchor_shaped_pr():
     satisfiable by the four anchor fields rather than about loosening the
     object.
     """
-    import json
-
     import jsonschema
 
     schema = json.loads(
-        (
-            _REPO_ROOT / "agents" / "schemas" / "source_collector.schema.json"
-        ).read_text()
+        (_REPO_ROOT / "agents" / "schemas" / "source_collector.schema.json").read_text()
     )
     anchor = {
         "prs": [
@@ -201,8 +206,6 @@ def test_a_payload_that_drops_prs_is_flagged_incomplete(
     off-by-one in the comparison -- all of which leave the dangerous path live
     while the test stays green.
     """
-    import json
-
     state_path, _base, _shas, fakes = _seed_capped_host(
         tmp_path, init_host, base_config_yaml, cap=2
     )
@@ -228,8 +231,6 @@ def test_an_accounted_bounded_payload_is_not_flagged(
     "any payload_bounded is incomplete", which would make the fix it belongs to
     useless -- every bounded run would stall exactly as it does today.
     """
-    import json
-
     state_path, _base, _shas, fakes = _seed_capped_host(
         tmp_path, init_host, base_config_yaml, cap=2
     )
@@ -243,3 +244,254 @@ def test_an_accounted_bounded_payload_is_not_flagged(
     orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
     reasons = read_current_run(state_path).get("partial_reasons") or []
     assert not any("collector_payload_incomplete" in r for r in reasons), reasons
+
+
+# --------------------------------------------------------------------------
+# CCE-199 Task 4: route a bounded payload degraded, keep everything else blind.
+#
+# Tasks 1-3 made the payload FIT -- the collector now anchors its tail instead
+# of overflowing. They did not make the night pass: `sources.get("error")` is
+# classified `degraded=False` for every value, so the contracted
+# `payload_bounded` reason lands blind exactly where the invented
+# `output_size_limit` did, and a blind run exits non-zero, skips auto-merge and
+# freezes the watermark. The stall would have survived its own fix.
+#
+# `blind` is monotonic within a run (`state_io.add_partial`), so there are TWO
+# sites to route, not one: the error AND `source_collector_partial: true`,
+# which the contract requires a bounded payload to set. Routing only the first
+# leaves the second to blind the run on its own --
+# `test_partial_true_does_not_blind_a_bounded_run_on_its_own` is the case that
+# catches that, and it is why these tests assert the SITE and not only the
+# outcome.
+# --------------------------------------------------------------------------
+
+
+def _seed_bounded(
+    tmp_path, init_host, base_config_yaml, *, cap, error, prs=None, partial=True
+):
+    """A capped host whose collector reports `error` with an optional payload.
+
+    `prs=None` keeps the fixture's three PRs, so `payload_bounded: <d> of 3` is
+    an ACCOUNTED claim and `<d> of 99` is not.
+    """
+    state_path, base, shas, fakes = _seed_capped_host(
+        tmp_path, init_host, base_config_yaml, cap=cap
+    )
+    sc_path = fakes / "fake_source_collector.json"
+    sc = json.loads(sc_path.read_text())
+    sc["partial"] = partial
+    sc["error"] = error
+    if prs is not None:
+        sc["prs"] = prs
+    sc_path.write_text(json.dumps(sc))
+    return state_path, base, shas, fakes
+
+
+def test_a_bounded_payload_that_accounts_for_its_window_advances(
+    tmp_path, init_host, base_config_yaml, read_current_run
+):
+    """THE TICKET. A bounded payload must behave like the cap it already is.
+
+    Asserted as an advance rather than as a flag, because the flag is not what
+    was broken -- the frozen watermark is. The advance must land on the CAP
+    BOUNDARY (`c2`, the last admitted PR) and not on head: the anchored tail is
+    real work still owed, held out by CCE-169's admission cut, and an advance
+    past it would be the silent permanent loss the anchor contract exists to
+    prevent. `test_a_capped_run_advances_to_the_cap_boundary_and_says_so` pins
+    the same boundary for an unbounded payload; this is that invariant
+    surviving a collector that had to bound its own output.
+    """
+    state_path, _base, (_c1, c2, c3), fakes = _seed_bounded(
+        tmp_path, init_host, base_config_yaml, cap=2, error="payload_bounded: 2 of 3"
+    )
+    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0, "an accounted bounded payload is held-back work, not a blind run"
+
+    cr = read_current_run(state_path)
+    assert cr.get("blind") is not True, cr
+    # Degraded, NOT info_only: a run that could not detail its whole window is
+    # not a clean run, and `partial` is what withholds the non-cursor-backed
+    # advance.
+    assert cr.get("partial") is True, cr
+    assert any("payload_bounded" in r for r in cr.get("partial_reasons", [])), cr
+
+    written = json.loads(state_path.read_text())
+    advance = written["last_successful_run"]["head_sha"]
+    assert advance == c2, written["last_successful_run"]
+    assert advance != c3, "advanced past the anchored tail"
+
+
+def test_partial_true_does_not_blind_a_bounded_run_on_its_own(
+    tmp_path, init_host, base_config_yaml, read_current_run
+):
+    """The second call site, which a one-line fix to the first would miss.
+
+    The contract requires a bounded payload to set `partial: true` as well as
+    the error. `source_collector_partial: true` is its own `add_partial` call
+    with its own classification, and `blind` is monotonic -- so routing only the
+    error leaves this site to freeze the watermark by itself, with a digest that
+    names a reason the operator has just been told is benign.
+    """
+    state_path, _base, _shas, fakes = _seed_bounded(
+        tmp_path, init_host, base_config_yaml, cap=2, error="payload_bounded: 2 of 3"
+    )
+    orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    blind = read_current_run(state_path).get("blind_reasons", [])
+    assert not any("source_collector_partial" in r for r in blind), blind
+
+
+def test_an_empty_bounded_payload_stays_blind(
+    tmp_path, init_host, base_config_yaml, read_current_run
+):
+    """A bound is only trustworthy when something came back under it.
+
+    `payload_bounded: 0 of 173` is not a collector holding work back, it is a
+    collector that returned nothing while claiming a 173-PR window -- there is
+    no detailed prefix to advance to, so the only safe reading is blind.
+    """
+    state_path, base, _shas, fakes = _seed_bounded(
+        tmp_path,
+        init_host,
+        base_config_yaml,
+        cap=2,
+        error="payload_bounded: 0 of 173",
+        prs=[],
+    )
+    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 1, "an empty payload cannot be degraded"
+    assert read_current_run(state_path).get("blind") is True
+    assert json.loads(state_path.read_text())["last_successful_run"]["head_sha"] == base
+
+
+def test_a_bounded_claim_the_payload_cannot_account_for_stays_blind(
+    tmp_path, init_host, base_config_yaml, read_current_run
+):
+    """Degrading on the claim alone would hand the cursor a short window.
+
+    Three PRs arrive against a claimed 99, so 96 are unaccounted: the tail was
+    dropped rather than anchored. Task 3's guard records that independently;
+    this asserts the CLASSIFIER refuses it too, so the two agree instead of one
+    relying on the other.
+    """
+    state_path, base, _shas, fakes = _seed_bounded(
+        tmp_path, init_host, base_config_yaml, cap=2, error="payload_bounded: 2 of 99"
+    )
+    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 1, "an unaccounted payload cannot be degraded"
+    assert read_current_run(state_path).get("blind") is True
+    assert json.loads(state_path.read_text())["last_successful_run"]["head_sha"] == base
+
+
+def test_the_invented_overflow_string_from_the_incident_is_still_blind(
+    tmp_path, init_host, base_config_yaml, read_current_run
+):
+    """The exact string run 37493982560 emitted must not become benign.
+
+    `output_size_limit` is not in the contract -- the agent improvised it. An
+    older plugin version, or an agent that ignores the new contract, can still
+    produce it, and it carries no accounting, so there is nothing to verify a
+    cursor against. CCE-144: an unclassified failure mode is loud, not silent.
+    """
+    state_path, _base, _shas, fakes = _seed_bounded(
+        tmp_path,
+        init_host,
+        base_config_yaml,
+        cap=2,
+        error="output_size_limit: 12 of 173 in-window PRs returned",
+    )
+    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 1, "an unrecognised collector error must stay blind"
+    assert read_current_run(state_path).get("blind") is True
+
+
+def test_a_contracted_tool_failure_is_still_blind(
+    tmp_path, init_host, base_config_yaml, read_current_run
+):
+    """Only `payload_bounded` is held-back; the other contracted errors are not.
+
+    `git_rate_limit` means the collector could not LOOK, so the window it
+    returned is not a judgement about that window -- the distinction CCE-144 is
+    built on. Without this test the fix could be written as "any error with a
+    non-empty payload is degraded", which would quietly advance across a
+    rate-limited half-window.
+    """
+    state_path, _base, _shas, fakes = _seed_bounded(
+        tmp_path, init_host, base_config_yaml, cap=2, error="git_rate_limit"
+    )
+    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 1, "a tool failure must stay blind"
+    assert read_current_run(state_path).get("blind") is True
+
+
+# --------------------------------------------------------------------------
+# The classification rule itself. The six cases above drive `run()`, which is
+# what proves the wiring; these pin the boundaries the wiring cannot reach --
+# an exact-count payload, a zero-detail payload, and the two string shapes a
+# looser regex would wrongly accept.
+# --------------------------------------------------------------------------
+
+
+def test_an_exactly_accounted_payload_is_held_back():
+    """`len(prs) == total` is the healthy anchored case, not an off-by-one.
+
+    This is the boundary a `>` would break: an anchored payload returns exactly
+    as many PRs as it claims, so a strict comparison would refuse every correct
+    payload and leave the stall in place.
+    """
+    assert orun.collector_error_is_held_back("payload_bounded: 2 of 3", [1, 2, 3])
+
+
+def test_a_payload_longer_than_its_claim_is_held_back():
+    """More PRs than claimed is still fully accounted.
+
+    Not a shape the contract asks for, but `>=` means an agent that
+    miscounts its own total low cannot turn a complete payload into a stall.
+    """
+    assert orun.collector_error_is_held_back("payload_bounded: 2 of 3", [1, 2, 3, 4])
+
+
+def test_a_short_payload_is_not_held_back():
+    assert not orun.collector_error_is_held_back("payload_bounded: 2 of 99", [1, 2, 3])
+
+
+def test_a_zero_detail_payload_is_not_held_back():
+    """Anchors alone give the cursor nothing to stop on.
+
+    A collector that anchored all three PRs and detailed none has returned a
+    complete window, so the accounting check passes -- but there is no detailed
+    prefix, and admitting anchors would hand the authoring stage PRs with no
+    body or files. Accounting is necessary and not sufficient.
+    """
+    assert not orun.collector_error_is_held_back("payload_bounded: 0 of 3", [1, 2, 3])
+
+
+def test_an_empty_payload_is_not_held_back():
+    assert not orun.collector_error_is_held_back("payload_bounded: 0 of 0", [])
+
+
+def test_a_non_string_error_is_not_held_back():
+    assert not orun.collector_error_is_held_back(None, [1, 2, 3])
+
+
+def test_the_reason_must_be_the_whole_error_not_a_substring():
+    """A compound error is a different event and stays blind.
+
+    `git_rate_limit; payload_bounded: 2 of 3` says the collector BOTH bounded
+    its output and hit a rate limit -- the second clause makes the window
+    untrustworthy whatever the first claims. The match is anchored so a
+    substring cannot launder a blind error into a degraded one.
+    """
+    assert not orun.collector_error_is_held_back(
+        "git_rate_limit; payload_bounded: 2 of 3", [1, 2, 3]
+    )
+
+
+def test_trailing_commentary_is_not_held_back():
+    """An agent that decorates the reason has left the contract.
+
+    Refusing it is the fail-safe reading: the decoration may be reporting
+    something the accounting does not capture.
+    """
+    assert not orun.collector_error_is_held_back(
+        "payload_bounded: 2 of 3 (body omitted)", [1, 2, 3]
+    )

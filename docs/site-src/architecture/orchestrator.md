@@ -23,13 +23,17 @@ source_files:
   - tests/orchestrator/test_authoring_hard_cap_bounds.py
   - tests/orchestrator/test_dispatch_reasons_classification.py
   - tests/orchestrator/test_deferral_skip.py
+  - tests/orchestrator/test_dispatch_control_char_tolerance.py
+  - tests/orchestrator/test_dispatch_quote_repair.py
+  - tests/orchestrator/test_plugin_dir_write_denial.py
+  - tests/orchestrator/fixtures/cce187_invalid_escaping_source_collector.json
   - tests/orchestrator/test_deferral_stall_escape.py
   - tests/orchestrator/test_forgiven_run_merge_gate.py
   - tests/orchestrator/test_citation_repair_wiring.py
   - tests/orchestrator/test_schema_invalid_soft_fail.py
   - tests/state_io/test_add_partial_blind.py
   - tests/templates/test_workflow_run_parity.py
-last_reviewed: "2026-09-26"
+last_reviewed: "2026-10-02"
 status: draft
 doc_kind: architecture
 ---
@@ -202,7 +206,9 @@ Two traps this took to get right:
 - **Gating the watermark refusal on `partial` instead of on `held_back` would have reinstated the CCE-109 doom loop.** A permanently-unlintable page would freeze the baseline forever — the cursor has to keep MOVING, just never past undocumented work. `held_back` names exactly the unfinished content; `partial` alone does not.
 - **Hoisting only the READ of `deferred_pages_by_pr` was not enough — `partition_deferrals` had to move too.** With `still_deferred` left at its default empty list on the non-truncated path, `next_deferral_counts` (`scripts/orchestrator_runner.py:next_deferral_counts`) silently cleared the deferral count of every held-back PR on every run that didn't time-truncate, so no PR could ever accumulate enough consecutive deferrals to reach the CCE-140 skip threshold. That release valve is what stops the first trap from recurring by another route.
 
-The reason strings the walk emits are cause-dependent: `time_budget_*` on the time-truncated path (kept byte-identical, since `test_time_budget.py` and `test_deferral_skip.py` assert those exact strings and the CCE-109/CCE-140 runbooks tell operators to grep for them) and `held_back_*` on the newly-covered non-time path — e.g. `held_back_no_advance_no_cursor` when no admitted PR carries a usable `merge_sha`, or `held_back_no_advance_unanchored_deferred` when a still-deferred PR has none. Neither family is in `_MERGE_VETO_REASON_PREFIXES` (`scripts/orchestrator_runner.py:_MERGE_VETO_REASON_PREFIXES` — one entry, `app_token_unavailable`), and both keep `degraded=True`, so this change is orthogonal to the blind/degraded split above.
+The reason strings the walk emits are cause-dependent: `time_budget_*` on the time-truncated path (kept byte-identical, since `test_time_budget.py` and `test_deferral_skip.py` assert those exact strings and the CCE-109/CCE-140 runbooks tell operators to grep for them) and `held_back_*` on the newly-covered non-time path — e.g. `held_back_no_advance_prefix_blocked` when the cursor prefix is empty because a held-back PR sits at the head of the window, `held_back_no_advance_no_cursor` when prefix members exist but none carries a usable `merge_sha`, or `held_back_no_advance_unanchored_deferred` when a still-deferred PR has none.
+
+The first two used to be one reason. `_last_processed_merge_sha` returns `None` both for an empty prefix and for a prefix whose members lack a `merge_sha`, and a single `cursor is None` arm reported the second for both (CCE-186). On nightlies `36000442301` and `36007491599` (2026-09-24) that sent triage hunting for a missing SHA while every admitted PR had one — `pr_summaries_reused: 10/10` in the same digest is the disproof, because `cached_pr_summary` returns nothing unless the SHA is present and matches. The `prefix_blocked` reason names the blocking PR number. The change is reporting-only: the baseline still holds and the run stays degraded, not blind. `test_blocked_cursor_prefix_names_the_blocking_pr_not_a_missing_sha` (`tests/orchestrator/test_degraded_advance_non_truncated.py`) asserts on the non-truncated `held_back_` branch on purpose, since that is the branch production takes. Neither family is in `_MERGE_VETO_REASON_PREFIXES` (`scripts/orchestrator_runner.py:_MERGE_VETO_REASON_PREFIXES` — one entry, `app_token_unavailable`), and both keep `degraded=True`, so this change is orthogonal to the blind/degraded split above.
 
 **Diagnostic reflex:** a green nightly with `partial: true` whose baseline moved anyway is not a linting bug — check `deferred_pages_by_pr` and `held_back` before suspecting the page-author.
 
@@ -239,6 +245,31 @@ The run-wide cap used to recover how many findings the run had already shown by 
 CCE-173 moves the counter off the prose entirely. `current["citation_findings_emitted"]` — set via `state.setdefault("current_run", ...)` before the read, so a missing key can never silently look like "cap already reached" — is now the run's only record of how many findings it has shown, incremented by exactly `len(shown)` on every call. `test_the_cap_fires_on_the_counter_with_no_matching_prose_present` pins exactly the case the old recovery logic could not see — no matching `citation_shortening_suspected` prose in `partial_reasons` at all, but the counter already at `_CITATION_RUN_FINDINGS_CAP` — and `test_the_counter_survives_a_renamed_digest_prefix` rewrites every already-emitted line to a different prefix mid-run and asserts the cap still holds, both in `tests/orchestrator/test_citation_repair_wiring.py`.
 
 **Diagnostic reflex:** if a run's citation-diagnosis digest keeps growing across pages past where `_CITATION_RUN_FINDINGS_CAP` should have stopped it, read `current_run.citation_findings_emitted` against the cap before suspecting the cap logic itself — the counter is state now, not a scan of its own output.
+
+## Agent-output parsing: a tolerant ladder before a dispatch is judged invalid
+
+Every subagent dispatch returns text that `_parse_agent_payload` (`scripts/orchestrator_runner.py:_parse_agent_payload`) turns into a dict. A `None` result is what makes a blocking agent's dispatch invalid, and for source-collector that is blind. The parser therefore tries progressively more tolerant tiers and records a reason for any tier past a clean parse:
+
+1. **Strict parse.** A fenced payload is unwrapped silently. A clean payload records nothing.
+2. **`strict=False`** (CCE-187). JSON forbids raw control characters inside strings, but that is a wire-format rule: accepting a real newline where `\n` was meant loses nothing. The result records `control_chars_tolerated: <agent>`. This tier is non-destructive and never rewrites bytes.
+3. **Prose rescue.** `_rescue_json_object` (`scripts/orchestrator_runner.py:_rescue_json_object`) extracts the object from surrounding prose and records `prose_contamination_rescued: <agent>`. Its terminal parse is also control-character tolerant, so a payload with a prose preamble and a raw newline is still recovered.
+4. **Unescaped-quote repair** (CCE-189). `_repair_unescaped_quotes` (`scripts/orchestrator_runner.py:_repair_unescaped_quotes`) escapes an interior `"` and retries through the `strict=False` loader. It records `unescaped_quotes_repaired: <agent>`.
+
+The trigger was nightly `36080301431`, which went blind on `source_collector_invalid: returned None` although the subagent had succeeded and its roughly 93 KB of stdout was structurally complete. One Jira description carried two independent faults: six raw newlines and an unescaped quote around `"explicitly mentioned"`. The failure is stochastic: the previous night collected the same window, chose a shorter description for the same issue, and parsed cleanly. The contract already bounds `description` length, so no pre-flight check in the agent contract could have closed it. Every guard enforced *bounded*, and none enforced *well-formed*.
+
+Tier 4 is safe because of the rule it applies. In valid JSON a string's closing quote is followed, past whitespace, by one of `,` `}` `]` `:` or end of input. An interior quote followed by anything else cannot be a terminator, so there is no competing valid parse to choose wrongly between, and escaping inserts a backslash without losing a character. The residual is an interior quote that happens to be followed by a structural token, such as `"he said "hi", bye"`. That is indistinguishable from a terminator, so the repair **fails closed**: it returns `None` exactly as before and records nothing. A silently mis-parsed payload would be worse than a blind run, because a blind run is loud.
+
+Ordering is part of the contract. A control-character-only payload must report `control_chars_tolerated` and must not be credited to the repair, because tier 2 does not rewrite and tier 4 does. `tests/orchestrator/test_dispatch_control_char_tolerance.py` and `tests/orchestrator/test_dispatch_quote_repair.py` pin this against the committed production bytes in `tests/orchestrator/fixtures/cce187_invalid_escaping_source_collector.json`, and each asserts the fixture still carries both faults so the tests cannot go vacuous. Hosts see the tier reasons in the digest; they say the agent's output needed help, not that the run failed.
+
+## page-author writes: a refused write is a partial reason, not a clean exit
+
+CCE-188 found that the docs-agent had not authored a page while reporting healthy runs. In nightly `36007491599`, page-author was dispatched 13 times with return code 0, made 17 Edit/Write attempts, and had all 17 refused as sensitive-file writes. No pages were written and no partial reason was recorded.
+
+There were two defects, and the page pins both halves.
+
+**The permission cause.** Every dispatch passes `--plugin-dir`, and Claude Code protects plugin-owned files from agent writes. This repo is the plugin, so when the docs-agent documents itself the plugin root equals the worktree and every page write is refused. `_plugin_dir_shadows_worktree` (`scripts/orchestrator_runner.py:_plugin_dir_shadows_worktree`) detects that shape, including a worktree nested under the plugin root. The first remedy, `--permission-mode auto`, held for two runs and then failed on nightly `36241035222` (2026-09-26): `auto` asks a server-side classifier to approve each write, the classifier returned no verdict, and the CLI treats that as a hard failure. CCE-193 removed the condition instead. On a shadowed worktree `--plugin-dir` now points at a copy of the plugin outside the worktree (`_vendored_plugin_dir`, `scripts/orchestrator_runner.py:_vendored_plugin_dir`), cached once per process, and **no** `--permission-mode` is passed on any path. Vendoring fails loud with `cannot vendor plugin` when the manifest is missing, because a silent fallback to the plugin root would reintroduce the shadowing. A real host installs the plugin to a subdirectory of its worktree, so it is not shadowed, keeps the installed plugin dir unchanged, and pays no copy cost.
+
+**The silence.** The caller checked `if out.get("ok"):` with no `else`, so a schema-valid `ok: false` fell through with no reason and no banner. A page-author refusal now records `page_author_error: <agent's error text>` in `partial_reasons`. The agent's own text survives into the reason because it is the only clue an operator gets. By the call-site rule, this is `degraded`, not `blind`: an unlanded page holds its PR out of the cursor-backed advance rather than consuming it. The run still exits 0 and the baseline does not move. `tests/orchestrator/test_plugin_dir_write_denial.py` pins the argv, the vendoring, and the reason.
 
 ## Advisory agents: a "couldn't judge" verdict must not degrade the run
 

@@ -1,6 +1,7 @@
 ---
 description: 'Documents architecture citation shortening detection: The docs-agent now detects citations that page-author shortened into an unresolvable form (e.g. dropping a directory prefix) and reports them as an info-only digest line, instead of attempting to repair them. A prior repair capability (scripts/citation_repair.py rewriting the page text) was built, reviewed across four rounds, and withdrawn: each round moved the shortened citation into a region citation_exists does not verify, turning a correct BLOCK into a silent PASS even after the cited file was deleted. Detection now runs via _diagnose_citation_paths in orchestrator_runner.py, after the authoring loop and before the lint-block revert, so it inspects the same finished tree citation_exists checks. Findings are bounded per-page and per-run and classified into four confidence labels (candidate_in_run_inputs, suffix_match_only, ambiguous, no_candidate), with only the first three surfaced in the digest.'
 source_files:
+  - .engineering-docs-agent/config.yml
   - CLAUDE.md
   - docs/superpowers/plans/2026-08-21-cce141-citation-path-repair.md
   - docs/superpowers/plans/2026-08-21-cce141-corroborated-repair.md
@@ -66,6 +67,16 @@ One malformed token costs only itself. `diagnose` catches `OSError` per citation
 The resolution check accepts an untracked on-disk sibling from the same run. Candidate search iterates tracked files only. A citation shortened to a page this run just wrote will therefore name a tracked decoy elsewhere in the tree. Nothing acts on the label, so the cost is one misleading suggestion. A test pins this behavior as known.
 
 Under an `archive-index` section, `citation_exists` is downgraded to `warn` and the revert never fires. The page ships with its shortened citation, and the digest line is the only signal.
+
+## Why this page's example paths are exempt
+
+This page has to name the evidence. The full `.claude/skills/connector-builder/references/checklist.md` path belongs to another repository. `references/checklist.md` is the shortened form, and its non-resolution is the whole finding. `erences/checklist.md` is the over-shortened form that the boundary rule must reject. None of the three resolves in this repo, and that is the point of the page.
+
+`citation_exists` would block them like any other unresolvable citation. That happened on nightly 36245832365. The page was the last one owed by PR #241, the oldest admitted PR. Its block kept the cursor prefix empty, the run partial and auto-merge skipped, so 13 authored pages were discarded.
+
+The host config now lists the three tokens under `lint.citation_exempt_tokens` in `.engineering-docs-agent/config.yml`. The match is on the exact token, so a nearby path that is also unresolvable still blocks. The plugin's own defaults in `scripts/lint/citation_exists.py` separately exempt a few generic example tokens that pages about citation linting quote.
+
+If you add an example path to this page, use a placeholder form such as `scripts/<name>.py`. A concrete unresolvable path needs its own exemption entry, and the prose that explains the entry can mint the next blocked token.
 
 ## Why there is no repair
 

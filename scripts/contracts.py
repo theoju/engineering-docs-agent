@@ -77,8 +77,14 @@ class NotifierResult:
 
 @dataclass(frozen=True)
 class FactCheckerResult:
-    ok: bool
+    # CCE-197: `verdict` leads and `ok` carries a default because the schema no
+    # longer requires `ok`. validate_and_parse builds this as
+    # ``cls(**{f.name: raw[f.name] for f in fields(cls) if f.name in raw})``, so
+    # an absent `ok` against a no-default field would raise TypeError here — an
+    # uncaught crash, strictly worse than the caught ValidationError it
+    # replaces. Reordering is safe: this class is only ever built by keyword.
     verdict: str
+    ok: bool | None = None
     page: str | None = None
     findings: list[dict] = None  # type: ignore[assignment]
     error: str | None = None
@@ -86,6 +92,12 @@ class FactCheckerResult:
     def __post_init__(self) -> None:
         if self.findings is None:
             object.__setattr__(self, "findings", [])
+        # An absent `ok` means the agent answered and said nothing about
+        # success, so derive it from `error` instead of guessing. An `ok` the
+        # agent did supply — including False — is authoritative and is never
+        # overwritten, which keeps the documented failure payload meaningful.
+        if self.ok is None:
+            object.__setattr__(self, "ok", self.error is None)
 
 
 _DATACLASS_BY_NAME: dict[str, type] = {

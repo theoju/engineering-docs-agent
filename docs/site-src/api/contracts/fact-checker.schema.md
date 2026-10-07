@@ -1,3 +1,10 @@
+---
+status: draft
+sources:
+  - https://github.com/theoju/engineering-docs-agent/pull/306
+synthesized_into: []
+---
+
 # fact-checker output
 
 _Auto-generated from JSON Schema; do not edit by hand — see `scripts/contracts_doc.py`._

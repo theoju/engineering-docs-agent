@@ -27,6 +27,16 @@
     },
     "jira_issues": { "type": "array" },
     "error": { "type": ["string", "null"] },
-    "partial": { "type": "boolean" }
+    "partial": { "type": "boolean" },
+    "held_back_count": { "type": "integer", "minimum": 0 },
+    "held_back_oldest": {
+      "type": "object",
+      "required": ["number", "merge_sha"],
+      "additionalProperties": false,
+      "properties": {
+        "number": { "type": "integer" },
+        "merge_sha": { "type": "string", "minLength": 1 }
+      }
+    }
   }
 }

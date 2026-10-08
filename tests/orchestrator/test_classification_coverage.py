@@ -244,10 +244,38 @@ def test_orchestrator_has_the_expected_call_site_population():
     permanent loss this ticket exists to stop. Explicitly NOT info_only: it
     must flip `partial`. Not added to `_MERGE_VETO_REASON_PREFIXES`, since
     blind already skips auto-merge via `blind_run` and a veto would add
-    nothing."""
+    nothing.
+
+    50 -> 51, CCE-202: `held_back_collector_bounded` in `run`, immediately
+    after the CCE-169 `held_back_window_capped` site. Audited degraded=True,
+    and it is the SAME classification as its neighbour for the same reason: the
+    run HELD BACK PRs it did not detail, it did not consume and lose them. They
+    are still in the next run's window, so the run is self-healing and must
+    merge and advance -- a blind classification here would freeze the watermark
+    and reinstate exactly the stall CCE-199 and CCE-202 exist to drain.
+
+    Why a second site rather than widening the cap's reason: the two held-back
+    sets have different ORIGINS and CCE-144 classifies by call site, never by
+    resemblance. `held_back_window_capped` is the orchestrator declining work it
+    could see; `held_back_collector_bounded` is the collector declining to
+    describe work the orchestrator therefore never saw. They also count
+    differently -- the cap's reason is rendered from `len(window_capped)`, and
+    the collector's tail contributes ONE stop-marker element standing for N PRs,
+    so folding them together would print "3 of 5" on a run holding back 190.
+
+    Guarded on `collector_stop_marker(...)` AND `_hb_declared > 0`, so a
+    payload claiming a tail it cannot stop the cursor on never reaches this
+    site: `collector_error_is_held_back` refuses it first and the run stays
+    blind. That ordering is the whole safety argument -- an empty `held_back`
+    routes the advance to full window HEAD, so a count without a marker must be
+    blind, not degraded. Not info_only: it must flip `partial`, because a run
+    that could not detail its whole window is not a clean run. Not added to
+    `_MERGE_VETO_REASON_PREFIXES` -- a cursor-backed advance to the detailed
+    prefix is exactly what should merge here, and that is what drains the
+    backlog one cap-width per night."""
     calls = list(_add_partial_calls(REPO_ROOT / "scripts/orchestrator_runner.py"))
-    assert len(calls) == 50, (
-        f"expected 50 add_partial calls, found {len(calls)}; re-audit and "
+    assert len(calls) == 51, (
+        f"expected 51 add_partial calls, found {len(calls)}; re-audit and "
         "update this count deliberately"
     )
     # 42 -> 43: CCE-141 round 5 added `citation_diagnosis_truncated` in

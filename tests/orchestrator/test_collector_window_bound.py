@@ -152,8 +152,20 @@ def test_the_contract_bounds_detail_without_dropping_prs():
     the bound.
     """
     contract = (_REPO_ROOT / "agents" / "source-collector.md").read_text()
-    after = contract[contract.index("`max_detail_prs`") :].lower()
-    assert "anchor" in after, "the contract must describe the metadata anchor shape"
+    after = contract[contract.index("`max_detail_prs`") :]
+    # CCE-202 narrowed HOW the tail is reported without changing THAT it is.
+    # Asserted on the accounting identity rather than on the word "anchor":
+    # the rewritten contract still contains "anchor", inside a sentence that
+    # REJECTS per-PR anchors, so the old substring check now passes for the
+    # opposite of the reason it was written.
+    assert "held_back_count" in after, (
+        "the contract must require the tail to be reported as a count; a "
+        "payload that simply ends early reads as a complete window"
+    )
+    assert "len(prs) + held_back_count" in after, (
+        "the contract must state the accounting identity the orchestrator "
+        "checks, or the agent cannot know what makes a payload complete"
+    )
     assert "payload_bounded" in contract, (
         "a bounded payload needs a CONTRACTED reason; an invented string is "
         "what sent run 37493982560 down the blind path"
@@ -494,4 +506,246 @@ def test_trailing_commentary_is_not_held_back():
     """
     assert not orun.collector_error_is_held_back(
         "payload_bounded: 2 of 3 (body omitted)", [1, 2, 3]
+    )
+
+
+# --------------------------------------------------------------------------
+# CCE-202: the anchored tail does not fit either.
+#
+# CCE-199 bounded DETAIL and contracted one metadata anchor per held-back PR.
+# Measured on the ADIS window (200 in-window PRs, 2026-10-07): the contracted
+# anchor shape is 186 bytes, so the tail alone is 37,203 bytes and the agent's
+# actual emission was 48,563 -- reproducing the 49.6KB the runner spilled. The
+# payload is O(window), which is the one variable the bound existed to make
+# irrelevant, so the cliff merely moved to ~161 PRs and the window was already
+# 173 when the fix was written. It could never have cleared that host's stall.
+#
+# The tail's per-PR anchors are only ever consumed by `advance_cursor_list` to
+# walk PAST a held-back PR, which an overflowing window must never do. So the
+# tail collapses to a count plus ONE stop-marker, which is O(1):
+#
+#   held_back_count:  how many anchorable in-window PRs went undetailed
+#   held_back_oldest: {number, merge_sha} -- the oldest of them, and the only
+#                     one the cursor walk needs to break on
+#
+# A count WITHOUT a stop-marker is the catastrophic shape, not a lesser one:
+# `held_back` stays empty, the advance branch takes its `else`, and the run
+# advances to full window HEAD -- CCE-144's consume-once loss, green. Hence
+# `test_a_positive_count_without_a_stop_marker_stays_blind`.
+# --------------------------------------------------------------------------
+
+
+def _seed_count_bounded(
+    tmp_path,
+    init_host,
+    base_config_yaml,
+    *,
+    cap,
+    detailed,
+    stop_marker="derive",
+    count="derive",
+    error="derive",
+):
+    """A capped host whose collector bounded its tail to a count + marker.
+
+    Keeps the oldest `detailed` fixture PRs in `prs` and replaces the rest with
+    `held_back_count` plus `held_back_oldest`. `stop_marker` and `count`
+    default to the shapes the contract requires; pass an explicit value (or
+    `None`) to seed a malformed payload.
+    """
+    state_path, base, shas, fakes = _seed_capped_host(
+        tmp_path, init_host, base_config_yaml, cap=cap
+    )
+    sc_path = fakes / "fake_source_collector.json"
+    sc = json.loads(sc_path.read_text())
+    kept, dropped = sc["prs"][:detailed], sc["prs"][detailed:]
+    sc["prs"] = kept
+    if count == "derive":
+        count = len(dropped)
+    if stop_marker == "derive":
+        stop_marker = (
+            {"number": dropped[0]["number"], "merge_sha": dropped[0]["merge_sha"]}
+            if dropped
+            else None
+        )
+    if error == "derive":
+        error = f"payload_bounded: {detailed} of {detailed + len(dropped)}"
+    sc["partial"] = True
+    sc["error"] = error
+    if count is not None:
+        sc["held_back_count"] = count
+    if stop_marker is not None:
+        sc["held_back_oldest"] = stop_marker
+    sc_path.write_text(json.dumps(sc))
+    return state_path, base, shas, fakes
+
+
+def test_a_count_bounded_payload_advances_to_the_detailed_prefix(
+    tmp_path, init_host, base_config_yaml, read_current_run
+):
+    """THE TICKET. An O(1) tail must advance exactly where anchors did.
+
+    Pins the same boundary as
+    `test_a_bounded_payload_that_accounts_for_its_window_advances`, which
+    proves the collapse from M anchors to one stop-marker changed the payload
+    SIZE and not the cursor SEMANTICS. The advance must reach `c2` -- the last
+    detailed PR -- and never `c3`, which is real work still owed.
+    """
+    state_path, _base, (_c1, c2, c3), fakes = _seed_count_bounded(
+        tmp_path, init_host, base_config_yaml, cap=2, detailed=2
+    )
+    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc == 0, "a count-bounded payload is held-back work, not a blind run"
+
+    cr = read_current_run(state_path)
+    assert cr.get("blind") is not True, cr
+    assert cr.get("partial") is True, cr
+
+    written = json.loads(state_path.read_text())
+    advance = written["last_successful_run"]["head_sha"]
+    assert advance == c2, written["last_successful_run"]
+    assert advance != c3, "advanced past the held-back tail"
+
+
+def test_the_held_back_count_is_reported_not_just_the_stop_marker(
+    tmp_path, init_host, base_config_yaml, read_current_run
+):
+    """The reason must name the real count, not the one synthesized PR.
+
+    The stop-marker enters the cursor machinery as a single element, so a
+    reason rendered from `len(window_capped)` would read "1 of 3" on a window
+    holding back 190. An operator reading that figure is the only signal the
+    drain is not keeping up.
+    """
+    state_path, _base, _shas, fakes = _seed_count_bounded(
+        tmp_path, init_host, base_config_yaml, cap=3, detailed=1
+    )
+    orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    reasons = read_current_run(state_path).get("partial_reasons", [])
+    assert any("held_back_collector_bounded: 2 of 3" in r for r in reasons), reasons
+
+
+def test_a_positive_count_without_a_stop_marker_stays_blind(
+    tmp_path, init_host, base_config_yaml, read_current_run
+):
+    """THE CATASTROPHIC SHAPE. A count alone must never advance.
+
+    With no stop-marker `held_back` is empty, so the advance branch falls to
+    its `else` and reaches full window HEAD -- consuming a window whose tail
+    nobody documented, with no red anywhere. That is strictly worse than
+    today's loud stall, so an unstoppable claim is blind by construction.
+    """
+    state_path, base, _shas, fakes = _seed_count_bounded(
+        tmp_path, init_host, base_config_yaml, cap=2, detailed=2, stop_marker=None
+    )
+    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc != 0, "a tail the cursor cannot stop on must fail loudly"
+    assert read_current_run(state_path).get("blind") is True
+
+    written = json.loads(state_path.read_text())
+    assert written["last_successful_run"]["head_sha"] == base, "watermark moved"
+
+
+def test_a_stop_marker_without_a_merge_sha_stays_blind(
+    tmp_path, init_host, base_config_yaml, read_current_run
+):
+    """An unanchored stop-marker cannot be re-anchored by a later window.
+
+    `_last_processed_merge_sha` skips a PR with no sha, so a marker without one
+    stops the walk but leaves the cursor unable to name where it stopped.
+    """
+    state_path, base, _shas, fakes = _seed_count_bounded(
+        tmp_path,
+        init_host,
+        base_config_yaml,
+        cap=2,
+        detailed=2,
+        stop_marker={"number": 999},
+    )
+    rc = orun.run(tmp_path, dry_run_dir=fakes, no_pr=True)
+    assert rc != 0, rc
+    assert read_current_run(state_path).get("blind") is True
+    written = json.loads(state_path.read_text())
+    assert written["last_successful_run"]["head_sha"] == base, "watermark moved"
+
+
+# --- predicate units ------------------------------------------------------
+
+
+_MARKER = {"number": 3, "merge_sha": "a" * 40}
+
+
+def test_a_count_closes_the_accounting_gap():
+    """`len(prs) + held_back_count` is the new accounting identity."""
+    assert orun.collector_error_is_held_back(
+        "payload_bounded: 2 of 3", [1, 2], held_back_count=1, held_back_oldest=_MARKER
+    )
+
+
+def test_a_count_that_does_not_close_the_gap_is_not_held_back():
+    assert not orun.collector_error_is_held_back(
+        "payload_bounded: 2 of 99", [1, 2], held_back_count=1, held_back_oldest=_MARKER
+    )
+
+
+def test_a_positive_count_without_a_stop_marker_is_not_held_back():
+    assert not orun.collector_error_is_held_back(
+        "payload_bounded: 2 of 3", [1, 2], held_back_count=1, held_back_oldest=None
+    )
+
+
+def test_a_stop_marker_without_a_merge_sha_is_not_held_back():
+    assert not orun.collector_error_is_held_back(
+        "payload_bounded: 2 of 3",
+        [1, 2],
+        held_back_count=1,
+        held_back_oldest={"number": 3},
+    )
+
+
+def test_a_zero_count_falls_back_to_the_anchored_rule():
+    """Backward compatibility, pinned.
+
+    The anchored contract satisfies `len(prs) + 0 >= total`, so the default
+    `held_back_count=0` must reduce the predicate to exactly CCE-199's rule --
+    which is what keeps every CCE-199 test above meaningful rather than
+    accidentally passing.
+    """
+    assert orun.collector_error_is_held_back("payload_bounded: 2 of 3", [1, 2, 3])
+    assert not orun.collector_error_is_held_back("payload_bounded: 2 of 3", [1, 2])
+
+
+def test_the_contract_documents_the_count_bounded_tail():
+    """The agent is a prompt, so the prompt is the only place this can live."""
+    t = (_REPO_ROOT / "agents" / "source-collector.md").read_text()
+    assert "held_back_count" in t, "the count field is not contracted"
+    assert "held_back_oldest" in t, "the stop-marker is not contracted"
+    lo = t.index("held_back_oldest")
+    assert "oldest" in t[lo - 600 : lo + 600].lower()
+
+
+def test_the_schema_accepts_a_count_bounded_payload():
+    import jsonschema
+
+    schema = json.loads(
+        (_REPO_ROOT / "agents" / "schemas" / "source_collector.schema.json").read_text()
+    )
+    jsonschema.validate(
+        {
+            "prs": [
+                {
+                    "number": 1,
+                    "title": "t",
+                    "url": "https://example.test/1",
+                    "merged_at": "2026-01-01T00:00:00Z",
+                    "merge_sha": "b" * 40,
+                }
+            ],
+            "jira_issues": [],
+            "partial": True,
+            "error": "payload_bounded: 1 of 3",
+            "held_back_count": 2,
+            "held_back_oldest": {"number": 2, "merge_sha": "c" * 40},
+        },
+        schema,
     )

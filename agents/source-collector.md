@@ -59,7 +59,17 @@ The orchestrator will pass you a JSON block named `inputs` containing:
     },
     "jira_issues": { "type": "array" },
     "error": { "type": ["string", "null"] },
-    "partial": { "type": "boolean" }
+    "partial": { "type": "boolean" },
+    "held_back_count": { "type": "integer", "minimum": 0 },
+    "held_back_oldest": {
+      "type": "object",
+      "required": ["number", "merge_sha"],
+      "additionalProperties": false,
+      "properties": {
+        "number": { "type": "integer" },
+        "merge_sha": { "type": "string", "minLength": 1 }
+      }
+    }
   }
 }
 ```
@@ -305,35 +315,56 @@ marker. The budget is not cosmetic: an over-long payload gets truncated
 mid-object by your own output ceiling, the orchestrator parses a fragment, and
 the entire run is lost. A bounded `body` is worth more than a complete one.
 
-**§8 — `max_detail_prs`: bound the DETAIL, never drop a PR.**
+**§8 — `max_detail_prs`: bound the DETAIL, and bound the TAIL too.**
 
 When `max_detail_prs` is greater than `0` and the window holds more PRs than
-that, do NOT shorten the list. Emit every in-window PR, in two shapes:
+that, emit:
 
-1. The **oldest** `max_detail_prs` PRs, ordered oldest-merge-first, with the
-   full detail Step 3 describes.
-2. Every remaining PR as a **metadata anchor** — exactly `number`, `url`,
-   `merge_sha` and `merged_at`, and nothing else. No `title`, `body`, `files`
-   or `labels`.
+1. The **oldest** `max_detail_prs` PRs in `prs`, ordered oldest-merge-first,
+   with the full detail Step 3 describes.
+2. Every in-window PR you could NOT determine a `merge_sha` for, in `prs` as
+   well, regardless of the bound. A PR with no merge sha cannot be re-anchored
+   by a later window, so it has to be admitted now or it is lost.
+3. `held_back_count`: how many remaining in-window PRs you did not detail.
+   Count only PRs that DO have a `merge_sha`.
+4. `held_back_oldest`: `{"number": <n>, "merge_sha": "<sha>"}` for the
+   **oldest** held-back PR — the one that merged earliest. Exactly those two
+   keys.
 
 Then set `partial: true` and `error: "payload_bounded: <detailed> of <total>"`,
-where `<detailed>` is how many you gave full detail to and `<total>` is the
-in-window count. That reason is contracted; do not invent your own wording for
-this condition.
+where `<detailed>` is `len(prs)` and `<total>` is the in-window count. That
+reason is contracted; do not invent your own wording for this condition.
+
+`len(prs) + held_back_count` MUST equal `<total>`. The orchestrator checks that
+identity and stalls the run if it does not hold, because a payload that cannot
+account for its own window is indistinguishable from one whose tail was
+silently dropped.
+
+**Do not emit one entry per held-back PR.** CCE-199 asked for a metadata anchor
+each, and that payload grows with the window — the one variable the bound
+exists to make irrelevant. Measured at 200 in-window PRs it reached 48KB and
+overflowed the output ceiling, which is the same failure the bound was added to
+prevent, merely later. A count plus one marker is fixed-size at any window
+width.
+
+**`held_back_oldest` is not optional when `held_back_count` is above `0`.** It
+is the only thing that stops the orchestrator's cursor. A count on its own
+leaves the cursor unbounded, and the run advances the baseline past every
+held-back PR — permanently, outside every future window, with nothing red. A
+count without a marker is worse than returning nothing at all, and the
+orchestrator refuses it.
 
 **Oldest-first is a correctness requirement, not a preference.** The
 orchestrator cannot tell an oldest-first payload from a newest-first one — it
 only sees what you returned. If you detail the NEWEST PRs, the run's cursor
 advances across them and every older PR in the window falls permanently behind
 the baseline, outside every future window, and is never documented by anyone.
-
-**Never omit the anchors.** They are what tells the orchestrator those PRs
-exist, so that it holds them back and stops its cursor at your detailed
-prefix. A payload that simply ends early reads to the orchestrator as a
-complete window, and it will advance past work nobody has documented.
+The same applies to `held_back_oldest`: report the earliest-merged held-back
+PR, not the latest, or the cursor stops in the wrong place and strands
+everything between.
 
 If `max_detail_prs` is `0`, or the window holds no more PRs than the bound,
-emit full detail for all of them and set neither flag.
+emit full detail for all of them and set none of these fields.
 
 
 If Step 1 returned 0 PRs, skip to Step 6 and emit `{"prs": [], "jira_issues": []}`.

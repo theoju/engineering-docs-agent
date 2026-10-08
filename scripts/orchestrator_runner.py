@@ -861,7 +861,12 @@ def resolve_window_cap(config: dict) -> int:
 _PAYLOAD_BOUNDED_RE = re.compile(r"^payload_bounded:\s*(\d+)\s+of\s+(\d+)$")
 
 
-def collector_error_is_held_back(error: object, prs: object) -> bool:
+def collector_error_is_held_back(
+    error: object,
+    prs: object,
+    held_back_count: object = 0,
+    held_back_oldest: object = None,
+) -> bool:
     """Whether a source-collector error reports held-back work (CCE-144).
 
     CCE-144 classifies by CALL SITE and never by reason string. This IS that
@@ -872,11 +877,19 @@ def collector_error_is_held_back(error: object, prs: object) -> bool:
 
     `payload_bounded: <detailed> of <total>` is the only held-back value, and
     only when the payload bears it out. It is the collector ANSWERING in full
-    about a window too wide to detail in one response: every in-window PR is
-    present, the tail anchor-shaped, so CCE-169's admission cut makes the same
-    decision it always does and CCE-151's cursor stops at the cap boundary. The
-    run judged the window and deferred part of it -- self-healing, because the
-    anchored tail is still in the next run's window.
+    about a window too wide to detail in one response: the window is fully
+    ACCOUNTED FOR, so CCE-169's admission cut makes the same decision it always
+    does and CCE-151's cursor stops at the detailed prefix. The run judged the
+    window and deferred part of it -- self-healing, because the held-back tail
+    is still in the next run's window.
+
+    CCE-202 changed what "accounted for" means. CCE-199 required every in-window
+    PR to be present, the tail anchor-shaped; that payload is O(window) and at
+    200 PRs it was 48KB, overflowing the same ceiling the bound existed to stay
+    under. The tail is now a count plus one stop-marker, so accounting is
+    `len(prs) + held_back_count >= total`. With `held_back_count` defaulting to
+    0 this reduces exactly to CCE-199's rule, which is what keeps an anchored
+    payload from an older agent valid rather than merely tolerated.
 
     Three ways it is refused, each a case where the premise does not hold:
 
@@ -894,6 +907,13 @@ def collector_error_is_held_back(error: object, prs: object) -> bool:
     - nothing detailed, or nothing returned. There is no detailed prefix for
       the cursor to stop on, and admitting anchors would hand the authoring
       stage PRs with no body or files to write from.
+    - CCE-202: a positive `held_back_count` with no usable `held_back_oldest`.
+      The marker is the ONLY thing that puts a number into `held_back`, and an
+      empty `held_back` routes the advance to its `else` branch, which reaches
+      full window HEAD. So an unstoppable claim is not a lesser shape than a
+      stalled run, it is the CCE-144 consume-once loss with nothing red. Refused
+      here AND schema-rejected (`held_back_oldest` requires `merge_sha`), so
+      neither layer is load-bearing alone.
     """
     if not isinstance(error, str):
         return False
@@ -903,7 +923,38 @@ def collector_error_is_held_back(error: object, prs: object) -> bool:
     detailed, total = int(m.group(1)), int(m.group(2))
     if detailed <= 0 or not isinstance(prs, list) or not prs:
         return False
-    return len(prs) >= total
+    try:
+        held = int(held_back_count or 0)
+    except (TypeError, ValueError):
+        return False
+    if held < 0:
+        return False
+    if held > 0 and not collector_stop_marker(held_back_oldest):
+        return False
+    return len(prs) + held >= total
+
+
+def collector_stop_marker(held_back_oldest: object) -> dict | None:
+    """The held-back tail's cursor stop-marker, or None if unusable (CCE-202).
+
+    Shaped like a PR dict on purpose: `run()` appends it to `window_capped`, so
+    it flows into `held_back` and `advance_cursor_list` through the machinery
+    CCE-169 already tests, rather than through a parallel path that would need
+    its own proof that the cursor stops.
+
+    A marker needs both fields. `number` is what the walk breaks on; without it
+    the walk never stops. `merge_sha` is what makes the held-back PR
+    re-anchorable by a later window -- `_last_processed_merge_sha` skips a PR
+    without one, so a marker missing it stops the walk but leaves the cursor
+    unable to say where it stopped.
+    """
+    if not isinstance(held_back_oldest, dict):
+        return None
+    number = held_back_oldest.get("number")
+    sha = (held_back_oldest.get("merge_sha") or "").strip()
+    if number is None or not sha:
+        return None
+    return {"number": number, "merge_sha": sha}
 
 
 def resolve_authoring_hard_cap(
@@ -2915,7 +2966,10 @@ def run(
             # told was benign. `partial: true` with no error, or with a blind
             # one, is unchanged: `held_back` is False and the site stays blind.
             held_back = collector_error_is_held_back(
-                sources.get("error"), sources.get("prs")
+                sources.get("error"),
+                sources.get("prs"),
+                sources.get("held_back_count"),
+                sources.get("held_back_oldest"),
             )
             if sources.get("error"):
                 add_partial(
@@ -2968,17 +3022,33 @@ def run(
         # #211/#212/#213). With `max_detail_prs` honoured the collector anchors
         # its tail instead of dropping it, so this guard is defence in depth and
         # should never fire in a healthy run.
+        # CCE-202: hoisted out of the error branch below on purpose. The cap
+        # block reads it on EVERY run, and scoping it to a run that reported an
+        # error string made it a NameError on the common path.
+        _hb_declared = sources.get("held_back_count") or 0
+        try:
+            _hb_declared = max(0, int(_hb_declared))
+        except (TypeError, ValueError):
+            _hb_declared = 0
         if isinstance(sources.get("error"), str):
             _bounded = re.search(
                 r"payload_bounded:\s*(\d+)\s+of\s+(\d+)", sources["error"]
             )
-            if _bounded and len(sources.get("prs") or []) < int(_bounded.group(2)):
+            # CCE-202: `len(prs) + held_back_count` is the accounting identity.
+            # Before the tail collapsed to a count this was `len(prs)` alone;
+            # under the new contract `len(prs)` is DELIBERATELY short of the
+            # total, so the old comparison would fire on every healthy bounded
+            # run and blind it. `_hb_declared` is the collector's own claim and
+            # is only trusted for accounting -- whether it can actually stop
+            # the cursor is `collector_stop_marker`'s question, asked below.
+            _returned = len(sources.get("prs") or [])
+            if _bounded and _returned + _hb_declared < int(_bounded.group(2)):
                 add_partial(
                     state,
                     "collector_payload_incomplete: "
-                    f"{len(sources.get('prs') or [])} PRs returned but "
-                    f"{_bounded.group(2)} claimed in window; tail dropped "
-                    "rather than anchored",
+                    f"{_returned} PRs returned plus {_hb_declared} held back "
+                    f"but {_bounded.group(2)} claimed in window; tail dropped "
+                    "rather than accounted",
                     degraded=False,
                 )
 
@@ -3028,6 +3098,33 @@ def run(
                 f"held_back_window_capped: {len(window_capped)} of "
                 f"{len(prs) + len(window_capped)} PRs held for a later run "
                 f"(cap {_window_cap})",
+                degraded=True,
+            )
+        # CCE-202: the collector's own held-back tail joins `window_capped`.
+        #
+        # Appended AFTER the cap reason above, never before: that reason is
+        # rendered from `len(window_capped)`, and a marker counted into it would
+        # read "3 of 5" on a run that capped 2 and held back 190 -- a figure an
+        # operator uses to judge whether the drain is keeping up.
+        #
+        # `window_capped` and not `admission_deferred`, for the reason the cap
+        # block states about itself: a capped PR accrues no deferral count and
+        # the CCE-140 skip hatch cannot forgive it. A held-back tail must have
+        # both properties too, or the hatch could forgive the one marker holding
+        # the cursor and the advance would reach HEAD -- the shape this ticket
+        # exists to make unreachable.
+        #
+        # ONE element regardless of how many PRs it stands for. The walk breaks
+        # on the first held-back number, so the rest were never consumed; that
+        # is the whole reason the tail can be O(1).
+        _stop = collector_stop_marker(sources.get("held_back_oldest"))
+        if _stop and _hb_declared > 0:
+            window_capped = list(window_capped) + [_stop]
+            add_partial(
+                state,
+                f"held_back_collector_bounded: {_hb_declared} of "
+                f"{len(prs) + _hb_declared} in-window PRs were not detailed by "
+                f"the collector; cursor stops at #{_stop['number']}",
                 degraded=True,
             )
         jira_issues = sources.get("jira_issues", []) or []

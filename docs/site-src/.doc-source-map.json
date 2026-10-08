@@ -89,7 +89,8 @@
       "architecture/structured-docs-site-generation.md"
     ],
     "agents/source-collector.md": [
-      "architecture/cce4-schema-enforcement.md"
+      "architecture/cce4-schema-enforcement.md",
+      "architecture/orchestrator.md"
     ],
     "docs/adr/0001-baseline-advances-on-disk-for-partial-runs.md": [
       "architecture/glossary.md"
@@ -1196,6 +1197,12 @@
       "architecture/cce32-github-pages-publish-target.md",
       "architecture/structured-docs-site-generation.md"
     ],
+    "docs/superpowers/plans/2026-10-06-cce199-collector-window-bound.md": [
+      "architecture/cce-capability-c-canonical-core-citations.md",
+      "architecture/cce-capability-c2-canonical-core-authoring.md",
+      "architecture/cce32-github-pages-publish-target.md",
+      "architecture/structured-docs-site-generation.md"
+    ],
     "docs/superpowers/specs/2026-05-19-engineering-docs-agent-design.md": [
       "architecture/cce-capability-c-canonical-core-citations.md",
       "architecture/cce-capability-c2-canonical-core-authoring.md",
@@ -1855,6 +1862,9 @@
       "architecture/external-citations.md",
       "architecture/orchestrator.md"
     ],
+    "tests/orchestrator/test_collector_window_bound.py": [
+      "architecture/orchestrator.md"
+    ],
     "tests/orchestrator/test_cursor_backed_merge.py": [
       "architecture/orchestrator.md"
     ],
@@ -2137,6 +2147,8 @@
       "scripts/state_io.py",
       "scripts/citation_repair.py",
       "agents/page-author.md",
+      "agents/source-collector.md",
+      "tests/orchestrator/test_collector_window_bound.py",
       "agents/gap-detector.md",
       "agents/schemas/gap_detector.schema.json",
       "scripts/lint/description_quality.py",

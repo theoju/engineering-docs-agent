@@ -1,8 +1,8 @@
 {
   "version": "1",
   "last_successful_run": {
-    "head_sha": "6b2bfc19ae59308107e48d07a6e8367afe62281a",
-    "completed_at": "2026-10-07T14:22:39.316030+00:00"
+    "head_sha": "93e4e0766e7d15798b2f43fc16145545d20b33d9",
+    "completed_at": "2026-10-08T14:30:18.752781+00:00"
   },
   "pr_summaries": {
     "theoju/engineering-docs-agent#221": {

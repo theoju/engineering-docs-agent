@@ -8,3 +8,5 @@ _Auto-generated from JSON Schema; do not edit by hand — see `scripts/contracts
 | `jira_issues` | array | yes |  |
 | `error` | string \| null | no |  |
 | `partial` | boolean | no |  |
+| `held_back_count` | integer | no |  |
+| `held_back_oldest` | object | no |  |

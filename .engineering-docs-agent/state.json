@@ -1,40 +1,10 @@
 {
   "version": "1",
   "last_successful_run": {
-    "head_sha": "e5fba9b897fb6e4bb016e00fe3f01954ea6e1265",
-    "completed_at": "2026-10-22T12:53:29.663839+00:00"
+    "head_sha": "f3062ff059cc7d9d72cac1c165afb10d1a78de1e",
+    "completed_at": "2026-10-23T12:32:19.469803+00:00"
   },
   "pr_summaries": {
-    "theoju/engineering-docs-agent#221": {
-      "merge_sha": "37f288581f2cf1987e5a531b1477bdb48385a9b9",
-      "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-22T13:09:24.689767+00:00",
-      "summary": {
-        "pr_number": 221,
-        "what_changed": "Ran a controlled A/B extraction experiment through graphify's shared library path (same parser, chunker, and out-of-scope filter), varying only the extraction system prompt. The result confirms that the prompt itself was the doc-layer ceiling: swapping the stock prompt for the CCE-125-tuned one raised nodes produced per document from roughly 1 to 6-8, while a separate check found that `_FILE_CHAR_CAP` slices file content mid-token rather than truncating cleanly at a boundary. Findings were written into the existing `docs/runbooks/graphify-extraction-findings.md` runbook and surfaced in the site's what's-new page.",
-        "why": "CCE-146's reference-aware batching experiment ended with the prompt-ceiling hypothesis explicitly called out as untested. CCE-148 closes that open question so future graphify tuning work (and the CCE-145/CCE-146 lineage of extraction-yield investigations) has a validated cause rather than a guess, and documents the `_FILE_CHAR_CAP` slicing defect discovered along the way.",
-        "breaking": false,
-        "doc_targets": [
-          {
-            "lens": "core",
-            "action": "edit",
-            "page_hint": "whats-new.md",
-            "doc_kind": "decision",
-            "notes": "PR already updated this file directly; confirm the entry reflects the finalized prompt-ceiling conclusion and mentions the _FILE_CHAR_CAP slicing defect."
-          },
-          {
-            "lens": "core",
-            "action": "create",
-            "page_hint": "archive/2026-08-14-graphify-extraction-prompt-ceiling.md",
-            "doc_kind": "decision",
-            "notes": "Capture the CCE-148 A/B methodology and result (1 -> 6-8 nodes/doc, _FILE_CHAR_CAP slicing bug) as a standalone archive/decision record, since the source-of-truth runbook (docs/runbooks/graphify-extraction-findings.md) lives outside the published docs lens and isn't itself surfaced to lens readers."
-          }
-        ],
-        "notes": "The PR's file list (docs/runbooks/graphify-extraction-findings.md, docs/site-src/whats-new.md) mixes a host-repo runbook outside the lens root with a lens-managed page; only the latter maps directly to an edit target. The proposed archive create-target mirrors the runbook's content into the published docs lens so the finding is discoverable there too.",
-        "error": null,
-        "partial": false
-      }
-    },
     "theoju/engineering-docs-agent#222": {
       "merge_sha": "52881a6aaaf516e7b11248f5920a0e374c1f6da6",
       "fingerprint": "e6d7c2a0894b9d2f",

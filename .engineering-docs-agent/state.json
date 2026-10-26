@@ -1,90 +1,10 @@
 {
   "version": "1",
   "last_successful_run": {
-    "head_sha": "c19d355ca4fdf2458a741348948141bc5f596be5",
-    "completed_at": "2026-10-25T12:27:33.595612+00:00"
+    "head_sha": "4e64221ac76c704695a42311dd27665f1683e287",
+    "completed_at": "2026-10-26T14:05:09.407718+00:00"
   },
   "pr_summaries": {
-    "theoju/engineering-docs-agent#237": {
-      "merge_sha": "ff470c0ad02219361b77600165ad542c53ad0f05",
-      "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
-      "summary": {
-        "pr_number": 237,
-        "what_changed": "Fixes the citation_exists Tier-1 lint check so it resolves Python symbol citations (`path:symbol`) against any definition site \u2014 methods, nested functions, class attributes \u2014 not just top-level module definitions. Previously the linter only recognized symbols defined at the top level of a Python file, so citations to real, correctly-defined symbols nested inside a class or function were incorrectly reported as nonexistent, causing the authored page to be dropped by content-validator. Because a dropped page is not retried and the collection window still advances, this silently and permanently stranded documentation for legitimately-cited code.",
-        "why": "Root cause per CCE-145: on three consecutive nightly runs against theoju/claude-code-self-assessment, citation_exists produced false positives for exported symbols and gitignored paths, blocking roughly 11 authored pages per run. Because last_successful_run.head_sha advances even when a page is dropped, those pages fell permanently out of the collection range with no re-attempt path. This PR corrects the symbol-resolution logic to eliminate that class of false positive, closing CCE-145 (and is part of the broader CCE-122 line-free citation design plus the CCE-141/CCE-152 related stranding-prevention work).",
-        "breaking": false,
-        "doc_targets": [
-          {
-            "lens": "core",
-            "action": "create",
-            "page_hint": "archive/2026-08-21-cce145-citation-symbol-definition-forms-fix.md",
-            "doc_kind": "decision",
-            "notes": "Postmortem/decision record for the citation_exists false-positive fix; mirrors the source spec at docs/superpowers/specs/2026-08-21-cce145-citation-symbol-definition-forms-design.md. Summarize the bug (top-level-only symbol resolution), the live-reproduction incident, and the fix (resolve at any definition site)."
-          },
-          {
-            "lens": "core",
-            "action": "edit",
-            "page_hint": "architecture/linting.md",
-            "notes": "If an existing linting/content-validator architecture page documents citation_exists behavior, update it to note that symbol resolution now covers nested/class/function-scoped definitions, not just module top level. If no such page exists yet, skip this target and treat it as create instead."
-          }
-        ],
-        "notes": "PR body was truncated by source-collector after the reproduction block; summary is based on the title, available body fragment, and the linked CCE-145/CCE-122 Jira context. The second doc_target assumes an existing linting architecture page under core/architecture/ \u2014 if none exists, page-author should fall back to a flat create rather than a no-op edit.",
-        "error": null,
-        "partial": false
-      }
-    },
-    "theoju/engineering-docs-agent#238": {
-      "merge_sha": "c19b9cacae59f73a8ae33ccd199c6ea136d35c79",
-      "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
-      "summary": {
-        "pr_number": 238,
-        "what_changed": "The nightly orchestrator's watermark-advance logic is now cursor-backed on every code path, not just the time-truncated one. `deferred_pages_by_pr` and the `held_back` set are now computed unconditionally, and the cursor walk that limits the advance to the last fully-documented PR is entered whenever `time_truncated OR held_back` is true (previously it was nested only inside the `if time_truncated:` branch). A clean run's behavior is unchanged (full window-HEAD advance when nothing is held back); a run that is partial for a non-time reason (lint block, `page_author_invalid`, etc.) now advances only as far as the last PR whose pages all landed, instead of jumping to full window HEAD and silently discarding the undocumented window. Reason strings are now cause-dependent (`time_budget_*` vs `held_back_*`) to preserve existing operator-facing grep patterns and test assertions for the time-truncated family.",
-        "why": "CCE-144 built the cursor-backed advance and the `deferred_pages_by_pr` complement writer, but wired the gating check only inside the `if time_truncated:` branch. Any run that was partial for a non-time reason (a lint block or a `page_author_invalid`) fell into the `else` branch, which set `advance_sha = current_run.head_sha` (full window HEAD) without ever reading `deferred_pages_by_pr`. Because the watermark cursor is consume-once, the skipped window was permanently lost and the run still exited 0, so nothing alarmed. This was identified as a known residual (\"C1\") in CCE-144's own final review and documented in prose but had no ticket until CCE-151. Two incidents (runs 32460602658 and 32495019606 on 2026-08-21) each blocked a page on lint and then advanced past the very window that held the stranded content, requiring a hand-written baseline rewind to recover.",
-        "breaking": false,
-        "doc_targets": [
-          {
-            "lens": "core",
-            "action": "edit",
-            "page_hint": "architecture/orchestrator.md",
-            "doc_kind": "architecture",
-            "notes": "Update the watermark-advance / cursor-backed-merge description to reflect that the cursor walk is now entered on `time_truncated or held_back`, not only on time-truncation, and that partition_deferrals runs unconditionally each cycle."
-          },
-          {
-            "lens": "core",
-            "action": "create",
-            "page_hint": "archive/2026-08-21-cce151-watermark-cursor-back-on-every-path.md",
-            "doc_kind": "decision",
-            "notes": "Record the CCE-151 incident, root cause (advance gate only inside the time_truncated branch), the four traps called out in review (doom-loop regression risk of gating on `partial`, partition_deferrals hoist requirement, merge-as-promotion not being a real containment, cause-dependent reason strings), and the diagnostic reflex for future on-call."
-          }
-        ],
-        "notes": "PR body was truncated by source-collector before the 'Why it happened' section completed; what_changed/why above are reconstructed from the linked CCE-151 Jira description and the CCE-151 CLAUDE.md entry already landed by this PR. Assumed architecture/orchestrator.md already exists per available_sections['core'] including 'architecture'; if it does not yet cover watermark/cursor-advance behavior, treat as effectively a substantial edit."
-      }
-    },
-    "theoju/engineering-docs-agent#239": {
-      "merge_sha": "1718883fa52e7d291a5e78266e26304a8634a0ec",
-      "fingerprint": "e6d7c2a0894b9d2f",
-      "last_seen_at": "2026-09-25T13:16:35.530504+00:00",
-      "summary": {
-        "pr_number": 239,
-        "what_changed": "Fixed the internal_links Tier-1 lint rule so it no longer treats markdown links that are being documented as examples (verbatim link text quoted inside prose explaining a link-parsing function) as if they were real navigation links. The rule was blocking pages that legitimately quoted link syntax as illustrative content, most visibly a page documenting extractDocRefs \u2014 a function whose entire purpose is parsing markdown links out of CLAUDE.md \u2014 which was blocked twice for containing the exact example links it was explaining.",
-        "why": "A blocked page is dropped from the docs PR entirely, so false-positive lint blocks silently prevent legitimate pages from ever landing. This is the same pathology CCE-131 closed for citation_exists (reserved example namespace / exempt-token allowlist), recurring here in internal_links: the rule couldn't distinguish an example link quoted in prose from an actual navigation reference, so pages that document link-parsing behavior (like extractDocRefs) got permanently stuck.",
-        "breaking": false,
-        "doc_targets": [
-          {
-            "lens": "core",
-            "action": "create",
-            "page_hint": "archive/2026-08-21-internal-links-example-link-exemption.md",
-            "doc_kind": "decision",
-            "notes": "Documents why internal_links now exempts example/illustrative links quoted in prose from navigation-link validation, mirroring the CCE-131 citation_exists reserved-example-namespace precedent. If an existing page already covers the Tier-1 lint rule set's example-link handling, this should instead be an edit to that page."
-          }
-        ],
-        "notes": "Could not confirm whether an existing architecture page enumerates internal_links' exemption rules in detail; if scripts/lint/lint_runner.py or a Tier-1 rules reference page already exists under core/architecture, prefer editing it instead of creating a new archive page.",
-        "error": null,
-        "partial": false
-      }
-    },
     "theoju/engineering-docs-agent#241": {
       "merge_sha": "c5dbe98162a575e360507e752a6eec5beae16563",
       "fingerprint": "e6d7c2a0894b9d2f",
